@@ -1,7 +1,8 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
+import type { PtyRouter } from './pty-buffer';
 
 export interface TerminalSize {
   cols: number;
@@ -11,16 +12,22 @@ export interface TerminalSize {
 interface TerminalViewProps {
   sessionId: string;
   visible: boolean;
+  exited: boolean;
+  attach: PtyRouter['attach'];
   onSize: (size: TerminalSize) => void;
 }
 
-export function TerminalView({ sessionId, visible, onSize }: TerminalViewProps) {
+export function TerminalView({ sessionId, visible, exited, attach, onSize }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onSizeRef = useRef(onSize);
-  onSizeRef.current = onSize;
   const visibleRef = useRef(visible);
-  visibleRef.current = visible;
   const termRef = useRef<Terminal | null>(null);
+
+  // NOTE: layout effect so the refs are current before ResizeObserver callbacks run on a display toggle.
+  useLayoutEffect(() => {
+    onSizeRef.current = onSize;
+    visibleRef.current = visible;
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,12 +43,7 @@ export function TerminalView({ sessionId, visible, onSize }: TerminalViewProps) 
     termRef.current = term;
 
     const dataSub = term.onData((data) => window.inova.ptyWrite(sessionId, data));
-    const offData = window.inova.onPtyData((event) => {
-      if (event.sessionId === sessionId) term.write(event.data);
-    });
-    const offExit = window.inova.onPtyExit((event) => {
-      if (event.sessionId === sessionId) term.write('\r\n[processo encerrado]\r\n');
-    });
+    const detach = attach(sessionId, (data) => term.write(data));
     const observer = new ResizeObserver(() => {
       if (!visibleRef.current) return;
       fit.fit();
@@ -53,19 +55,26 @@ export function TerminalView({ sessionId, visible, onSize }: TerminalViewProps) 
 
     return () => {
       observer.disconnect();
-      offData();
-      offExit();
+      detach();
       dataSub.dispose();
       term.dispose();
       termRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, attach]);
 
   useEffect(() => {
     if (visible) termRef.current?.focus();
   }, [visible]);
 
+  useEffect(() => {
+    if (exited) termRef.current?.write('\r\n[processo encerrado]\r\n');
+  }, [exited]);
+
   return (
-    <div ref={containerRef} className="terminal" style={{ display: visible ? 'block' : 'none' }} />
+    <div
+      ref={containerRef}
+      className="terminal-host"
+      style={{ display: visible ? 'block' : 'none' }}
+    />
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import type { ProviderId } from '@inova/core/types';
 import type { AccountView, OpenedSession, ProjectView } from '../shared/api';
+import { createPtyRouter } from './pty-buffer';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 import { TerminalView, type TerminalSize } from './TerminalView';
@@ -18,6 +19,7 @@ export function App() {
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const sizeRef = useRef<TerminalSize>(DEFAULT_SIZE);
   const loginSessions = useRef(new Map<string, ProviderId>());
+  const [router] = useState(createPtyRouter);
 
   const reloadAccounts = useCallback(async () => {
     const result = await call(() => window.inova.listAccounts());
@@ -34,22 +36,31 @@ export function App() {
     void reloadProjects();
   }, [reloadAccounts, reloadProjects]);
 
-  useEffect(
-    () =>
-      window.inova.onPtyExit(({ sessionId }) => {
-        dispatch({ type: 'exited', sessionId });
-        if (loginSessions.current.has(sessionId)) void reloadAccounts();
-      }),
-    [reloadAccounts],
-  );
+  useEffect(() => {
+    const offData = window.inova.onPtyData(({ sessionId, data }) => router.data(sessionId, data));
+    const offExit = window.inova.onPtyExit(({ sessionId }) => {
+      router.exit(sessionId);
+      dispatch({ type: 'exited', sessionId });
+      if (loginSessions.current.has(sessionId)) void reloadAccounts();
+    });
+    return () => {
+      offData();
+      offExit();
+    };
+  }, [router, reloadAccounts]);
 
   const openTab = (session: OpenedSession, loginProvider?: ProviderId) => {
     if (loginProvider) loginSessions.current.set(session.sessionId, loginProvider);
     dispatch({ type: 'open', tab: session });
+    if (router.consumeExit(session.sessionId)) {
+      dispatch({ type: 'exited', sessionId: session.sessionId });
+      if (loginProvider) void reloadAccounts();
+    }
   };
 
   const closeTab = (sessionId: string) => {
     void guard(async () => window.inova.ptyClose(sessionId));
+    router.close(sessionId);
     dispatch({ type: 'close', sessionId });
     if (loginSessions.current.delete(sessionId)) void reloadAccounts();
   };
@@ -70,6 +81,7 @@ export function App() {
     if (result) await Promise.all([reloadAccounts(), reloadProjects()]);
   };
 
+  const activeTab = tabs.tabs.find((tab) => tab.sessionId === tabs.active);
   const activeLogin = tabs.active ? loginSessions.current.get(tabs.active) : undefined;
 
   return (
@@ -111,13 +123,15 @@ export function App() {
           onActivate={(sessionId) => dispatch({ type: 'activate', sessionId })}
           onClose={closeTab}
         />
-        {activeLogin === 'gemini' && <p className="hint">{GEMINI_HINT}</p>}
+        {activeLogin === 'gemini' && !activeTab?.exited && <p className="hint">{GEMINI_HINT}</p>}
         <div className="terminals">
           {tabs.tabs.map((tab) => (
             <TerminalView
               key={tab.sessionId}
               sessionId={tab.sessionId}
               visible={tab.sessionId === tabs.active}
+              exited={tab.exited}
+              attach={router.attach}
               onSize={(size) => {
                 sizeRef.current = size;
               }}
