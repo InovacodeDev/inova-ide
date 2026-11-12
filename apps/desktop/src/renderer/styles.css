@@ -15,7 +15,12 @@ body {
 .app {
   display: grid;
   grid-template-columns: 280px 1fr;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
+}
+
+.app > .footer-bar {
+  grid-column: 1 / -1;
 }
 
 .sidebar {
@@ -142,4 +147,98 @@ button:disabled {
   right: 0;
   top: 0;
   z-index: 10;
+}
+
+.project-section {
+  margin-bottom: 12px;
+}
+
+.project-header {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.project-toggle {
+  background: none;
+  border: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.project-toggle small {
+  color: #a6adc8;
+}
+
+.session-tree,
+.session-children {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.sidebar .session-node {
+  align-items: stretch;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.session-children {
+  border-left: 1px solid #313244;
+  margin-left: 6px;
+  padding-left: 6px;
+}
+
+.session-row {
+  align-items: center;
+  border-radius: 4px;
+  display: flex;
+  gap: 4px;
+}
+
+.session-row.active {
+  background: #313244;
+  box-shadow: inset 2px 0 0 #89b4fa;
+}
+
+.session-title {
+  background: none;
+  border: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-add {
+  background: none;
+  border: 0;
+  color: #a6adc8;
+  padding: 0 6px;
+}
+
+.session-add:hover {
+  color: #89b4fa;
+}
+
+.session-empty {
+  color: #a6adc8;
+  margin: 4px 0 0;
+}
+
+.session-more {
+  background: none;
+  border: 0;
+  color: #89b4fa;
+  padding: 2px 0;
+}
+
+.sidebar-add {
+  margin-top: 8px;
 }
