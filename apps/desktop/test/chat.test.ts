@@ -212,3 +212,64 @@ test('a throwing killTree is logged and does not break cancel', () => {
   log.mockRestore();
   runner.send(input('s2'));
 });
+
+test('a turn is released after SIGKILL even when close never fires', () => {
+  vi.useFakeTimers();
+  const { child, events, runner } = setup();
+  runner.send(input());
+  runner.cancel('s1');
+  vi.advanceTimersByTime(2000);
+  expect(events.map(({ event }) => event)).toEqual([
+    { kind: 'error', message: 'Turno cancelado.' },
+    { kind: 'done', isError: true, costUsd: null, durationMs: null },
+  ]);
+  expect(runner.isRunning('s1')).toBe(false);
+  expect(child.stdout.destroyed).toBe(true);
+  expect(child.stderr.destroyed).toBe(true);
+  child.emit('close', null);
+  expect(events).toHaveLength(2);
+});
+
+test('a turn is released when the process exits but close never fires', () => {
+  vi.useFakeTimers();
+  const { child, events, runner } = setup();
+  runner.send(input());
+  child.emit('exit', 3);
+  expect(runner.isRunning('s1')).toBe(true);
+  vi.advanceTimersByTime(2000);
+  const [first, second] = events.map(({ event }) => event);
+  expect(first?.kind === 'error' && first.message).toContain('código 3');
+  expect(second?.kind).toBe('done');
+  expect(runner.isRunning('s1')).toBe(false);
+  expect(child.stdout.destroyed).toBe(true);
+  child.emit('close', 3);
+  expect(events).toHaveLength(2);
+});
+
+test('close after exit finishes once and cancels the exit grace timer', () => {
+  vi.useFakeTimers();
+  const { child, events, runner } = setup();
+  runner.send(input());
+  child.emit('exit', 1);
+  child.emit('close', 1);
+  vi.advanceTimersByTime(5000);
+  expect(events.map(({ event }) => event.kind)).toEqual(['error', 'done']);
+});
+
+test('each turn gets distinct gemini block ids', () => {
+  const first = setup();
+  const second = setup();
+  const line = JSON.stringify({ type: 'message', role: 'assistant', content: 'x', delta: true });
+  for (const { runner, child } of [first, second]) {
+    runner.send({ ...input(), provider: 'gemini' });
+    child.stdout.write(`${line}\n`);
+  }
+  return tick().then(() => {
+    const ids = [first, second].map(({ events }) => {
+      const delta = events.find(({ event }) => event.kind === 'text-delta')?.event;
+      return delta?.kind === 'text-delta' ? delta.blockId : '';
+    });
+    expect(ids[0]).not.toBe('');
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+});
