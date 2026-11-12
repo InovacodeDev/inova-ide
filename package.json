@@ -13,6 +13,13 @@
     "test": "vitest run",
     "format:check": "prettier --check ."
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "node-pty"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",

@@ -1,10 +1,10 @@
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'graft', '.superpowers', 'docs', 'node_modules'] },
+  { ignores: ['dist', 'apps/desktop/out', 'graft', '.superpowers', 'docs', 'node_modules'] },
   ...tseslint.configs.recommended,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
       parserOptions: {
         projectService: { allowDefaultProject: ['vitest.config.ts'] },
