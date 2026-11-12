@@ -1,8 +1,10 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
-import type { ProviderId, Session } from '@inova/core/types';
+import type { ProviderId, Session, Workspace } from '@inova/core/types';
 
 export type SessionView = Session;
+
+export type WorkspaceView = Workspace;
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -38,8 +40,14 @@ export interface InovaApi {
     projectId: string;
     parentId?: string | null;
   }): Promise<Result<SessionView>>;
-  renameSession(input: { sessionId: string; title: string }): Promise<Result<SessionView>>;
+  updateSession(input: {
+    sessionId: string;
+    title?: string;
+    archived?: boolean;
+  }): Promise<Result<SessionView>>;
   deleteSession(input: { sessionId: string }): Promise<Result<null>>;
+  getWorkspace(): Promise<Result<WorkspaceView>>;
+  saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
   loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
   sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
   cancelTurn(sessionId: string): void;
@@ -67,8 +75,10 @@ export const CHANNELS = {
   unbindProject: 'inova:unbindProject',
   listSessions: 'inova:listSessions',
   createSession: 'inova:createSession',
-  renameSession: 'inova:renameSession',
+  updateSession: 'inova:updateSession',
   deleteSession: 'inova:deleteSession',
+  getWorkspace: 'inova:getWorkspace',
+  saveWorkspace: 'inova:saveWorkspace',
   loadTranscript: 'inova:loadTranscript',
   sendMessage: 'inova:sendMessage',
   cancelTurn: 'inova:cancelTurn',

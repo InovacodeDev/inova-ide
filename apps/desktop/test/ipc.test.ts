@@ -28,8 +28,10 @@ function setup() {
       ...methods,
       'listSessions',
       'createSession',
-      'renameSession',
+      'updateSession',
       'deleteSession',
+      'getWorkspace',
+      'saveWorkspace',
       'loadTranscript',
       'sendMessage',
       'getUsage',
@@ -142,10 +144,15 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   const input = { sessionId: 's', prompt: 'oi' };
   await invoke('inova:sendMessage', trusted, input);
   expect(handlers['sendMessage']).toHaveBeenCalledWith(input);
-  for (const name of ['listSessions', 'createSession', 'renameSession', 'deleteSession']) {
+  for (const name of ['listSessions', 'createSession', 'updateSession', 'deleteSession']) {
     await invoke(`inova:${name}`, trusted, input);
     expect(handlers[name]).toHaveBeenCalledWith(input);
   }
+  await invoke('inova:saveWorkspace', trusted, input);
+  expect(handlers['saveWorkspace']).toHaveBeenCalledWith(input);
+  await invoke('inova:getWorkspace', trusted);
+  expect(handlers['getWorkspace']).toHaveBeenCalledWith();
+  expect(electron.invokes.has('inova:renameSession')).toBe(false);
   await invoke('inova:loadTranscript', trusted, input);
   await invoke('inova:getUsage', trusted, input);
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);

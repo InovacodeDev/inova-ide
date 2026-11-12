@@ -69,6 +69,21 @@ test('chat calls go through invoke and send channels', async () => {
   expect('openProject' in api).toBe(false);
 });
 
+test('session update and workspace calls use their channels', async () => {
+  const api = await loadApi();
+  void api.updateSession({ sessionId: 's', archived: true });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:updateSession', {
+    sessionId: 's',
+    archived: true,
+  });
+  void api.getWorkspace();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getWorkspace');
+  const workspace = { openSessionIds: ['s'], activeSessionId: 's' };
+  void api.saveWorkspace(workspace);
+  expect(electron.invoke).toHaveBeenCalledWith('inova:saveWorkspace', workspace);
+  expect('renameSession' in api).toBe(false);
+});
+
 test('pty calls go through send and invoke channels', async () => {
   const api = await loadApi();
   api.ptyWrite('s', 'ls');

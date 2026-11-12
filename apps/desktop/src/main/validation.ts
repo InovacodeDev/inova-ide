@@ -16,6 +16,7 @@ export interface Size {
 const MAX_TEXT = 255;
 const MAX_PATH = 4096;
 const MAX_PROMPT = 100_000;
+const MAX_WORKSPACE_INPUT = 1000;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
 
 export function ok<T>(value: T): Result<T> {
@@ -105,11 +106,32 @@ export function parseSessionRef(input: unknown): { sessionId: string } | undefin
     : undefined;
 }
 
-export function parseRename(input: unknown): { sessionId: string; title: string } | undefined {
-  if (!isRecord(input) || !isSafeId(input['sessionId']) || !isText(input['title'])) {
+export function parseSessionUpdate(
+  input: unknown,
+): { sessionId: string; title?: string; archived?: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { sessionId, title, archived } = input;
+  if (title === undefined && archived === undefined) return undefined;
+  if (title !== undefined && !isText(title)) return undefined;
+  if (archived !== undefined && typeof archived !== 'boolean') return undefined;
+  return {
+    sessionId,
+    ...(title === undefined ? {} : { title }),
+    ...(archived === undefined ? {} : { archived }),
+  };
+}
+
+export function parseWorkspace(
+  input: unknown,
+): { openSessionIds: string[]; activeSessionId: string | null } | undefined {
+  if (!isRecord(input)) return undefined;
+  const { openSessionIds, activeSessionId } = input;
+  if (!Array.isArray(openSessionIds) || openSessionIds.length > MAX_WORKSPACE_INPUT) {
     return undefined;
   }
-  return { sessionId: input['sessionId'], title: input['title'] };
+  if (!openSessionIds.every(isSafeId)) return undefined;
+  if (activeSessionId !== null && !isSafeId(activeSessionId)) return undefined;
+  return { openSessionIds, activeSessionId };
 }
 
 export function parseMessage(input: unknown): { sessionId: string; prompt: string } | undefined {

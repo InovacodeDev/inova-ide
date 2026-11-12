@@ -7,9 +7,10 @@ import {
   parsePath,
   parseProjectRef,
   parseRemoval,
-  parseRename,
   parseSessionRef,
+  parseSessionUpdate,
   parseUsageRequest,
+  parseWorkspace,
 } from '../src/main/validation.js';
 
 test('array and primitive inputs are rejected', () => {
@@ -21,7 +22,8 @@ test('array and primitive inputs are rejected', () => {
     expect(parseProjectRef(input)).toBeUndefined();
     expect(parseNewSession(input)).toBeUndefined();
     expect(parseSessionRef(input)).toBeUndefined();
-    expect(parseRename(input)).toBeUndefined();
+    expect(parseSessionUpdate(input)).toBeUndefined();
+    expect(parseWorkspace(input)).toBeUndefined();
     expect(parseMessage(input)).toBeUndefined();
     expect(parseUsageRequest(input)).toBeUndefined();
   }
@@ -39,7 +41,7 @@ test('session ids must be safe path segments', () => {
   for (const sessionId of ['', '.', '..', 'a/b', 'a\\b', '../x', 'a\0b']) {
     expect(parseSessionRef({ sessionId })).toBeUndefined();
     expect(parseMessage({ sessionId, prompt: 'oi' })).toBeUndefined();
-    expect(parseRename({ sessionId, title: 't' })).toBeUndefined();
+    expect(parseSessionUpdate({ sessionId, title: 't' })).toBeUndefined();
   }
   expect(parseSessionRef({ sessionId: 'abc-123' })).toEqual({ sessionId: 'abc-123' });
 });
@@ -70,9 +72,43 @@ test('prompts are trimmed and limited to 100000 characters', () => {
   expect(parseMessage({ sessionId: 's', prompt: `${longest}a` })).toBeUndefined();
 });
 
-test('rename and usage requests require their fields', () => {
-  expect(parseRename({ sessionId: 's', title: 'novo' })).toEqual({ sessionId: 's', title: 'novo' });
-  expect(parseRename({ sessionId: 's', title: '' })).toBeUndefined();
+test('session updates need a title or an archived flag of the right type', () => {
+  expect(parseSessionUpdate({ sessionId: 's', title: 'novo' })).toEqual({
+    sessionId: 's',
+    title: 'novo',
+  });
+  expect(parseSessionUpdate({ sessionId: 's', archived: true })).toEqual({
+    sessionId: 's',
+    archived: true,
+  });
+  expect(parseSessionUpdate({ sessionId: 's', title: 'a', archived: false })).toEqual({
+    sessionId: 's',
+    title: 'a',
+    archived: false,
+  });
+  expect(parseSessionUpdate({ sessionId: 's' })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', title: '' })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', archived: 'yes' })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', title: 3 })).toBeUndefined();
+});
+
+test('workspace needs safe ids and a null or string active id', () => {
+  const workspace = { openSessionIds: ['a', 'b'], activeSessionId: 'a' };
+  expect(parseWorkspace(workspace)).toEqual(workspace);
+  expect(parseWorkspace({ openSessionIds: [], activeSessionId: null })).toEqual({
+    openSessionIds: [],
+    activeSessionId: null,
+  });
+  expect(parseWorkspace({ openSessionIds: ['a/b'], activeSessionId: null })).toBeUndefined();
+  expect(parseWorkspace({ openSessionIds: ['a'], activeSessionId: '..' })).toBeUndefined();
+  expect(parseWorkspace({ openSessionIds: ['a'] })).toBeUndefined();
+  expect(parseWorkspace({ openSessionIds: 'a', activeSessionId: null })).toBeUndefined();
+  expect(parseWorkspace({ openSessionIds: [1], activeSessionId: null })).toBeUndefined();
+  const many = Array.from({ length: 1001 }, (_, index) => `s${index}`);
+  expect(parseWorkspace({ openSessionIds: many, activeSessionId: null })).toBeUndefined();
+});
+
+test('usage requests require their fields', () => {
   expect(parseUsageRequest({ accountLabel: 'a' })).toEqual({ accountLabel: 'a' });
   expect(parseUsageRequest({ accountLabel: '' })).toBeUndefined();
 });

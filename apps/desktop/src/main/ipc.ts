@@ -52,8 +52,10 @@ export function registerIpc(deps: {
   handle(CHANNELS.unbindProject, (input) => handlers.unbindProject(input));
   handle(CHANNELS.listSessions, (input) => handlers.listSessions(input));
   handle(CHANNELS.createSession, (input) => handlers.createSession(input));
-  handle(CHANNELS.renameSession, (input) => handlers.renameSession(input));
+  handle(CHANNELS.updateSession, (input) => handlers.updateSession(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
+  handle(CHANNELS.getWorkspace, () => handlers.getWorkspace());
+  handle(CHANNELS.saveWorkspace, (input) => handlers.saveWorkspace(input));
   handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
   handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
