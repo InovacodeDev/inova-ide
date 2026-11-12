@@ -54,6 +54,22 @@ export function createHandlers(deps: HandlerDeps) {
     return { id: account.id, label: account.label, provider: account.provider, status };
   }
 
+  async function savedAccountView(account: Account): Promise<AccountView> {
+    try {
+      return await accountView(account);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        return {
+          id: account.id,
+          label: account.label,
+          provider: account.provider,
+          status: 'unknown',
+        };
+      }
+      throw error;
+    }
+  }
+
   async function startSession(input: {
     account: Account;
     title: string;
@@ -84,7 +100,7 @@ export function createHandlers(deps: HandlerDeps) {
       }),
     addAccount: (input: unknown): Promise<Result<AccountView>> =>
       validated(input, parseNewAccount, async ({ provider, label }) =>
-        ok(await accountView(await addAccount({ root: deps.root, provider, label }))),
+        ok(await savedAccountView(await addAccount({ root: deps.root, provider, label }))),
       ),
     removeAccount: (input: unknown): Promise<Result<null>> =>
       validated(input, parseRemoval, async ({ label, force }) => {

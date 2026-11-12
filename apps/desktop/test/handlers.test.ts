@@ -79,6 +79,14 @@ test('addAccount creates the account and reports its status', async () => {
   expect(view).toMatchObject({ label: 'pessoal', provider: 'claude', status: 'logged-in' });
 });
 
+test('addAccount keeps the saved account and reports unknown status when the check throws', async () => {
+  const { root, run, handlers } = await setup();
+  run.mockRejectedValueOnce(new Error('spawn failed'));
+  const view = unwrap(await handlers.addAccount({ provider: 'claude', label: 'pessoal' }));
+  expect(view).toMatchObject({ label: 'pessoal', status: 'unknown' });
+  expect((await loadStore(root)).accounts).toHaveLength(1);
+});
+
 test('listAccounts reports status with api keys stripped', async () => {
   const { root, run, handlers } = await setup();
   const { account } = await seedProject(root);
