@@ -102,3 +102,71 @@ describe('claude parser', () => {
     ]);
   });
 });
+
+describe('gemini parser', () => {
+  it('maps the fixture', () => {
+    const events = parseFixture('gemini', 'gemini-stream.jsonl');
+    expect(events).toEqual([
+      { kind: 'session', providerSessionId: '00000000-0000-4000-8000-000000000001' },
+      { kind: 'text-delta', blockId: 'gemini-1', text: 'Here is a **short** ' },
+      {
+        kind: 'tool-use',
+        toolId: 'run_shell_command-1',
+        name: 'run_shell_command',
+        input: JSON.stringify({ command: 'ls' }, null, 2),
+      },
+      { kind: 'tool-result', toolId: 'run_shell_command-1', output: 'README.md', isError: false },
+      { kind: 'error', message: 'example warning' },
+      { kind: 'done', isError: false, costUsd: null, durationMs: null },
+    ]);
+  });
+
+  it('emits text for non-delta assistant messages and failures for error results', () => {
+    const parser = createChatParser('gemini');
+    expect(
+      parser.parse(JSON.stringify({ type: 'message', role: 'assistant', content: 'hi' })),
+    ).toEqual([{ kind: 'text', blockId: 'gemini-1', text: 'hi' }]);
+    expect(
+      parser.parse(JSON.stringify({ type: 'result', status: 'error', error: { message: 'bad' } })),
+    ).toEqual([
+      { kind: 'error', message: 'bad' },
+      { kind: 'done', isError: true, costUsd: null, durationMs: null },
+    ]);
+  });
+});
+
+describe('codex parser', () => {
+  it('maps the fixture', () => {
+    const events = parseFixture('codex', 'codex-exec.jsonl');
+    expect(events).toEqual([
+      { kind: 'session', providerSessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
+      { kind: 'tool-use', toolId: 'item_1', name: 'command_execution', input: 'bash -lc ls' },
+      { kind: 'tool-result', toolId: 'item_1', output: 'README.md\nsrc\n', isError: false },
+      expect.objectContaining({ kind: 'text', blockId: 'item_2' }),
+      { kind: 'done', isError: false, costUsd: null, durationMs: null },
+      { kind: 'error', message: 'stream disconnected before completion' },
+      { kind: 'done', isError: true, costUsd: null, durationMs: null },
+      { kind: 'error', message: 'stream disconnected before completion' },
+    ]);
+  });
+
+  it('flags non-zero exit codes', () => {
+    const parser = createChatParser('codex');
+    const line = JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'i', type: 'command_execution', aggregated_output: 'x', exit_code: 2 },
+    });
+    expect(parser.parse(line)).toEqual([
+      { kind: 'tool-result', toolId: 'i', output: 'x', isError: true },
+    ]);
+  });
+});
+
+describe('garbage input', () => {
+  it.each(['claude', 'codex', 'gemini'] as const)('returns [] for %s', (provider) => {
+    const parser = createChatParser(provider);
+    for (const line of ['', '   ', 'not json', '[]', '42', 'null', '{"type":"nope"}', '{"a":1}']) {
+      expect(parser.parse(line)).toEqual([]);
+    }
+  });
+});
