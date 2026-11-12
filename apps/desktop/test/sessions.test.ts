@@ -1,4 +1,4 @@
-import { expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { LaunchSpec } from '@inova/core/launch';
 import { clampSize, createSessionManager } from '../src/main/sessions.js';
@@ -11,18 +11,27 @@ interface FakePty extends PtyProcess {
   emitExit(exitCode: number): void;
   write: PtyProcess['write'] & Mock;
   resize: PtyProcess['resize'] & Mock;
-  kill: PtyProcess['kill'] & Mock;
 }
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function setup() {
   const calls: SpawnInput[] = [];
   const ptys: FakePty[] = [];
   const events = { data: vi.fn(), exit: vi.fn() };
+  const killTree = vi.fn<(pid: number, signal: NodeJS.Signals) => void>();
   const spawnPty: SpawnPty = (input) => {
     calls.push(input);
     let dataCb: (data: string) => void = () => undefined;
     let exitCb: (e: { exitCode: number }) => void = () => undefined;
     const pty: FakePty = {
+      pid: 1000 + ptys.length,
       onData: (cb) => {
         dataCb = cb;
       },
@@ -31,15 +40,14 @@ function setup() {
       },
       write: vi.fn(),
       resize: vi.fn(),
-      kill: vi.fn(),
       emitData: (data) => dataCb(data),
       emitExit: (exitCode) => exitCb({ exitCode }),
     };
     ptys.push(pty);
     return pty;
   };
-  const manager = createSessionManager({ spawnPty, events });
-  return { manager, calls, ptys, events };
+  const manager = createSessionManager({ spawnPty, events, killTree });
+  return { manager, calls, ptys, events, killTree };
 }
 
 const spec: LaunchSpec = {
@@ -91,29 +99,78 @@ test('write and resize reach the process, resize is clamped', () => {
   expect(ptys[0]?.resize).toHaveBeenCalledWith(500, 31);
 });
 
-test('close kills the process and frees the account', () => {
-  const { manager, ptys } = setup();
+test('close sends HUP to the process group and frees the account', () => {
+  const { manager, killTree } = setup();
   const id = openSession(manager);
   manager.close(id);
-  expect(ptys[0]?.kill).toHaveBeenCalledTimes(1);
+  expect(killTree.mock.calls).toEqual([[1000, 'SIGHUP']]);
   expect(manager.accountsInUse().size).toBe(0);
 });
 
-test('closeAll kills every open session', () => {
-  const { manager, ptys } = setup();
+test('close sends KILL to the group when no exit arrives within 2 seconds', () => {
+  const { manager, killTree } = setup();
+  manager.close(openSession(manager));
+  vi.advanceTimersByTime(1999);
+  expect(killTree).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(1);
+  expect(killTree.mock.calls).toEqual([
+    [1000, 'SIGHUP'],
+    [1000, 'SIGKILL'],
+  ]);
+});
+
+test('an exit before 2 seconds skips KILL and clears the timer', () => {
+  const { manager, ptys, killTree } = setup();
+  manager.close(openSession(manager));
+  expect(vi.getTimerCount()).toBe(1);
+  ptys[0]?.emitExit(0);
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersByTime(5000);
+  expect(killTree.mock.calls).toEqual([[1000, 'SIGHUP']]);
+});
+
+test('closeAll closes every session and KILLs the ones that stay alive', async () => {
+  const { manager, ptys, killTree } = setup();
   openSession(manager, 'acc-1');
   openSession(manager, 'acc-2');
-  manager.closeAll();
-  expect(ptys.map((pty) => pty.kill.mock.calls.length)).toEqual([1, 1]);
+  const done = manager.closeAll();
+  expect(killTree.mock.calls).toEqual([
+    [1000, 'SIGHUP'],
+    [1001, 'SIGHUP'],
+  ]);
+  ptys[1]?.emitExit(0);
+  vi.advanceTimersByTime(2000);
+  await done;
+  expect(killTree.mock.calls.slice(2)).toEqual([[1000, 'SIGKILL']]);
   expect(manager.accountsInUse().size).toBe(0);
+});
+
+test('closeAll resolves immediately without sessions', async () => {
+  const { manager, killTree } = setup();
+  await manager.closeAll();
+  expect(killTree).not.toHaveBeenCalled();
+});
+
+test('closeAll also waits for sessions closed earlier that are still dying', async () => {
+  const { manager, ptys } = setup();
+  manager.close(openSession(manager));
+  let settled = false;
+  void manager.closeAll().then(() => {
+    settled = true;
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(settled).toBe(false);
+  ptys[0]?.emitExit(0);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(settled).toBe(true);
 });
 
 test('closeAll works when detached from the manager', () => {
-  const { manager, ptys } = setup();
+  const { manager, killTree } = setup();
   openSession(manager);
   const { closeAll } = manager;
-  expect(() => closeAll()).not.toThrow();
-  expect(ptys[0]?.kill).toHaveBeenCalledTimes(1);
+  expect(() => void closeAll()).not.toThrow();
+  expect(killTree).toHaveBeenCalledTimes(1);
 });
 
 test('exit after close does not throw and emits exit at most once', () => {
@@ -124,12 +181,13 @@ test('exit after close does not throw and emits exit at most once', () => {
   expect(events.exit.mock.calls.length).toBeLessThanOrEqual(1);
 });
 
-test('close after exit does not kill the process', () => {
-  const { manager, ptys } = setup();
+test('close after exit does not signal the process', () => {
+  const { manager, ptys, killTree } = setup();
   const id = openSession(manager);
   ptys[0]?.emitExit(0);
   manager.close(id);
-  expect(ptys[0]?.kill).not.toHaveBeenCalled();
+  expect(killTree).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
 });
 
 test('unknown session ids are ignored', () => {

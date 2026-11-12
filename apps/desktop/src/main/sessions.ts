@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { LaunchSpec } from '@inova/core/launch';
 
 export interface PtyProcess {
+  pid: number;
   onData(cb: (data: string) => void): void;
   onExit(cb: (e: { exitCode: number }) => void): void;
   write(data: string): void;
   resize(cols: number, rows: number): void;
-  kill(): void;
 }
 
 export type SpawnPty = (input: {
@@ -34,13 +34,20 @@ export interface SessionManager {
   write(sessionId: string, data: string): void;
   resize(input: { sessionId: string; cols: number; rows: number }): void;
   close(sessionId: string): void;
-  closeAll(): void;
+  closeAll(): Promise<void>;
   accountsInUse(): ReadonlySet<string>;
 }
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_SIZE = 500;
+const KILL_AFTER_MS = 2000;
+
+interface Closing {
+  timer: ReturnType<typeof setTimeout>;
+  settle: () => void;
+  done: Promise<void>;
+}
 
 function clampAxis(value: number, fallback: number): number {
   if (!Number.isFinite(value) || value < 1) return fallback;
@@ -54,14 +61,38 @@ export function clampSize(cols: number, rows: number): { cols: number; rows: num
 export function createSessionManager(deps: {
   spawnPty: SpawnPty;
   events: SessionEvents;
+  killTree: (pid: number, signal: NodeJS.Signals) => void;
 }): SessionManager {
   const sessions = new Map<string, { pty: PtyProcess; accountId: string }>();
+  const closing = new Map<string, Closing>();
+
+  function settleClosing(sessionId: string): void {
+    const entry = closing.get(sessionId);
+    if (!entry) return;
+    clearTimeout(entry.timer);
+    closing.delete(sessionId);
+    entry.settle();
+  }
 
   function close(sessionId: string): void {
     const session = sessions.get(sessionId);
     if (!session) return;
     sessions.delete(sessionId);
-    session.pty.kill();
+    const { pid } = session.pty;
+    let settle: () => void = () => undefined;
+    const done = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const timer = setTimeout(() => {
+      closing.delete(sessionId);
+      try {
+        deps.killTree(pid, 'SIGKILL');
+      } finally {
+        settle();
+      }
+    }, KILL_AFTER_MS);
+    closing.set(sessionId, { timer, settle, done });
+    deps.killTree(pid, 'SIGHUP');
   }
 
   return {
@@ -79,6 +110,7 @@ export function createSessionManager(deps: {
       pty.onData((data) => deps.events.data(sessionId, data));
       pty.onExit(({ exitCode }) => {
         sessions.delete(sessionId);
+        settleClosing(sessionId);
         deps.events.exit(sessionId, exitCode);
       });
       return sessionId;
@@ -90,8 +122,9 @@ export function createSessionManager(deps: {
       const size = clampSize(cols, rows);
       sessions.get(sessionId)?.pty.resize(size.cols, size.rows);
     },
-    closeAll() {
+    async closeAll() {
       for (const sessionId of [...sessions.keys()]) close(sessionId);
+      await Promise.all([...closing.values()].map((entry) => entry.done));
     },
     accountsInUse() {
       return new Set([...sessions.values()].map((session) => session.accountId));

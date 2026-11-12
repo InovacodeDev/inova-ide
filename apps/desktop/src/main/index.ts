@@ -8,6 +8,7 @@ import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
 import { createHandlers } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
+import { killProcessGroup } from './process-group.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { loginShellPath } from './shell-env.js';
@@ -42,6 +43,7 @@ const spawnPty: SpawnPty = ({ file, args, cwd, env, cols, rows }) =>
 
 const sessions = createSessionManager({
   spawnPty,
+  killTree: killProcessGroup,
   events: {
     data: (sessionId, data) => sendToWindow(CHANNELS.ptyData, { sessionId, data }),
     exit: (sessionId, exitCode) => sendToWindow(CHANNELS.ptyExit, { sessionId, exitCode }),
@@ -116,9 +118,9 @@ void app.whenReady().then(async () => {
   }
 });
 
-app.on('will-quit', () => sessions.closeAll());
+app.on('will-quit', () => void sessions.closeAll());
 
 app.on('window-all-closed', () => {
-  sessions.closeAll();
+  void sessions.closeAll();
   app.quit();
 });
