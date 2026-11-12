@@ -139,15 +139,16 @@ function createClaudeParser(): ChatParser {
           return fromAssistant(data['message']);
         case 'user':
           return fromUser(data['message']);
-        case 'result':
-          return [
-            {
-              kind: 'done',
-              isError: data['is_error'] === true,
-              costUsd: num(data['total_cost_usd']),
-              durationMs: num(data['duration_ms']),
-            },
-          ];
+        case 'result': {
+          const isError = data['is_error'] === true;
+          const done: ChatEvent = {
+            kind: 'done',
+            isError,
+            costUsd: num(data['total_cost_usd']),
+            durationMs: num(data['duration_ms']),
+          };
+          return isError ? [{ kind: 'error', message: claudeErrorMessage(data) }, done] : [done];
+        }
         default:
           return [];
       }
@@ -155,8 +156,26 @@ function createClaudeParser(): ChatParser {
   };
 }
 
-function createGeminiParser(): ChatParser {
+function claudeErrorMessage(data: Json): string {
+  const errors = Array.isArray(data['errors'])
+    ? data['errors'].filter((item): item is string => typeof item === 'string')
+    : [];
+  if (errors.length > 0) return errors.join('\n');
+  return str(data['result']) ?? str(data['subtype']) ?? 'Claude failed';
+}
+
+function createGeminiParser(prefix: string): ChatParser {
   let block = 0;
+  let open = false;
+  let buffer = '';
+
+  function flush(): ChatEvent[] {
+    if (!open) return [];
+    open = false;
+    const text = buffer;
+    buffer = '';
+    return [{ kind: 'text', blockId: `${prefix}gemini-${block}`, text }];
+  }
 
   function errorMessage(value: unknown): string {
     if (typeof value === 'string') return value;
@@ -177,28 +196,45 @@ function createGeminiParser(): ChatParser {
           const text = str(data['content']);
           if (data['role'] !== 'assistant' || text === null) return [];
           if (data['delta'] === true) {
-            if (block === 0) block = 1;
-            return [{ kind: 'text-delta', blockId: `gemini-${block}`, text }];
+            if (!open) {
+              block += 1;
+              open = true;
+            }
+            buffer += text;
+            return [{ kind: 'text-delta', blockId: `${prefix}gemini-${block}`, text }];
           }
+          const closed = flush();
           block += 1;
-          return [{ kind: 'text', blockId: `gemini-${block}`, text }];
+          return [...closed, { kind: 'text', blockId: `${prefix}gemini-${block}`, text }];
         }
         case 'tool_use': {
           const toolId = str(data['tool_id']);
           const name = str(data['tool_name']);
           if (toolId === null || name === null) return [];
+          const closed = flush();
           block += 1;
-          return [{ kind: 'tool-use', toolId, name, input: prettyJson(data['parameters']) }];
+          return [
+            ...closed,
+            {
+              kind: 'tool-use',
+              toolId: `${prefix}${toolId}`,
+              name,
+              input: prettyJson(data['parameters']),
+            },
+          ];
         }
         case 'tool_result': {
           const toolId = str(data['tool_id']);
           if (toolId === null) return [];
           const failed = data['status'] === 'error' || isRecord(data['error']);
           const output = failed ? errorMessage(data['error']) : (str(data['output']) ?? '');
-          return [{ kind: 'tool-result', toolId, output, isError: failed }];
+          return [
+            ...flush(),
+            { kind: 'tool-result', toolId: `${prefix}${toolId}`, output, isError: failed },
+          ];
         }
         case 'error':
-          return [{ kind: 'error', message: errorMessage(data) }];
+          return [...flush(), { kind: 'error', message: errorMessage(data) }];
         case 'result': {
           const stats = isRecord(data['stats']) ? data['stats'] : {};
           const failed = data['status'] !== 'success';
@@ -208,7 +244,10 @@ function createGeminiParser(): ChatParser {
             costUsd: null,
             durationMs: num(stats['duration_ms']),
           };
-          return failed ? [{ kind: 'error', message: errorMessage(data['error']) }, done] : [done];
+          const tail: ChatEvent[] = failed
+            ? [{ kind: 'error', message: errorMessage(data['error']) }, done]
+            : [done];
+          return [...flush(), ...tail];
         }
         default:
           return [];
@@ -217,13 +256,14 @@ function createGeminiParser(): ChatParser {
   };
 }
 
-function createCodexParser(): ChatParser {
+function createCodexParser(prefix: string): ChatParser {
   const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
 
   function fromItem(started: boolean, item: unknown): ChatEvent[] {
     if (!isRecord(item)) return [];
-    const id = str(item['id']);
-    if (id === null) return [];
+    const rawId = str(item['id']);
+    if (rawId === null) return [];
+    const id = `${prefix}${rawId}`;
     if (item['type'] === 'command_execution') {
       if (started) {
         return [
@@ -279,13 +319,14 @@ function createCodexParser(): ChatParser {
   };
 }
 
-export function createChatParser(provider: ProviderId): ChatParser {
+export function createChatParser(provider: ProviderId, options: { turnId: string }): ChatParser {
+  const prefix = `${options.turnId}:`;
   switch (provider) {
     case 'claude':
       return createClaudeParser();
     case 'gemini':
-      return createGeminiParser();
+      return createGeminiParser(prefix);
     case 'codex':
-      return createCodexParser();
+      return createCodexParser(prefix);
   }
 }
