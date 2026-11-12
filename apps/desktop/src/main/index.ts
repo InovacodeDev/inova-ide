@@ -67,8 +67,14 @@ function createWindow(): void {
     if (!isAppUrl(url, appUrl)) event.preventDefault();
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  window.webContents.on('did-navigate', () => void sessions.closeAll());
+  window.webContents.on('render-process-gone', () => void sessions.closeAll());
   mainWindow = window;
-  void window.loadURL(appUrl);
+  window.loadURL(appUrl).catch((error: unknown) => {
+    console.error('inova: failed to load', appUrl, error instanceof Error ? error.message : error);
+    dialog.showErrorBox('Inova', 'Não foi possível carregar a interface.');
+    app.quit();
+  });
 }
 
 async function pickFolder(): Promise<string | null> {
@@ -118,9 +124,13 @@ void app.whenReady().then(async () => {
   }
 });
 
-app.on('will-quit', () => void sessions.closeAll());
+let shuttingDown = false;
 
-app.on('window-all-closed', () => {
-  void sessions.closeAll();
-  app.quit();
+app.on('before-quit', (event) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  event.preventDefault();
+  void sessions.closeAll().finally(() => app.quit());
 });
+
+app.on('window-all-closed', () => app.quit());
