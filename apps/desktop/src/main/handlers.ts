@@ -53,6 +53,15 @@ const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão
 const TITLE_CHARS = 60;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 
+export function isExternalWebUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function projectView(project: { id: string; path: string }, account: Account): ProjectView {
   return {
     id: project.id,

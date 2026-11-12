@@ -4,12 +4,12 @@ import { pathToFileURL } from 'node:url';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
 import { createChatRunner } from './chat.js';
 import type { SpawnChild } from './chat.js';
-import { createHandlers } from './handlers.js';
+import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { killProcessGroup } from './process-group.js';
 import { createSessionManager } from './sessions.js';
@@ -76,7 +76,14 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
     },
   });
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternalWebUrl(url)) {
+      shell.openExternal(url).catch((error: unknown) => {
+        console.error('inova: failed to open external url', error);
+      });
+    }
+    return { action: 'deny' };
+  });
   window.webContents.on('will-navigate', (event, url) => {
     if (!isAppUrl(url, appUrl)) event.preventDefault();
   });

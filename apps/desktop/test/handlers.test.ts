@@ -11,7 +11,7 @@ import { loadStore } from '@inova/core/store';
 import type { Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
-import { createHandlers } from '../src/main/handlers.js';
+import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
 import type { Result } from '../src/shared/api.js';
 
@@ -200,6 +200,21 @@ test('a new claude turn persists the session id before spawning and derives the 
   const stored = (await loadStore(root)).sessions?.[0];
   expect(stored?.providerSessionId).toBe(uuid);
   expect(stored?.title).toBe('a'.repeat(60));
+});
+
+test('isExternalWebUrl accepts only http and https urls', () => {
+  expect(isExternalWebUrl('https://example.com/a?b=1')).toBe(true);
+  expect(isExternalWebUrl('http://example.com')).toBe(true);
+  for (const url of [
+    'file:///etc/passwd',
+    'javascript:alert(1)',
+    'ftp://example.com',
+    'data:text/html,x',
+    'not a url',
+    '',
+  ]) {
+    expect(isExternalWebUrl(url)).toBe(false);
+  }
 });
 
 const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
