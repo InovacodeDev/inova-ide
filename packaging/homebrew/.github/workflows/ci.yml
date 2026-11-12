@@ -1,0 +1,21 @@
+name: Homebrew Tap CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Audit cask
+        run: |
+          brew style Casks/inova-ide.rb
+          TAP_DIR="$(brew --repository)/Library/Taps/inovacodedev"
+          mkdir -p "${TAP_DIR}"
+          ln -sfn "${PWD}" "${TAP_DIR}/homebrew-tap"
+          brew trust inovacodedev/tap
+          brew audit --cask inovacodedev/tap/inova-ide
