@@ -99,6 +99,20 @@ test('listAccounts reports status with api keys stripped', async () => {
   expect(env?.['CLAUDE_CONFIG_DIR']).toBe(account.homeDir);
 });
 
+test('listAccounts reports unknown for an account whose check throws and keeps the others', async () => {
+  const { root, run, handlers } = await setup();
+  const broken = await addAccount({ root, provider: 'claude', label: 'quebrada' });
+  const healthy = await addAccount({ root, provider: 'claude', label: 'saudavel' });
+  run.mockImplementation(async ({ env }) => {
+    if (env['CLAUDE_CONFIG_DIR'] === broken.homeDir) throw new Error('spawn failed');
+    return { exitCode: 0, stdout: '{"loggedIn":true}' };
+  });
+  expect(unwrap(await handlers.listAccounts())).toEqual([
+    { id: broken.id, label: 'quebrada', provider: 'claude', status: 'unknown' },
+    { id: healthy.id, label: 'saudavel', provider: 'claude', status: 'logged-in' },
+  ]);
+});
+
 test('openProject spawns absolute binary in project dir with account isolation', async () => {
   const { root, bin, open, handlers } = await setup();
   const { account, project } = await seedProject(root);

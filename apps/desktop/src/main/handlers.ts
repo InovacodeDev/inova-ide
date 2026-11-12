@@ -96,7 +96,7 @@ export function createHandlers(deps: HandlerDeps) {
     listAccounts: (): Promise<Result<AccountView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
-        return ok(await Promise.all(store.accounts.map(accountView)));
+        return ok(await Promise.all(store.accounts.map(savedAccountView)));
       }),
     addAccount: (input: unknown): Promise<Result<AccountView>> =>
       validated(input, parseNewAccount, async ({ provider, label }) =>
