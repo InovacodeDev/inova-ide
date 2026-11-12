@@ -131,3 +131,84 @@ test('a second send for a running session is rejected', () => {
   expect(() => runner.send(input('s2'))).not.toThrow();
 });
 
+test('cancel sends SIGTERM, then SIGKILL after 2s, and reports cancellation', () => {
+  vi.useFakeTimers();
+  const { child, killTree, events, runner } = setup();
+  runner.send(input());
+  runner.cancel('s1');
+  runner.cancel('s1');
+  expect(killTree).toHaveBeenCalledTimes(1);
+  expect(killTree).toHaveBeenCalledWith(4242, 'SIGTERM');
+  vi.advanceTimersByTime(2000);
+  expect(killTree).toHaveBeenLastCalledWith(4242, 'SIGKILL');
+  child.emit('close', null);
+  expect(events[0]?.event).toEqual({ kind: 'error', message: 'Turno cancelado.' });
+});
+
+test('SIGKILL is not sent when the process exits within 2s', () => {
+  vi.useFakeTimers();
+  const { child, killTree, runner } = setup();
+  runner.send(input());
+  runner.cancel('s1');
+  child.emit('close', 143);
+  vi.advanceTimersByTime(5000);
+  expect(killTree).toHaveBeenCalledTimes(1);
+});
+
+test('closeAll cancels every turn and resolves once they exit', async () => {
+  const { child, killTree, runner } = setup();
+  runner.send(input());
+  const closed = runner.closeAll();
+  expect(killTree).toHaveBeenCalledWith(4242, 'SIGTERM');
+  child.emit('close', null);
+  await closed;
+  expect(runner.isRunning('s1')).toBe(false);
+});
+
+test('closeAll resolves after the SIGKILL fallback when the process ignores SIGTERM', async () => {
+  vi.useFakeTimers();
+  const { killTree, runner } = setup();
+  runner.send(input());
+  const closed = runner.closeAll();
+  await vi.advanceTimersByTimeAsync(2000);
+  await closed;
+  expect(killTree).toHaveBeenLastCalledWith(4242, 'SIGKILL');
+});
+
+test('parseTranscriptLine accepts every persisted event kind and rejects malformed lines', () => {
+  const events: ChatEvent[] = [
+    { kind: 'session', providerSessionId: 'p' },
+    { kind: 'user', text: 't', at: 'a' },
+    { kind: 'text', blockId: 'b', text: 't' },
+    { kind: 'tool-use', toolId: 'i', name: 'n', input: '{}' },
+    { kind: 'tool-result', toolId: 'i', output: 'o', isError: true },
+    { kind: 'usage-limits', windows: [{ kind: 'weekly', usedPercent: 1, resetsAt: null }] },
+    { kind: 'error', message: 'm' },
+    { kind: 'done', isError: false, costUsd: null, durationMs: 3 },
+  ];
+  for (const event of events) expect(parseTranscriptLine(JSON.stringify(event))).toEqual(event);
+  for (const line of [
+    '',
+    'nope',
+    '[]',
+    '{"kind":"text"}',
+    '{"kind":"done","isError":"x"}',
+    '{"kind":"usage-limits","windows":[{"kind":"x"}]}',
+    '{"kind":"unknown"}',
+  ]) {
+    expect(parseTranscriptLine(line)).toBeUndefined();
+  }
+});
+
+test('a throwing killTree is logged and does not break cancel', () => {
+  const { killTree, runner } = setup();
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  killTree.mockImplementation(() => {
+    throw new Error('EPERM');
+  });
+  runner.send(input());
+  expect(() => runner.cancel('s1')).not.toThrow();
+  expect(log).toHaveBeenCalled();
+  log.mockRestore();
+  runner.send(input('s2'));
+});
