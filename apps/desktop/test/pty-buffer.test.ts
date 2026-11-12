@@ -41,6 +41,7 @@ describe('createPtyRouter', () => {
     const router = createPtyRouter();
     router.exit('a');
     expect(router.consumeExit('a')).toBe(true);
+    expect(router.consumeExit('a')).toBe(false);
     expect(router.consumeExit('b')).toBe(false);
   });
 

@@ -39,7 +39,7 @@ export function createPtyRouter(): PtyRouter {
       return () => release(sessionId);
     },
     consumeExit(sessionId) {
-      return exited.has(sessionId);
+      return exited.delete(sessionId);
     },
     close(sessionId) {
       release(sessionId);
