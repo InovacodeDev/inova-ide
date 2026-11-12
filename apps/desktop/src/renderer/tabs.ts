@@ -1,9 +1,11 @@
-import type { OpenedSession } from '../shared/api';
+import type { ProviderId } from '@inova/core/types';
 
 export interface Tab {
   sessionId: string;
   title: string;
   exited: boolean;
+  kind: 'chat' | 'login';
+  provider: ProviderId | null;
 }
 
 export interface TabsState {
@@ -12,10 +14,11 @@ export interface TabsState {
 }
 
 export type TabsAction =
-  | { type: 'open'; tab: OpenedSession }
+  | { type: 'open'; tab: Pick<Tab, 'sessionId' | 'title' | 'kind' | 'provider'> }
   | { type: 'close'; sessionId: string }
   | { type: 'activate'; sessionId: string }
-  | { type: 'exited'; sessionId: string };
+  | { type: 'exited'; sessionId: string }
+  | { type: 'rename'; sessionId: string; title: string };
 
 function closeTab(state: TabsState, sessionId: string): TabsState {
   const index = state.tabs.findIndex((tab) => tab.sessionId === sessionId);
@@ -25,10 +28,20 @@ function closeTab(state: TabsState, sessionId: string): TabsState {
   return { tabs, active: neighbor?.sessionId ?? null };
 }
 
+function updateTab(state: TabsState, sessionId: string, patch: Partial<Tab>): TabsState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) => (tab.sessionId === sessionId ? { ...tab, ...patch } : tab)),
+  };
+}
+
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   if (action.type === 'open') {
-    const tab: Tab = { sessionId: action.tab.sessionId, title: action.tab.title, exited: false };
-    return { tabs: [...state.tabs, tab], active: tab.sessionId };
+    const { sessionId } = action.tab;
+    if (state.tabs.some((tab) => tab.sessionId === sessionId)) {
+      return { ...state, active: sessionId };
+    }
+    return { tabs: [...state.tabs, { ...action.tab, exited: false }], active: sessionId };
   }
   if (!state.tabs.some((tab) => tab.sessionId === action.sessionId)) return state;
   switch (action.type) {
@@ -37,11 +50,8 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
     case 'activate':
       return { ...state, active: action.sessionId };
     case 'exited':
-      return {
-        ...state,
-        tabs: state.tabs.map((tab) =>
-          tab.sessionId === action.sessionId ? { ...tab, exited: true } : tab,
-        ),
-      };
+      return updateTab(state, action.sessionId, { exited: true });
+    case 'rename':
+      return updateTab(state, action.sessionId, { title: action.title });
   }
 }
