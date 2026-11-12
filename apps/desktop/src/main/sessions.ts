@@ -57,7 +57,15 @@ export function createSessionManager(deps: {
 }): SessionManager {
   const sessions = new Map<string, { pty: PtyProcess; accountId: string }>();
 
+  function close(sessionId: string): void {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    sessions.delete(sessionId);
+    session.pty.kill();
+  }
+
   return {
+    close,
     open({ spec, file, accountId, cols, rows }) {
       const sessionId = randomUUID();
       const pty = deps.spawnPty({
@@ -82,14 +90,8 @@ export function createSessionManager(deps: {
       const size = clampSize(cols, rows);
       sessions.get(sessionId)?.pty.resize(size.cols, size.rows);
     },
-    close(sessionId) {
-      const session = sessions.get(sessionId);
-      if (!session) return;
-      sessions.delete(sessionId);
-      session.pty.kill();
-    },
     closeAll() {
-      for (const sessionId of [...sessions.keys()]) this.close(sessionId);
+      for (const sessionId of [...sessions.keys()]) close(sessionId);
     },
     accountsInUse() {
       return new Set([...sessions.values()].map((session) => session.accountId));

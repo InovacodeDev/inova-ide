@@ -108,6 +108,30 @@ test('closeAll kills every open session', () => {
   expect(manager.accountsInUse().size).toBe(0);
 });
 
+test('closeAll works when detached from the manager', () => {
+  const { manager, ptys } = setup();
+  openSession(manager);
+  const { closeAll } = manager;
+  expect(() => closeAll()).not.toThrow();
+  expect(ptys[0]?.kill).toHaveBeenCalledTimes(1);
+});
+
+test('exit after close does not throw and emits exit at most once', () => {
+  const { manager, ptys, events } = setup();
+  const id = openSession(manager);
+  manager.close(id);
+  expect(() => ptys[0]?.emitExit(0)).not.toThrow();
+  expect(events.exit.mock.calls.length).toBeLessThanOrEqual(1);
+});
+
+test('close after exit does not kill the process', () => {
+  const { manager, ptys } = setup();
+  const id = openSession(manager);
+  ptys[0]?.emitExit(0);
+  manager.close(id);
+  expect(ptys[0]?.kill).not.toHaveBeenCalled();
+});
+
 test('unknown session ids are ignored', () => {
   const { manager, calls, ptys } = setup();
   expect(() => {
