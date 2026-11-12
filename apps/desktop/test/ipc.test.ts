@@ -94,6 +94,17 @@ test('valid pty payloads are forwarded', () => {
   expect(sessions.close).toHaveBeenCalledWith('s');
 });
 
+test('a failing pty close is logged, not thrown into the main process', () => {
+  const { sessions } = setup();
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  sessions.close.mockImplementationOnce(() => {
+    throw new Error('EPERM');
+  });
+  expect(() => send('inova:pty:close', trusted, 's')).not.toThrow();
+  expect(log).toHaveBeenCalledTimes(1);
+  log.mockRestore();
+});
+
 test('wrong-typed pty payloads are dropped', () => {
   const { sessions } = setup();
   send('inova:pty:write', trusted, 1, 'x');

@@ -61,6 +61,11 @@ export function registerIpc(deps: {
     if (request) sessions.resize(request);
   });
   listen(CHANNELS.ptyClose, (sessionId) => {
-    if (typeof sessionId === 'string') sessions.close(sessionId);
+    if (typeof sessionId !== 'string') return;
+    try {
+      sessions.close(sessionId);
+    } catch (error: unknown) {
+      console.error(`inova: failed to close session ${sessionId}`, error);
+    }
   });
 }

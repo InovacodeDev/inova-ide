@@ -67,13 +67,19 @@ function createWindow(): void {
     if (!isAppUrl(url, appUrl)) event.preventDefault();
   });
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
-  window.webContents.on('did-navigate', () => void sessions.closeAll());
-  window.webContents.on('render-process-gone', () => void sessions.closeAll());
+  window.webContents.on('did-navigate', () => void closeAllSessions());
+  window.webContents.on('render-process-gone', () => void closeAllSessions());
   mainWindow = window;
   window.loadURL(appUrl).catch((error: unknown) => {
     console.error('inova: failed to load', appUrl, error instanceof Error ? error.message : error);
     dialog.showErrorBox('Inova', 'Não foi possível carregar a interface.');
     app.quit();
+  });
+}
+
+function closeAllSessions(): Promise<void> {
+  return sessions.closeAll().catch((error: unknown) => {
+    console.error('inova: closeAll failed', error);
   });
 }
 
@@ -130,7 +136,7 @@ app.on('before-quit', (event) => {
   if (shuttingDown) return;
   shuttingDown = true;
   event.preventDefault();
-  void sessions.closeAll().finally(() => app.quit());
+  void closeAllSessions().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => app.quit());
