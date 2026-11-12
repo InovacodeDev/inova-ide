@@ -46,7 +46,6 @@ describe('buildChatTurn', () => {
   const baseEnv = { ANTHROPIC_API_KEY: 'k', PATH: '/bin' };
   const claudeBase = [
     '-p',
-    'hi',
     '--output-format',
     'stream-json',
     '--verbose',
@@ -55,8 +54,7 @@ describe('buildChatTurn', () => {
     'acceptEdits',
   ];
   const geminiBase = [
-    '-p',
-    'hi',
+    '--prompt=hi',
     '-o',
     'stream-json',
     '--approval-mode',
@@ -76,15 +74,28 @@ describe('buildChatTurn', () => {
       ...claudeBase,
       '--session-id',
       's1',
+      '--',
+      'hi',
     ]);
     expect(argsFor(claudeAccount, { mode: 'resume', providerSessionId: 'p1' })).toEqual([
       ...claudeBase,
       '--resume',
       'p1',
+      '--',
+      'hi',
     ]);
     expect(
       argsFor(claudeAccount, { mode: 'fork', parentProviderSessionId: 'p1', sessionId: 's2' }),
-    ).toEqual([...claudeBase, '--resume', 'p1', '--fork-session', '--session-id', 's2']);
+    ).toEqual([
+      ...claudeBase,
+      '--resume',
+      'p1',
+      '--fork-session',
+      '--session-id',
+      's2',
+      '--',
+      'hi',
+    ]);
   });
 
   it('builds gemini args for each mode', () => {
@@ -130,10 +141,27 @@ describe('buildChatTurn', () => {
     ]);
   });
 
-  it('keeps a dash-leading prompt as the -p value for claude', () => {
-    const args = argsFor(claudeAccount, { mode: 'new', sessionId: 's1' }, '--evil');
-    expect(args.slice(0, 2)).toEqual(['-p', '--evil']);
+  it.each([
+    '--version',
+    '--dangerously-skip-permissions',
+    '--print',
+    'a=b',
+    'line1\n--flag\nline3',
+  ])('passes the claude prompt %j after the -- terminator', (prompt) => {
+    const args = argsFor(claudeAccount, { mode: 'new', sessionId: 's1' }, prompt);
+    expect(args.slice(-2)).toEqual(['--', prompt]);
+    expect(args.slice(0, -2)).not.toContain(prompt);
+    expect(args[0]).toBe('-p');
   });
+
+  it.each(['--version', '-y', 'a=b', 'line1\n--flag\nline3', ''])(
+    'binds the gemini prompt %j inside one --prompt= argument',
+    (prompt) => {
+      const args = argsFor(geminiAccount, { mode: 'new', sessionId: 's1' }, prompt);
+      expect(args[0]).toBe(`--prompt=${prompt}`);
+      expect(args.filter((arg) => arg === prompt && prompt !== '')).toEqual([]);
+    },
+  );
 
   it('keeps env isolation and cwd', () => {
     const spec = buildChatTurn({

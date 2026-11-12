@@ -38,7 +38,6 @@ export type ChatTurn =
 function claudeTurnArgs(prompt: string, turn: ChatTurn): string[] {
   const base = [
     '-p',
-    prompt,
     '--output-format',
     'stream-json',
     '--verbose',
@@ -46,11 +45,12 @@ function claudeTurnArgs(prompt: string, turn: ChatTurn): string[] {
     '--permission-mode',
     'acceptEdits',
   ];
+  const tail = ['--', prompt];
   switch (turn.mode) {
     case 'new':
-      return [...base, '--session-id', turn.sessionId];
+      return [...base, '--session-id', turn.sessionId, ...tail];
     case 'resume':
-      return [...base, '--resume', turn.providerSessionId];
+      return [...base, '--resume', turn.providerSessionId, ...tail];
     case 'fork':
       return [
         ...base,
@@ -59,12 +59,20 @@ function claudeTurnArgs(prompt: string, turn: ChatTurn): string[] {
         '--fork-session',
         '--session-id',
         turn.sessionId,
+        ...tail,
       ];
   }
 }
 
 function geminiTurnArgs(prompt: string, turn: ChatTurn): string[] {
-  const base = ['-p', prompt, '-o', 'stream-json', '--approval-mode', 'auto_edit', '--skip-trust'];
+  const base = [
+    `--prompt=${prompt}`,
+    '-o',
+    'stream-json',
+    '--approval-mode',
+    'auto_edit',
+    '--skip-trust',
+  ];
   if (turn.mode === 'resume') return [...base, '--resume', turn.providerSessionId];
   return [...base, '--session-id', turn.sessionId];
 }
