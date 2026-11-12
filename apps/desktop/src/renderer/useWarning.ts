@@ -1,26 +1,35 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Result } from '../shared/api';
 
 const WARNING_MS = 6000;
 
 export function useWarning() {
-  const [warning, setWarning] = useState<string | null>(null);
+  const [current, setCurrent] = useState<{ id: number; message: string } | null>(null);
+  const nextId = useRef(0);
+
+  const setWarning = useCallback((message: string | null) => {
+    nextId.current += 1;
+    setCurrent(message === null ? null : { id: nextId.current, message });
+  }, []);
 
   useEffect(() => {
-    if (!warning) return;
-    const timer = setTimeout(() => setWarning(null), WARNING_MS);
+    if (!current) return;
+    const timer = setTimeout(() => setCurrent(null), WARNING_MS);
     return () => clearTimeout(timer);
-  }, [warning]);
+  }, [current]);
 
-  const guard = useCallback(async <T>(action: () => Promise<T>): Promise<T | undefined> => {
-    try {
-      return await action();
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      setWarning(`Erro inesperado: ${message}`);
-      return undefined;
-    }
-  }, []);
+  const guard = useCallback(
+    async <T>(action: () => Promise<T>): Promise<T | undefined> => {
+      try {
+        return await action();
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        setWarning(`Erro inesperado: ${message}`);
+        return undefined;
+      }
+    },
+    [setWarning],
+  );
 
   const call = useCallback(
     async <T>(action: () => Promise<Result<T>>): Promise<{ value: T } | undefined> => {
@@ -32,10 +41,10 @@ export function useWarning() {
       }
       return { value: result.value };
     },
-    [guard],
+    [guard, setWarning],
   );
 
-  const dismiss = useCallback(() => setWarning(null), []);
+  const dismiss = useCallback(() => setWarning(null), [setWarning]);
 
-  return { warning, dismiss, guard, call };
+  return { warning: current?.message ?? null, dismiss, guard, call };
 }
