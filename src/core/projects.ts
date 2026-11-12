@@ -1,16 +1,39 @@
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
-import { sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
 import { loadStore, saveStore } from './store.js';
 import type { Project, Store } from './types.js';
+
+export class PathNotFoundError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super(`Caminho não encontrado: ${path}`);
+    this.name = 'PathNotFoundError';
+    this.path = path;
+  }
+}
+
+function isMissingPath(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
+export async function realPathOf(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error: unknown) {
+    if (isMissingPath(error)) throw new PathNotFoundError(path);
+    throw error;
+  }
+}
 
 export async function bindProject(ctx: {
   root: string;
   path: string;
   accountLabel: string;
 }): Promise<Project> {
-  const path = await realpath(ctx.path);
+  const path = await realPathOf(ctx.path);
   const store = await loadStore(ctx.root);
   const account = findAccount(store, ctx.accountLabel);
   if (!account) throw new AccountError('not-found', `Account not found: ${ctx.accountLabel}`);
@@ -27,7 +50,10 @@ export async function bindProject(ctx: {
 }
 
 export async function unbindProject(ctx: { root: string; path: string }): Promise<void> {
-  const path = await realpath(ctx.path);
+  const path = await realPathOf(ctx.path).catch((error: unknown) => {
+    if (error instanceof PathNotFoundError) return resolve(ctx.path);
+    throw error;
+  });
   const store = await loadStore(ctx.root);
   const remaining = store.projects.filter((project) => project.path !== path);
   if (remaining.length === store.projects.length) return;

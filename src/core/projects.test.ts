@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, realpath } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AccountError, addAccount } from './accounts.js';
-import { bindProject, resolveProject, unbindProject } from './projects.js';
+import { bindProject, PathNotFoundError, resolveProject, unbindProject } from './projects.js';
 import { loadStore } from './store.js';
 import type { Store } from './types.js';
 
@@ -67,11 +67,14 @@ describe('bindProject', () => {
     expect((err as AccountError).code).toBe('not-found');
   });
 
-  it('rejects a path that does not exist', async () => {
+  it('rejects a path that does not exist with PathNotFoundError', async () => {
     await addAccount({ root, provider: 'claude', label: 'work' });
-    await expect(
-      bindProject({ root, path: join(root, 'missing'), accountLabel: 'work' }),
-    ).rejects.toThrow();
+    const missing = join(root, 'missing');
+    const err = await bindProject({ root, path: missing, accountLabel: 'work' }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(PathNotFoundError);
+    expect((err as PathNotFoundError).message).toBe(`Caminho não encontrado: ${missing}`);
   });
 });
 
@@ -82,5 +85,13 @@ describe('unbindProject', () => {
     await unbindProject({ root, path: workDir });
     expect((await loadStore(root)).projects).toEqual([]);
     await expect(unbindProject({ root, path: workDir })).resolves.toBeUndefined();
+  });
+
+  it('unbinds a project whose folder no longer exists', async () => {
+    await addAccount({ root, provider: 'claude', label: 'work' });
+    await bindProject({ root, path: workDir, accountLabel: 'work' });
+    await rm(workDir, { recursive: true });
+    await unbindProject({ root, path: workDir });
+    expect((await loadStore(root)).projects).toEqual([]);
   });
 });

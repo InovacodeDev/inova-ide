@@ -1,13 +1,13 @@
-import { realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { buildLaunch } from './core/launch.js';
-import { bindProject, resolveProject, unbindProject } from './core/projects.js';
+import { bindProject, realPathOf, resolveProject, unbindProject } from './core/projects.js';
 import { loadStore } from './core/store.js';
 import { launch, need, root } from './cli-context.js';
 import type { Context } from './cli-context.js';
 
 export async function projectBind(ctx: Context, args: string[]): Promise<number> {
   const accountLabel = need(args[0]);
-  await bindProject({ root: root(ctx), path: args[1] ?? ctx.cwd, accountLabel });
+  await bindProject({ root: root(ctx), path: resolve(ctx.cwd, args[1] ?? '.'), accountLabel });
   return 0;
 }
 
@@ -26,7 +26,7 @@ export async function projectList(ctx: Context): Promise<number> {
 }
 
 export async function runProject(ctx: Context, args: string[]): Promise<number> {
-  const cwd = await realpath(ctx.cwd);
+  const cwd = await realPathOf(ctx.cwd);
   const store = await loadStore(root(ctx));
   const project = resolveProject(store, cwd);
   const account = store.accounts.find((item) => item.id === project?.accountId);

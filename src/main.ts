@@ -2,6 +2,7 @@ import { accountAdd, accountList, accountLogin, accountRm } from './account-comm
 import { USAGE, UsageError } from './cli-context.js';
 import type { Context } from './cli-context.js';
 import { AccountError } from './core/accounts.js';
+import { PathNotFoundError } from './core/projects.js';
 import { StoreCorruptError } from './core/store.js';
 import { projectBind, projectList, projectUnbind, runProject } from './project-commands.js';
 
@@ -39,6 +40,7 @@ export async function main(ctx: Context): Promise<number> {
   } catch (error: unknown) {
     if (
       error instanceof AccountError ||
+      error instanceof PathNotFoundError ||
       error instanceof StoreCorruptError ||
       error instanceof UsageError
     ) {
