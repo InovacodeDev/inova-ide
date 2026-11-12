@@ -330,11 +330,151 @@ test('transcript keeps event order, skips deltas and invalid lines', async () =>
   expect(loaded).toEqual(events.filter((event) => event.kind !== 'text-delta'));
 });
 
-test('openProject reports an unknown project', async () => {
-  const { handlers, open } = await setup();
-  const result = await handlers.openProject({ projectId: 'nope', cols: 80, rows: 24 });
-  expect(result).toEqual({ ok: false, message: 'Projeto não encontrado.' });
-  expect(open).not.toHaveBeenCalled();
+test('loadTranscript returns an empty list when no transcript exists', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([]);
+  expect(await handlers.loadTranscript({ sessionId: '../x' })).toEqual(INVALID);
+});
+
+test('session crud maps session errors to Portuguese', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  expect(unwrap(await handlers.listSessions({ projectId: project.id }))).toEqual([session]);
+  const child = unwrap(
+    await handlers.createSession({ projectId: project.id, parentId: session.id }),
+  );
+  expect(child).toMatchObject({ parentId: session.id, title: 'Subsessão' });
+  const renamed = unwrap(await handlers.renameSession({ sessionId: child.id, title: '  Novo ' }));
+  expect(renamed.title).toBe('Novo');
+  expect(await handlers.createSession({ projectId: 'nope' })).toEqual({
+    ok: false,
+    message: 'Projeto não encontrado.',
+  });
+  expect(await handlers.createSession({ projectId: project.id, parentId: 'nope' })).toEqual({
+    ok: false,
+    message: 'Sessão pai não encontrada.',
+  });
+  expect(await handlers.renameSession({ sessionId: 'ghost', title: 'x' })).toEqual({
+    ok: false,
+    message: 'Sessão não encontrada.',
+  });
+  expect(await handlers.renameSession({ sessionId: child.id, title: 'a'.repeat(201) })).toEqual({
+    ok: false,
+    message: 'O título deve ter de 1 a 200 caracteres.',
+  });
+});
+
+test('deleteSession removes the subtree and its transcripts', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: session.id });
+  const other = await createSession({ root, projectId: project.id });
+  for (const item of [session, child, other]) {
+    handlers.handleChatEvent(item.id, { kind: 'user', text: 'oi', at: 't' });
+    await handlers.loadTranscript({ sessionId: item.id });
+  }
+  expect(unwrap(await handlers.deleteSession({ sessionId: session.id }))).toBeNull();
+  expect((await loadStore(root)).sessions?.map((item) => item.id)).toEqual([other.id]);
+  const files = await readdir(join(root, 'sessions'));
+  expect(files).toEqual([`${other.id}.jsonl`]);
+  expect(await handlers.deleteSession({ sessionId: session.id })).toEqual({
+    ok: false,
+    message: 'Sessão não encontrada.',
+  });
+});
+
+test('deleteSession refuses when the session or a descendant is running', async () => {
+  const { root, running, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: session.id });
+  running.add(child.id);
+  expect(await handlers.deleteSession({ sessionId: session.id })).toEqual({
+    ok: false,
+    message: 'Pare o turno em andamento antes de apagar.',
+  });
+  expect((await loadStore(root)).sessions).toHaveLength(2);
+});
+
+test('cancelTurn forwards to the runner', async () => {
+  const { cancel, handlers } = await setup();
+  handlers.cancelTurn('s1');
+  expect(cancel).toHaveBeenCalledWith('s1');
+});
+
+test('getUsage returns the api snapshot', async () => {
+  const { root, fetch, handlers } = await setup();
+  const { account } = await seedSession(root);
+  await writeFile(
+    join(account.homeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token' } }),
+  );
+  fetch.mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => ({ five_hour: { utilization: 42, resets_at: null } }),
+  });
+  const snapshot = unwrap(await handlers.getUsage({ accountLabel: 'pessoal' }));
+  expect(snapshot).toMatchObject({
+    source: 'api',
+    windows: [{ kind: 'session', usedPercent: 42 }],
+  });
+});
+
+test('getUsage reports errors in Portuguese without leaking the token', async () => {
+  const { root, fetch, handlers } = await setup();
+  const { account } = await seedSession(root);
+  expect(await handlers.getUsage({ accountLabel: 'pessoal' })).toEqual({
+    ok: false,
+    message: 'Não foi possível ler o consumo: credenciais não encontradas.',
+  });
+  await writeFile(
+    join(account.homeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token' } }),
+  );
+  fetch.mockResolvedValue({ ok: false, status: 429, json: async () => ({}) });
+  expect(await handlers.getUsage({ accountLabel: 'pessoal' })).toEqual({
+    ok: false,
+    message: 'Não foi possível ler o consumo (HTTP 429).',
+  });
+  fetch.mockRejectedValue(new Error('network secret-token'));
+  const network = await handlers.getUsage({ accountLabel: 'pessoal' });
+  expect(network).toEqual({ ok: false, message: 'Não foi possível ler o consumo.' });
+  expect(await handlers.getUsage({ accountLabel: 'ghost' })).toEqual({
+    ok: false,
+    message: 'Conta não encontrada: ghost.',
+  });
+});
+
+test('getUsage falls back to the cached stream snapshot for claude', async () => {
+  const { root, fetch, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  const windows = [{ kind: 'session' as const, usedPercent: 10, resetsAt: null }];
+  handlers.handleChatEvent(session.id, { kind: 'usage-limits', windows });
+  fetch.mockRejectedValue(new Error('offline'));
+  expect(unwrap(await handlers.getUsage({ accountLabel: 'pessoal' }))).toEqual({
+    provider: 'claude',
+    windows,
+    source: 'stream',
+    fetchedAt: '2026-01-01T00:00:00.000Z',
+  });
+});
+
+test('unbindProject refuses while a project session is running', async () => {
+  const { root, running, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  running.add(session.id);
+  expect(await handlers.unbindProject({ path: project.path })).toEqual({
+    ok: false,
+    message: 'Pare os turnos deste projeto antes de desvinculá-lo.',
+  });
+  expect((await loadStore(root)).projects).toHaveLength(1);
+  running.clear();
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'oi', at: 't' });
+  expect(unwrap(await handlers.unbindProject({ path: project.path }))).toBeNull();
+  expect((await loadStore(root)).projects).toEqual([]);
+  expect(await readdir(join(root, 'sessions'))).toEqual([]);
 });
 
 test('openLogin runs the login args in the account home', async () => {
