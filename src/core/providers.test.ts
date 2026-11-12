@@ -93,6 +93,36 @@ describe('providers', () => {
     expect(await readFile(file, 'utf8')).toBe('custom = 1\n');
   });
 
+  it('claude prepareLaunch marks onboarding done and keeps other keys', async () => {
+    const file = join(homeDir, '.claude.json');
+    await writeFile(file, JSON.stringify({ userID: 'u1', nested: { a: 1 } }));
+    await providers.claude.prepareLaunch(homeDir);
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({
+      userID: 'u1',
+      nested: { a: 1 },
+      hasCompletedOnboarding: true,
+    });
+  });
+
+  it('claude prepareLaunch creates nothing when the account never logged in', async () => {
+    await providers.claude.prepareLaunch(homeDir);
+    await expect(readFile(join(homeDir, '.claude.json'))).rejects.toThrow(/ENOENT/);
+  });
+
+  it('claude prepareLaunch leaves an onboarded file byte for byte', async () => {
+    const file = join(homeDir, '.claude.json');
+    const original = '{"hasCompletedOnboarding":true,  "x":1}';
+    await writeFile(file, original);
+    await providers.claude.prepareLaunch(homeDir);
+    expect(await readFile(file, 'utf8')).toBe(original);
+  });
+
+  it('codex and gemini prepareLaunch do not touch the home', async () => {
+    await providers.codex.prepareLaunch(homeDir);
+    await providers.gemini.prepareLaunch(homeDir);
+    await expect(readFile(join(homeDir, '.claude.json'))).rejects.toThrow(/ENOENT/);
+  });
+
   it('isProviderId accepts only known providers', () => {
     expect(isProviderId('claude')).toBe(true);
     expect(isProviderId('other')).toBe(false);

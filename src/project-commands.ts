@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { buildLaunch } from './core/launch.js';
 import { bindProject, realPathOf, resolveProject, unbindProject } from './core/projects.js';
+import { providers } from './core/providers.js';
 import { loadStore } from './core/store.js';
 import { launch, need, root } from './cli-context.js';
 import type { Context } from './cli-context.js';
@@ -34,5 +35,6 @@ export async function runProject(ctx: Context, args: string[]): Promise<number> 
     ctx.io.err(`Nenhum projeto vinculado a ${cwd}. Rode: inova project bind <label>`);
     return 2;
   }
+  await providers[account.provider].prepareLaunch(account.homeDir);
   return launch(ctx, buildLaunch({ account, cwd: ctx.cwd, args, baseEnv: ctx.env }));
 }

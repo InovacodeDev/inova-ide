@@ -1,4 +1,4 @@
-import { access, writeFile } from 'node:fs/promises';
+import { access, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ProviderId } from './types.js';
 
@@ -22,6 +22,7 @@ export interface ProviderAdapter {
   loginArgs: readonly string[];
   installHint: string;
   initHome(homeDir: string): Promise<void>;
+  prepareLaunch(homeDir: string): Promise<void>;
   checkStatus(ctx: {
     homeDir: string;
     env: NodeJS.ProcessEnv;
@@ -63,6 +64,23 @@ function parseClaudeStatus(stdout: string): AuthStatus {
   return 'unknown';
 }
 
+// NOTE: `claude auth login` never sets hasCompletedOnboarding, so interactive claude reruns onboarding + login.
+async function markClaudeOnboarded(homeDir: string): Promise<void> {
+  const file = join(homeDir, '.claude.json');
+  let raw: string;
+  try {
+    raw = await readFile(file, 'utf8');
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return;
+    throw error;
+  }
+  const config: unknown = JSON.parse(raw);
+  if (typeof config !== 'object' || config === null) return;
+  if ((config as Record<string, unknown>)['hasCompletedOnboarding'] === true) return;
+  await writeFile(`${file}.inova.tmp`, JSON.stringify({ ...config, hasCompletedOnboarding: true }));
+  await rename(`${file}.inova.tmp`, file);
+}
+
 const claude: ProviderAdapter = {
   id: 'claude',
   binary: 'claude',
@@ -71,6 +89,7 @@ const claude: ProviderAdapter = {
   loginArgs: ['auth', 'login'],
   installHint: 'pnpm add -g @anthropic-ai/claude-code',
   initHome: noop,
+  prepareLaunch: markClaudeOnboarded,
   async checkStatus(ctx) {
     const result = await runInHome(claude, ctx, ['auth', 'status', '--json']);
     return 'notFound' in result ? 'binary-missing' : parseClaudeStatus(result.stdout);
@@ -95,6 +114,7 @@ const codex: ProviderAdapter = {
   installHint: 'pnpm add -g @openai/codex',
   initHome: (homeDir) =>
     createFileIfMissing(join(homeDir, 'config.toml'), 'cli_auth_credentials_store = "file"\n'),
+  prepareLaunch: noop,
   async checkStatus(ctx) {
     const result = await runInHome(codex, ctx, ['login', 'status']);
     if ('notFound' in result) return 'binary-missing';
@@ -111,6 +131,7 @@ const gemini: ProviderAdapter = {
   loginArgs: [],
   installHint: 'pnpm add -g @google/gemini-cli',
   initHome: noop,
+  prepareLaunch: noop,
   async checkStatus(ctx) {
     const result = await runInHome(gemini, ctx, ['--version']);
     if ('notFound' in result) return 'binary-missing';
