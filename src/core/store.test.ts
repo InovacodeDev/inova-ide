@@ -100,7 +100,47 @@ describe('store', () => {
     providerSessionId: null,
     createdAt: '2026-01-01',
     updatedAt: '2026-01-01',
+    archivedAt: null,
   };
+
+  it('loadStore normalizes a missing archivedAt to null and keeps a set one', async () => {
+    const { archivedAt: _omitted, ...legacy } = goodSession;
+    const sessions = [legacy, { ...goodSession, id: 's2', archivedAt: '2026-02-01' }];
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [], sessions }),
+    );
+    const loaded = await loadStore(root);
+    expect(loaded.sessions?.map((item) => item.archivedAt)).toEqual([null, '2026-02-01']);
+  });
+
+  it('loadStore rejects a non-string archivedAt', async () => {
+    const sessions = [{ ...goodSession, archivedAt: 3 }];
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [], sessions }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
+
+  it('loadStore accepts a valid workspace and rejects malformed ones', async () => {
+    const base = { version: 1, accounts: [], projects: [] };
+    const workspace = { openSessionIds: ['a', 'b'], activeSessionId: 'a' };
+    await writeFile(join(root, 'store.json'), JSON.stringify({ ...base, workspace }));
+    expect((await loadStore(root)).workspace).toEqual(workspace);
+    const bad = [
+      'x',
+      { openSessionIds: 'a', activeSessionId: null },
+      { openSessionIds: ['a/b'], activeSessionId: null },
+      { openSessionIds: [1], activeSessionId: null },
+      { openSessionIds: ['a'], activeSessionId: '..' },
+      { openSessionIds: ['a'] },
+    ];
+    for (const item of bad) {
+      await writeFile(join(root, 'store.json'), JSON.stringify({ ...base, workspace: item }));
+      await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+    }
+  });
 
   it('loadStore accepts a store without sessions and with valid sessions', async () => {
     await writeFile(

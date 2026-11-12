@@ -55,26 +55,53 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId } = value;
+  const { id, parentId, providerSessionId, archivedAt } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
     isStringOrNull(parentId) &&
-    isStringOrNull(providerSessionId)
+    isStringOrNull(providerSessionId) &&
+    (archivedAt === undefined || isStringOrNull(archivedAt))
+  );
+}
+
+function isSafeIdOrNull(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && isSafeSegment(value));
+}
+
+function isWorkspace(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const { openSessionIds, activeSessionId } = value;
+  return (
+    Array.isArray(openSessionIds) &&
+    openSessionIds.every((id) => typeof id === 'string' && isSafeSegment(id)) &&
+    isSafeIdOrNull(activeSessionId)
   );
 }
 
 function isStore(value: unknown): value is Store {
   if (!isRecord(value)) return false;
-  const { version, accounts, projects, sessions } = value;
+  const { version, accounts, projects, sessions, workspace } = value;
   return (
     version === 1 &&
     Array.isArray(accounts) &&
     accounts.every(isAccount) &&
     Array.isArray(projects) &&
     projects.every(isProject) &&
-    (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession)))
+    (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession))) &&
+    (workspace === undefined || isWorkspace(workspace))
   );
+}
+
+function normalizeSessions(store: Store): Store {
+  if (!store.sessions) return store;
+  return {
+    ...store,
+    sessions: store.sessions.map((session) => ({
+      ...session,
+      archivedAt: session.archivedAt ?? null,
+    })),
+  };
 }
 
 function isMissingFile(error: unknown): boolean {
@@ -97,7 +124,7 @@ export async function loadStore(root: string): Promise<Store> {
     throw new StoreCorruptError(file, 'invalid JSON');
   }
   if (!isStore(parsed)) throw new StoreCorruptError(file, 'invalid shape');
-  return parsed;
+  return normalizeSessions(parsed);
 }
 
 export async function saveStore(root: string, store: Store): Promise<void> {

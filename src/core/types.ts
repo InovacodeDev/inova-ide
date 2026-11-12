@@ -22,6 +22,12 @@ export interface Session {
   providerSessionId: string | null;
   createdAt: string;
   updatedAt: string;
+  archivedAt: string | null;
+}
+
+export interface Workspace {
+  openSessionIds: string[];
+  activeSessionId: string | null;
 }
 
 export interface Store {
@@ -29,4 +35,5 @@ export interface Store {
   accounts: Account[];
   projects: Project[];
   sessions?: Session[];
+  workspace?: Workspace;
 }
