@@ -29,6 +29,10 @@ export interface ProviderAdapter {
 
 type StatusContext = Parameters<ProviderAdapter['checkStatus']>[0];
 
+function isMissingFile(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
+}
+
 async function noop(): Promise<void> {}
 
 function runInHome(
@@ -109,7 +113,7 @@ const gemini: ProviderAdapter = {
     if ('notFound' in result) return 'binary-missing';
     return access(join(ctx.homeDir, '.gemini', 'oauth_creds.json')).then(
       () => 'logged-in',
-      () => 'logged-out',
+      (error: unknown) => (isMissingFile(error) ? 'logged-out' : 'unknown'),
     );
   },
 };

@@ -72,6 +72,12 @@ describe('providers', () => {
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
   });
 
+  it('gemini status is unknown when access fails with a non-ENOENT error', async () => {
+    const { runner } = fakeRunner({ exitCode: 0, stdout: '' });
+    await writeFile(join(homeDir, '.gemini'), '');
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('unknown');
+  });
+
   it('codex initHome writes file credential store and keeps existing config.toml', async () => {
     await providers.codex.initHome(homeDir);
     const file = join(homeDir, 'config.toml');
