@@ -1,30 +1,101 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { createHighlighter, type Highlighter } from 'shiki';
+import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core';
+import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 
-const THEME = 'catppuccin-mocha';
 const LANG_CLASS = /language-([\w+#-]+)/;
+const CACHE_LIMIT = 100;
 
-let highlighterPromise: Promise<Highlighter> | null = null;
+const LANG_LOADERS: Record<string, () => LanguageInput> = {
+  typescript: () => import('shiki/langs/typescript.mjs'),
+  tsx: () => import('shiki/langs/tsx.mjs'),
+  javascript: () => import('shiki/langs/javascript.mjs'),
+  jsx: () => import('shiki/langs/jsx.mjs'),
+  json: () => import('shiki/langs/json.mjs'),
+  shellscript: () => import('shiki/langs/shellscript.mjs'),
+  python: () => import('shiki/langs/python.mjs'),
+  go: () => import('shiki/langs/go.mjs'),
+  rust: () => import('shiki/langs/rust.mjs'),
+  dart: () => import('shiki/langs/dart.mjs'),
+  java: () => import('shiki/langs/java.mjs'),
+  kotlin: () => import('shiki/langs/kotlin.mjs'),
+  swift: () => import('shiki/langs/swift.mjs'),
+  c: () => import('shiki/langs/c.mjs'),
+  cpp: () => import('shiki/langs/cpp.mjs'),
+  csharp: () => import('shiki/langs/csharp.mjs'),
+  css: () => import('shiki/langs/css.mjs'),
+  scss: () => import('shiki/langs/scss.mjs'),
+  html: () => import('shiki/langs/html.mjs'),
+  xml: () => import('shiki/langs/xml.mjs'),
+  yaml: () => import('shiki/langs/yaml.mjs'),
+  toml: () => import('shiki/langs/toml.mjs'),
+  sql: () => import('shiki/langs/sql.mjs'),
+  markdown: () => import('shiki/langs/markdown.mjs'),
+  diff: () => import('shiki/langs/diff.mjs'),
+  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
+  ruby: () => import('shiki/langs/ruby.mjs'),
+  php: () => import('shiki/langs/php.mjs'),
+};
 
-function getHighlighter(): Promise<Highlighter> {
-  highlighterPromise ??= createHighlighter({ themes: [THEME], langs: [] });
+const LANG_ALIASES: Record<string, string> = {
+  ts: 'typescript',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  bash: 'shellscript',
+  sh: 'shellscript',
+  shell: 'shellscript',
+  zsh: 'shellscript',
+  py: 'python',
+  rs: 'rust',
+  kt: 'kotlin',
+  'c++': 'cpp',
+  cs: 'csharp',
+  'c#': 'csharp',
+  yml: 'yaml',
+  md: 'markdown',
+  rb: 'ruby',
+  docker: 'dockerfile',
+  htm: 'html',
+};
+
+function canonicalLang(lang: string): string | null {
+  const key = lang.toLowerCase();
+  const name = LANG_ALIASES[key] ?? key;
+  return name in LANG_LOADERS ? name : null;
+}
+
+let highlighterPromise: Promise<HighlighterCore> | null = null;
+
+function getHighlighter(): Promise<HighlighterCore> {
+  highlighterPromise ??= createHighlighterCore({
+    themes: [import('shiki/themes/catppuccin-mocha.mjs')],
+    langs: [],
+    engine: createJavaScriptRegexEngine(),
+  });
   return highlighterPromise;
 }
 
-async function highlight(code: string, lang: string): Promise<string> {
+const htmlCache = new Map<string, string>();
+
+async function highlight(input: { code: string; lang: string }): Promise<string | null> {
+  const name = canonicalLang(input.lang);
+  if (name === null) return null;
+  const key = `${name}\u0000${input.code}`;
+  const cached = htmlCache.get(key);
+  if (cached !== undefined) return cached;
   const highlighter = await getHighlighter();
-  let resolved = 'text';
-  if (lang !== '' && lang !== 'text') {
-    try {
-      await highlighter.loadLanguage(lang as Parameters<Highlighter['loadLanguage']>[0]);
-      resolved = lang;
-    } catch {
-      resolved = 'text';
-    }
+  const loader = LANG_LOADERS[name];
+  if (loader === undefined) return null;
+  await highlighter.loadLanguage(loader());
+  const html = highlighter.codeToHtml(input.code, { lang: name, theme: 'catppuccin-mocha' });
+  if (htmlCache.size >= CACHE_LIMIT) {
+    const oldest = htmlCache.keys().next();
+    if (!oldest.done) htmlCache.delete(oldest.value);
   }
-  return highlighter.codeToHtml(code, { lang: resolved, theme: THEME });
+  htmlCache.set(key, html);
+  return html;
 }
 
 interface CodeBlockProps {
@@ -39,11 +110,12 @@ function CodeBlock({ lang, code }: CodeBlockProps) {
 
   useEffect(() => {
     let cancelled = false;
-    highlight(code, lang)
+    highlight({ code, lang })
       .then((result) => {
         if (!cancelled) setHtml(result);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
+        console.error('inova: syntax highlighting failed', error);
         if (!cancelled) setHtml(null);
       });
     return () => {
