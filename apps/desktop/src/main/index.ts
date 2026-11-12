@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { dataRoot } from '@inova/core/store';
@@ -6,6 +7,8 @@ import { nodeRunner } from '@inova/node-io';
 import { app, BrowserWindow, dialog } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
+import { createChatRunner } from './chat.js';
+import type { SpawnChild } from './chat.js';
 import { createHandlers } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { killProcessGroup } from './process-group.js';
@@ -50,6 +53,17 @@ const sessions = createSessionManager({
   },
 });
 
+const spawnChild: SpawnChild = ({ file, args, cwd, env }) =>
+  spawn(file, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+
+let handlers: ReturnType<typeof createHandlers> | undefined;
+
+const chat = createChatRunner({
+  spawnChild,
+  killTree: killProcessGroup,
+  emit: (sessionId, event) => handlers?.handleChatEvent(sessionId, event),
+});
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1200,
@@ -78,9 +92,10 @@ function createWindow(): void {
 }
 
 function closeAllSessions(): Promise<void> {
-  return sessions.closeAll().catch((error: unknown) => {
-    console.error('inova: closeAll failed', error);
-  });
+  const report = (error: unknown): void => console.error('inova: closeAll failed', error);
+  return Promise.all([sessions.closeAll().catch(report), chat.closeAll().catch(report)]).then(
+    () => undefined,
+  );
 }
 
 async function pickFolder(): Promise<string | null> {
@@ -110,14 +125,23 @@ async function runSelftest(): Promise<void> {
 
 void app.whenReady().then(async () => {
   if (process.env['INOVA_SELFTEST'] !== '1') {
-    const handlers = createHandlers({
+    const created = createHandlers({
       root: dataRoot(process.env),
       runner: nodeRunner,
       sessions,
+      chat,
+      usageDeps: {
+        platform: process.platform,
+        runner: nodeRunner,
+        fetch: (url, init) => globalThis.fetch(url, init),
+        now: () => new Date(),
+      },
+      emit: (sessionId, event) => sendToWindow(CHANNELS.chatEvent, { sessionId, event }),
       baseEnv,
       pickFolder,
     });
-    registerIpc({ handlers, sessions, allowedOrigin: appUrl });
+    handlers = created;
+    registerIpc({ handlers: created, sessions, allowedOrigin: appUrl });
     createWindow();
     return;
   }

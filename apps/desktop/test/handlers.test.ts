@@ -500,6 +500,19 @@ test('removeAccount refuses while a session of the account is open', async () =>
   expect((await loadStore(root)).accounts).toEqual([]);
 });
 
+test('removeAccount refuses while a chat turn of the account is running', async () => {
+  const { root, chatInUse, handlers } = await setup();
+  const { account } = await seedProject(root);
+  chatInUse.add(account.id);
+  expect(await handlers.removeAccount({ label: 'pessoal', force: true })).toEqual({
+    ok: false,
+    message: 'Pare os turnos desta conta antes de removê-la.',
+  });
+  expect((await loadStore(root)).accounts).toHaveLength(1);
+  chatInUse.clear();
+  expect(unwrap(await handlers.removeAccount({ label: 'pessoal', force: true }))).toBeNull();
+});
+
 test('bindProject maps PathNotFoundError to a message', async () => {
   const { root, handlers } = await setup();
   await addAccount({ root, provider: 'claude', label: 'pessoal' });
