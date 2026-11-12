@@ -119,6 +119,79 @@ function decideTurn(input: { session: Session; parent: Session | undefined; clau
 }
 
 export function createHandlers(deps: HandlerDeps) {
+  const transcriptDir = join(deps.root, 'sessions');
+  const transcriptChains = new Map<string, Promise<void>>();
+  const streamUsage = new Map<string, UsageSnapshot>();
+  const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
+  let storeQueue: Promise<unknown> = Promise.resolve();
+
+  function serialized<T>(work: () => Promise<T>): Promise<T> {
+    const run = storeQueue.then(() => work());
+    storeQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  const transcriptPath = (sessionId: string): string => join(transcriptDir, `${sessionId}.jsonl`);
+
+  function enqueueAppend(sessionId: string, event: ChatEvent): void {
+    const previous = transcriptChains.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .then(async () => {
+        await mkdir(transcriptDir, { recursive: true, mode: 0o700 });
+        await appendFile(transcriptPath(sessionId), `${JSON.stringify(event)}\n`, { mode: 0o600 });
+      })
+      .catch((error: unknown) => {
+        console.error(`inova: failed to append transcript of ${sessionId}`, error);
+      });
+    transcriptChains.set(sessionId, next);
+    void next.then(() => {
+      if (transcriptChains.get(sessionId) === next) transcriptChains.delete(sessionId);
+    });
+  }
+
+  async function flushTranscript(sessionId: string): Promise<void> {
+    await transcriptChains.get(sessionId);
+  }
+
+  async function removeTranscripts(sessionIds: readonly string[]): Promise<void> {
+    await Promise.all(
+      sessionIds.map(async (sessionId) => {
+        await flushTranscript(sessionId);
+        await rm(transcriptPath(sessionId), { force: true });
+      }),
+    );
+  }
+
+  function adoptProviderSession(input: { sessionId: string; providerSessionId: string }): void {
+    const { sessionId, providerSessionId } = input;
+    void serialized(async () => {
+      const session = requireSession(await loadStore(deps.root), sessionId);
+      if (session.providerSessionId === null) {
+        await updateSession({ root: deps.root, sessionId, patch: { providerSessionId } });
+      }
+    }).catch((error: unknown) => {
+      console.error(`inova: failed to store provider session of ${sessionId}`, error);
+    });
+  }
+
+  function handleChatEvent(sessionId: string, event: ChatEvent): void {
+    deps.emit(sessionId, event);
+    if (event.kind !== 'text-delta') enqueueAppend(sessionId, event);
+    if (event.kind === 'session') {
+      adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
+    }
+    const owner = turnOwners.get(sessionId);
+    if (event.kind === 'usage-limits' && owner) {
+      streamUsage.set(owner.accountId, {
+        provider: owner.provider,
+        windows: event.windows,
+        source: 'stream',
+        fetchedAt: deps.usageDeps.now().toISOString(),
+      });
+    }
+    if (event.kind === 'done') turnOwners.delete(sessionId);
+  }
+
   async function accountView(account: Account): Promise<AccountView> {
     const baseEnv = await deps.baseEnv();
     const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
@@ -146,11 +219,9 @@ export function createHandlers(deps: HandlerDeps) {
     }
   }
 
-  async function startSession(input: {
+  async function startLogin(input: {
     account: Account;
-    title: string;
     size: Size;
-    buildSpec: (baseEnv: NodeJS.ProcessEnv) => Promise<LaunchSpec>;
   }): Promise<Result<OpenedSession>> {
     const adapter = providers[input.account.provider];
     const baseEnv = await deps.baseEnv();
@@ -158,17 +229,63 @@ export function createHandlers(deps: HandlerDeps) {
     if (file === undefined) {
       return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
     }
-    const spec = await input.buildSpec(baseEnv);
+    const spec: LaunchSpec = buildLogin({ account: input.account, baseEnv });
     const sessionId = deps.sessions.open({
       spec,
       file,
       accountId: input.account.id,
       ...input.size,
     });
-    return ok({ sessionId, title: input.title });
+    return ok({ sessionId, title: `login · ${input.account.label}` });
+  }
+
+  async function runTurn(input: {
+    sessionId: string;
+    prompt: string;
+    account: Account;
+    projectPath: string;
+    file: string;
+    baseEnv: NodeJS.ProcessEnv;
+  }): Promise<Result<null>> {
+    const { sessionId, prompt, account } = input;
+    const store = await loadStore(deps.root);
+    const session = requireSession(store, sessionId);
+    const parent = sessionsOf(store).find((item) => item.id === session.parentId);
+    const { turn, newId } = decideTurn({
+      session,
+      parent,
+      claude: account.provider === 'claude',
+    });
+    const persistNow = account.provider !== 'codex' && newId !== null;
+    await updateSession({
+      root: deps.root,
+      sessionId,
+      patch: {
+        ...(persistNow ? { providerSessionId: newId } : {}),
+        ...(DEFAULT_TITLES.has(session.title) ? { title: titleFromPrompt(prompt) } : {}),
+      },
+    });
+    const spec = buildChatTurn({
+      account,
+      cwd: input.projectPath,
+      prompt,
+      turn,
+      baseEnv: input.baseEnv,
+    });
+    turnOwners.set(sessionId, { accountId: account.id, provider: account.provider });
+    handleChatEvent(sessionId, { kind: 'user', text: prompt, at: new Date().toISOString() });
+    deps.chat.send({
+      sessionId,
+      accountId: account.id,
+      provider: account.provider,
+      file: input.file,
+      spec,
+    });
+    return ok(null);
   }
 
   return {
+    handleChatEvent,
     listAccounts: (): Promise<Result<AccountView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
@@ -180,10 +297,18 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     removeAccount: (input: unknown): Promise<Result<null>> =>
       validated(input, parseRemoval, async ({ label, force }) => {
-        const account = findAccount(await loadStore(deps.root), label);
+        const store = await loadStore(deps.root);
+        const account = findAccount(store, label);
         if (account && deps.sessions.accountsInUse().has(account.id)) {
           return fail('Feche as abas desta conta antes de removê-la.');
         }
+        if (account && deps.chat.accountsInUse().has(account.id)) {
+          return fail('Pare os turnos desta conta antes de removê-la.');
+        }
+        const projectIds = new Set(
+          store.projects.filter((item) => item.accountId === account?.id).map((item) => item.id),
+        );
+        const orphaned = sessionIdsOfProjects(store, projectIds);
         await removeAccount({ root: deps.root, label, force });
         return ok(null);
       }),
