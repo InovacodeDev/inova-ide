@@ -123,6 +123,7 @@ export function createHandlers(deps: HandlerDeps) {
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
   const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
+  const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
   let storeQueue: Promise<unknown> = Promise.resolve();
 
   function serialized<T>(work: () => Promise<T>): Promise<T> {
@@ -174,12 +175,39 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  function discardProvisionalSession(input: {
+    sessionId: string;
+    providerSessionId: string;
+  }): void {
+    const { sessionId, providerSessionId } = input;
+    void serialized(async () => {
+      const session = requireSession(await loadStore(deps.root), sessionId);
+      if (session.providerSessionId === providerSessionId) {
+        await updateSession({ root: deps.root, sessionId, patch: { providerSessionId: null } });
+      }
+    }).catch((error: unknown) => {
+      console.error(`inova: failed to clear provider session of ${sessionId}`, error);
+    });
+  }
+
+  function trackProvisionalSession(sessionId: string, event: ChatEvent): void {
+    const provisional = provisionalSessions.get(sessionId);
+    if (!provisional) return;
+    if (event.kind === 'session') provisional.confirmed = true;
+    if (event.kind !== 'done') return;
+    provisionalSessions.delete(sessionId);
+    if (event.isError && !provisional.confirmed) {
+      discardProvisionalSession({ sessionId, providerSessionId: provisional.providerSessionId });
+    }
+  }
+
   function handleChatEvent(sessionId: string, event: ChatEvent): void {
     deps.emit(sessionId, event);
     if (event.kind !== 'text-delta') enqueueAppend(sessionId, event);
     if (event.kind === 'session') {
       adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
     }
+    trackProvisionalSession(sessionId, event);
     const owner = turnOwners.get(sessionId);
     if (event.kind === 'usage-limits' && owner) {
       streamUsage.set(owner.accountId, {
@@ -272,6 +300,9 @@ export function createHandlers(deps: HandlerDeps) {
       turn,
       baseEnv: input.baseEnv,
     });
+    if (persistNow && newId !== null) {
+      provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
+    }
     turnOwners.set(sessionId, { accountId: account.id, provider: account.provider });
     handleChatEvent(sessionId, { kind: 'user', text: prompt, at: new Date().toISOString() });
     deps.chat.send({
@@ -292,27 +323,30 @@ export function createHandlers(deps: HandlerDeps) {
         return ok(await Promise.all(store.accounts.map(savedAccountView)));
       }),
     addAccount: (input: unknown): Promise<Result<AccountView>> =>
-      validated(input, parseNewAccount, async ({ provider, label }) =>
-        ok(await savedAccountView(await addAccount({ root: deps.root, provider, label }))),
-      ),
-    removeAccount: (input: unknown): Promise<Result<null>> =>
-      validated(input, parseRemoval, async ({ label, force }) => {
-        const store = await loadStore(deps.root);
-        const account = findAccount(store, label);
-        if (account && deps.sessions.accountsInUse().has(account.id)) {
-          return fail('Feche as abas desta conta antes de removê-la.');
-        }
-        if (account && deps.chat.accountsInUse().has(account.id)) {
-          return fail('Pare os turnos desta conta antes de removê-la.');
-        }
-        const projectIds = new Set(
-          store.projects.filter((item) => item.accountId === account?.id).map((item) => item.id),
-        );
-        const orphaned = sessionIdsOfProjects(store, projectIds);
-        await removeAccount({ root: deps.root, label, force });
-        await removeTranscripts(orphaned);
-        return ok(null);
+      validated(input, parseNewAccount, async ({ provider, label }) => {
+        const account = await serialized(() => addAccount({ root: deps.root, provider, label }));
+        return ok(await savedAccountView(account));
       }),
+    removeAccount: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseRemoval, ({ label, force }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const account = findAccount(store, label);
+          if (account && deps.sessions.accountsInUse().has(account.id)) {
+            return fail('Feche as abas desta conta antes de removê-la.');
+          }
+          if (account && deps.chat.accountsInUse().has(account.id)) {
+            return fail('Pare os turnos desta conta antes de removê-la.');
+          }
+          const projectIds = new Set(
+            store.projects.filter((item) => item.accountId === account?.id).map((item) => item.id),
+          );
+          const orphaned = sessionIdsOfProjects(store, projectIds);
+          await removeAccount({ root: deps.root, label, force });
+          await removeTranscripts(orphaned);
+          return ok(null);
+        }),
+      ),
     listProjects: (): Promise<Result<ProjectView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
@@ -325,29 +359,33 @@ export function createHandlers(deps: HandlerDeps) {
       }),
     pickFolder: (): Promise<string | null> => deps.pickFolder(),
     bindProject: (input: unknown): Promise<Result<ProjectView>> =>
-      validated(input, parseBinding, async ({ path, accountLabel }) => {
-        const project = await bindProject({ root: deps.root, path, accountLabel });
-        const account = requireAccount(await loadStore(deps.root), accountLabel);
-        return ok(projectView(project, account));
-      }),
+      validated(input, parseBinding, ({ path, accountLabel }) =>
+        serialized(async () => {
+          const project = await bindProject({ root: deps.root, path, accountLabel });
+          const account = requireAccount(await loadStore(deps.root), accountLabel);
+          return ok(projectView(project, account));
+        }),
+      ),
     unbindProject: (input: unknown): Promise<Result<null>> =>
-      validated(input, parsePath, async ({ path }) => {
-        const resolved = await realPathOf(path).catch((error: unknown) => {
-          if (error instanceof PathNotFoundError) return resolve(path);
-          throw error;
-        });
-        const store = await loadStore(deps.root);
-        const projectIds = new Set(
-          store.projects.filter((item) => item.path === resolved).map((item) => item.id),
-        );
-        const orphaned = sessionIdsOfProjects(store, projectIds);
-        if (orphaned.some((sessionId) => deps.chat.isRunning(sessionId))) {
-          return fail('Pare os turnos deste projeto antes de desvinculá-lo.');
-        }
-        await unbindProject({ root: deps.root, path });
-        await removeTranscripts(orphaned);
-        return ok(null);
-      }),
+      validated(input, parsePath, ({ path }) =>
+        serialized(async () => {
+          const resolved = await realPathOf(path).catch((error: unknown) => {
+            if (error instanceof PathNotFoundError) return resolve(path);
+            throw error;
+          });
+          const store = await loadStore(deps.root);
+          const projectIds = new Set(
+            store.projects.filter((item) => item.path === resolved).map((item) => item.id),
+          );
+          const orphaned = sessionIdsOfProjects(store, projectIds);
+          if (orphaned.some((sessionId) => deps.chat.isRunning(sessionId))) {
+            return fail('Pare os turnos deste projeto antes de desvinculá-lo.');
+          }
+          await unbindProject({ root: deps.root, path });
+          await removeTranscripts(orphaned);
+          return ok(null);
+        }),
+      ),
     listSessions: (input: unknown): Promise<Result<Session[]>> =>
       validated(input, parseProjectRef, async ({ projectId }) => {
         const store = await loadStore(deps.root);
