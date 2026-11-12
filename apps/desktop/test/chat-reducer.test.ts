@@ -78,6 +78,7 @@ describe('chatReducer', () => {
     events: [
       { kind: 'user', text: 'oi', at: 'now' },
       { kind: 'text', blockId: 'b1', text: 'olá' },
+      { kind: 'done', isError: false, costUsd: null, durationMs: null },
     ],
   };
 
@@ -85,6 +86,34 @@ describe('chatReducer', () => {
     const state = chatReducer(initialChatState, loadAction);
     expect(state.running).toBe(false);
     expect(state.items).toHaveLength(2);
+  });
+
+  test('load marks a trailing user turn without done as interrupted', () => {
+    const state = chatReducer(initialChatState, {
+      type: 'load',
+      events: [
+        { kind: 'user', text: 'a', at: 'now' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: null },
+        { kind: 'user', text: 'b', at: 'now' },
+        { kind: 'text', blockId: 'b1', text: 'parcial' },
+      ],
+    });
+    expect(state.running).toBe(false);
+    expect(state.items.at(-1)).toMatchObject({
+      type: 'error',
+      message: 'Turno interrompido ao fechar o app.',
+    });
+  });
+
+  test('load does not flag a completed turn', () => {
+    const state = chatReducer(initialChatState, {
+      type: 'load',
+      events: [
+        { kind: 'user', text: 'a', at: 'now' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: null },
+      ],
+    });
+    expect(state.items.some((item) => item.type === 'error')).toBe(false);
   });
 
   test('load is ignored while a turn is running', () => {

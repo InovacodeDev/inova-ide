@@ -18,6 +18,8 @@ export interface ChatState {
   running: boolean;
 }
 
+const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
+
 export const initialChatState: ChatState = { items: [], running: false };
 
 export type ChatAction =
@@ -112,6 +114,23 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return applyEvent(state, action.event);
     case 'load':
       if (state.running || state.items.length > 0) return state;
-      return { ...action.events.reduce(applyEvent, initialChatState), running: false };
+      return loadTranscript(action.events);
   }
+}
+
+function loadTranscript(events: ChatEvent[]): ChatState {
+  const replayed = { ...events.reduce(applyEvent, initialChatState), running: false };
+  const kinds = events.map((event) => event.kind);
+  const lastUser = kinds.lastIndexOf('user');
+  const lastDone = kinds.lastIndexOf('done');
+  if (lastUser <= lastDone) return replayed;
+  return {
+    ...replayed,
+    items: [
+      ...replayed.items.map((item) =>
+        item.type === 'assistant' && item.streaming ? { ...item, streaming: false } : item,
+      ),
+      { type: 'error', id: 'interrupted', message: INTERRUPTED_MESSAGE },
+    ],
+  };
 }
