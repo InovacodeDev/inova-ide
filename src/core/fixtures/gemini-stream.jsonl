@@ -1,0 +1,7 @@
+{"type":"init","timestamp":"2026-11-12T20:00:00.000Z","session_id":"00000000-0000-4000-8000-000000000001","model":"gemini-model"}
+{"type":"message","timestamp":"2026-11-12T20:00:00.100Z","role":"user","content":"Reply with a short markdown answer"}
+{"type":"message","timestamp":"2026-11-12T20:00:01.000Z","role":"assistant","content":"Here is a **short** ","delta":true}
+{"type":"tool_use","timestamp":"2026-11-12T20:00:02.000Z","tool_name":"run_shell_command","tool_id":"run_shell_command-1","parameters":{"command":"ls"}}
+{"type":"tool_result","timestamp":"2026-11-12T20:00:02.500Z","tool_id":"run_shell_command-1","status":"success","output":"README.md"}
+{"type":"error","timestamp":"2026-11-12T20:00:03.000Z","severity":"warning","message":"example warning"}
+{"type":"result","timestamp":"2026-11-12T20:00:04.000Z","status":"success","stats":{}}

@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Planning the answer**"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"README.md\nsrc\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Here is a **short** answer.\n\n| Name | Type |\n|------|------|\n| id | number |\n| tag | string |\n\n```ts\nconst item = { id: 1, tag: \"demo\" };\n```"}}
+{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122}}
+{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}
+{"type":"error","message":"stream disconnected before completion"}
+{"timestamp":"2026-11-12T20:00:00.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122,"reasoning_output_tokens":64,"total_tokens":24885},"last_token_usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122,"reasoning_output_tokens":64,"total_tokens":24885},"model_context_window":258400},"rate_limits":{"primary":{"used_percent":12.0,"window_minutes":300,"resets_in_seconds":10800},"secondary":{"used_percent":4.0,"window_minutes":10080,"resets_in_seconds":500000}}}}
