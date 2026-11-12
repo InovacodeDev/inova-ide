@@ -25,7 +25,13 @@ describe('chatStoreReducer', () => {
       {},
       {
         sessionId: 'a',
-        action: { type: 'load', events: [{ kind: 'user', text: 'oi', at: AT }] },
+        action: {
+          type: 'load',
+          events: [
+            { kind: 'user', text: 'oi', at: AT },
+            { kind: 'done', isError: false, costUsd: null, durationMs: null },
+          ],
+        },
       },
     );
     expect(store['a']?.running).toBe(false);
