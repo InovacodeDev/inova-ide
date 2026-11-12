@@ -1,5 +1,8 @@
 import type { AuthStatus } from '@inova/core/providers';
-import type { ProviderId } from '@inova/core/types';
+import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import type { ProviderId, Session } from '@inova/core/types';
+
+export type SessionView = Session;
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
@@ -30,11 +33,18 @@ export interface InovaApi {
   pickFolder(): Promise<string | null>;
   bindProject(input: { path: string; accountLabel: string }): Promise<Result<ProjectView>>;
   unbindProject(input: { path: string }): Promise<Result<null>>;
-  openProject(input: {
+  listSessions(input: { projectId: string }): Promise<Result<SessionView[]>>;
+  createSession(input: {
     projectId: string;
-    cols: number;
-    rows: number;
-  }): Promise<Result<OpenedSession>>;
+    parentId?: string | null;
+  }): Promise<Result<SessionView>>;
+  renameSession(input: { sessionId: string; title: string }): Promise<Result<SessionView>>;
+  deleteSession(input: { sessionId: string }): Promise<Result<null>>;
+  loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
+  sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
+  cancelTurn(sessionId: string): void;
+  getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
+  onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
   openLogin(input: {
     accountLabel: string;
     cols: number;
@@ -55,7 +65,15 @@ export const CHANNELS = {
   pickFolder: 'inova:pickFolder',
   bindProject: 'inova:bindProject',
   unbindProject: 'inova:unbindProject',
-  openProject: 'inova:openProject',
+  listSessions: 'inova:listSessions',
+  createSession: 'inova:createSession',
+  renameSession: 'inova:renameSession',
+  deleteSession: 'inova:deleteSession',
+  loadTranscript: 'inova:loadTranscript',
+  sendMessage: 'inova:sendMessage',
+  cancelTurn: 'inova:cancelTurn',
+  getUsage: 'inova:getUsage',
+  chatEvent: 'inova:chat:event',
   openLogin: 'inova:openLogin',
   ptyWrite: 'inova:pty:write',
   ptyResize: 'inova:pty:resize',

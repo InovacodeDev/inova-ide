@@ -42,6 +42,33 @@ test('onPtyData delivers only the payload and unsubscribes the exact listener', 
   expect(electron.removeListener).toHaveBeenCalledWith(channel, listener);
 });
 
+test('onChatEvent delivers only the payload and unsubscribes the exact listener', async () => {
+  const api = await loadApi();
+  electron.on.mockClear();
+  const callback = vi.fn();
+  const unsubscribe = api.onChatEvent(callback);
+
+  const [channel, listener] = electron.on.mock.calls[0] ?? [];
+  expect(channel).toBe('inova:chat:event');
+  listener?.({ sender: 'secret' }, { sessionId: 's', event: { kind: 'session' } });
+  expect(callback).toHaveBeenCalledWith({ sessionId: 's', event: { kind: 'session' } });
+
+  unsubscribe();
+  expect(electron.removeListener).toHaveBeenCalledWith(channel, listener);
+});
+
+test('chat calls go through invoke and send channels', async () => {
+  const api = await loadApi();
+  void api.sendMessage({ sessionId: 's', prompt: 'oi' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:sendMessage', {
+    sessionId: 's',
+    prompt: 'oi',
+  });
+  api.cancelTurn('s');
+  expect(electron.send).toHaveBeenCalledWith('inova:cancelTurn', 's');
+  expect('openProject' in api).toBe(false);
+});
+
 test('pty calls go through send and invoke channels', async () => {
   const api = await loadApi();
   api.ptyWrite('s', 'ls');

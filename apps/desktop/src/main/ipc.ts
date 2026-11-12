@@ -50,9 +50,18 @@ export function registerIpc(deps: {
   handle(CHANNELS.pickFolder, () => handlers.pickFolder());
   handle(CHANNELS.bindProject, (input) => handlers.bindProject(input));
   handle(CHANNELS.unbindProject, (input) => handlers.unbindProject(input));
-  handle(CHANNELS.openProject, (input) => handlers.openProject(input));
+  handle(CHANNELS.listSessions, (input) => handlers.listSessions(input));
+  handle(CHANNELS.createSession, (input) => handlers.createSession(input));
+  handle(CHANNELS.renameSession, (input) => handlers.renameSession(input));
+  handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
+  handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
+  handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
+  handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
   handle(CHANNELS.openLogin, (input) => handlers.openLogin(input));
 
+  listen(CHANNELS.cancelTurn, (sessionId) => {
+    if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);
+  });
   listen(CHANNELS.ptyWrite, (sessionId, data) => {
     if (typeof sessionId === 'string' && typeof data === 'string') sessions.write(sessionId, data);
   });

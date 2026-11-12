@@ -24,10 +24,22 @@ const foreign = { senderFrame: { url: 'file:///tmp/evil.html' } };
 function setup() {
   const methods = ['addAccount', 'removeAccount', 'bindProject', 'unbindProject'] as const;
   const handlers = Object.fromEntries(
-    [...methods, 'openProject', 'openLogin', 'listAccounts', 'listProjects', 'pickFolder'].map(
-      (name) => [name, vi.fn(async () => ({ ok: true, value: name }))],
-    ),
+    [
+      ...methods,
+      'listSessions',
+      'createSession',
+      'renameSession',
+      'deleteSession',
+      'loadTranscript',
+      'sendMessage',
+      'getUsage',
+      'openLogin',
+      'listAccounts',
+      'listProjects',
+      'pickFolder',
+    ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
+  handlers['cancelTurn'] = vi.fn();
   const sessions = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
@@ -123,6 +135,31 @@ test('wrong-typed pty payloads are dropped', () => {
   expect(sessions.write).not.toHaveBeenCalled();
   expect(sessions.close).not.toHaveBeenCalled();
   expect(sessions.resize).not.toHaveBeenCalled();
+});
+
+test('chat invokes reach their handlers and openProject is gone', async () => {
+  const { handlers } = setup();
+  const input = { sessionId: 's', prompt: 'oi' };
+  await invoke('inova:sendMessage', trusted, input);
+  expect(handlers['sendMessage']).toHaveBeenCalledWith(input);
+  for (const name of ['listSessions', 'createSession', 'renameSession', 'deleteSession']) {
+    await invoke(`inova:${name}`, trusted, input);
+    expect(handlers[name]).toHaveBeenCalledWith(input);
+  }
+  await invoke('inova:loadTranscript', trusted, input);
+  await invoke('inova:getUsage', trusted, input);
+  expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
+  expect(handlers['getUsage']).toHaveBeenCalledWith(input);
+  expect(electron.invokes.has('inova:openProject')).toBe(false);
+});
+
+test('cancelTurn is forwarded only from a trusted sender with a string id', () => {
+  const { handlers } = setup();
+  send('inova:cancelTurn', foreign, 's');
+  send('inova:cancelTurn', trusted, 42);
+  expect(handlers['cancelTurn']).not.toHaveBeenCalled();
+  send('inova:cancelTurn', trusted, 's');
+  expect(handlers['cancelTurn']).toHaveBeenCalledWith('s');
 });
 
 test('isAppUrl matches the app url and its sub-paths, query or hash only', () => {
