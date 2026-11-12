@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -106,5 +107,25 @@ describe('inova account commands', () => {
     const h = makeHarness();
     expect(await tmp.run(h, ['account', 'add', 'claude'])).toBe(1);
     expect(h.err[0]).toMatch(/^Uso: /);
+  });
+
+  it('--version and -v print package version and exit 0', async () => {
+    const expected = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string })
+      .version;
+    for (const flag of ['--version', '-v']) {
+      const h = makeHarness();
+      expect(await tmp.run(h, [flag])).toBe(0);
+      expect(h.out).toEqual([expected]);
+      expect(h.err).toEqual([]);
+    }
+  });
+
+  it('--help and -h print usage to stdout and exit 0', async () => {
+    for (const flag of ['--help', '-h']) {
+      const h = makeHarness();
+      expect(await tmp.run(h, [flag])).toBe(0);
+      expect(h.out[0]).toMatch(/^Uso: /);
+      expect(h.err).toEqual([]);
+    }
   });
 });

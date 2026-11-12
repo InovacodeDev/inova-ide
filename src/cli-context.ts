@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { AccountError, findAccount } from './core/accounts.js';
 import type { LaunchSpec } from './core/launch.js';
 import { providers } from './core/providers.js';
@@ -31,6 +32,20 @@ export const USAGE = [
 ].join(' | ');
 
 export class UsageError extends Error {}
+
+export function cliVersion(): string {
+  const pkgPath = new URL('../package.json', import.meta.url);
+  const parsed: unknown = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    'version' in parsed &&
+    typeof parsed.version === 'string'
+  ) {
+    return parsed.version;
+  }
+  return '0.0.0';
+}
 
 export function need(value: string | undefined): string {
   if (value === undefined) throw new UsageError(USAGE);

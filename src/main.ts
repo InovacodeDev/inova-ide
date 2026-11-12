@@ -1,5 +1,5 @@
 import { accountAdd, accountList, accountLogin, accountRm } from './account-commands.js';
-import { USAGE, UsageError } from './cli-context.js';
+import { cliVersion, USAGE, UsageError } from './cli-context.js';
 import type { Context } from './cli-context.js';
 import { AccountError } from './core/accounts.js';
 import { PathNotFoundError } from './core/projects.js';
@@ -13,6 +13,16 @@ async function dispatch(ctx: Context): Promise<number> {
   const head = separator === -1 ? ctx.argv : ctx.argv.slice(0, separator);
   const passthrough = separator === -1 ? [] : ctx.argv.slice(separator + 1);
   const [group, action, ...rest] = head;
+  if (separator === -1 && action === undefined) {
+    if (group === '--version' || group === '-v') {
+      ctx.io.out(cliVersion());
+      return 0;
+    }
+    if (group === '--help' || group === '-h') {
+      ctx.io.out(USAGE);
+      return 0;
+    }
+  }
   if (group === 'run' && action === undefined) return runProject(ctx, passthrough);
   switch (`${group} ${action}`) {
     case 'account add':
