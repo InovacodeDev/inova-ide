@@ -310,6 +310,7 @@ export function createHandlers(deps: HandlerDeps) {
         );
         const orphaned = sessionIdsOfProjects(store, projectIds);
         await removeAccount({ root: deps.root, label, force });
+        await removeTranscripts(orphaned);
         return ok(null);
       }),
     listProjects: (): Promise<Result<ProjectView[]>> =>
@@ -331,34 +332,109 @@ export function createHandlers(deps: HandlerDeps) {
       }),
     unbindProject: (input: unknown): Promise<Result<null>> =>
       validated(input, parsePath, async ({ path }) => {
+        const resolved = await realPathOf(path).catch((error: unknown) => {
+          if (error instanceof PathNotFoundError) return resolve(path);
+          throw error;
+        });
+        const store = await loadStore(deps.root);
+        const projectIds = new Set(
+          store.projects.filter((item) => item.path === resolved).map((item) => item.id),
+        );
+        const orphaned = sessionIdsOfProjects(store, projectIds);
+        if (orphaned.some((sessionId) => deps.chat.isRunning(sessionId))) {
+          return fail('Pare os turnos deste projeto antes de desvinculá-lo.');
+        }
         await unbindProject({ root: deps.root, path });
+        await removeTranscripts(orphaned);
         return ok(null);
       }),
-    openProject: (input: unknown): Promise<Result<OpenedSession>> =>
-      validated(input, parseProjectLaunch, async ({ projectId, ...size }) => {
+    listSessions: (input: unknown): Promise<Result<Session[]>> =>
+      validated(input, parseProjectRef, async ({ projectId }) => {
         const store = await loadStore(deps.root);
-        const project = store.projects.find((item) => item.id === projectId);
+        return ok(sessionsOf(store).filter((session) => session.projectId === projectId));
+      }),
+    createSession: (input: unknown): Promise<Result<Session>> =>
+      validated(input, parseNewSession, ({ projectId, parentId }) =>
+        serialized(async () => ok(await createSession({ root: deps.root, projectId, parentId }))),
+      ),
+    renameSession: (input: unknown): Promise<Result<Session>> =>
+      validated(input, parseRename, ({ sessionId, title }) =>
+        serialized(async () =>
+          ok(await updateSession({ root: deps.root, sessionId, patch: { title } })),
+        ),
+      ),
+    deleteSession: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, ({ sessionId }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          requireSession(store, sessionId);
+          const affected = descendantIds(store, sessionId);
+          if ([...affected].some((id) => deps.chat.isRunning(id))) {
+            return fail('Pare o turno em andamento antes de apagar.');
+          }
+          const removed = await deleteSession({ root: deps.root, sessionId });
+          await removeTranscripts(removed);
+          return ok(null);
+        }),
+      ),
+    loadTranscript: (input: unknown): Promise<Result<ChatEvent[]>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        await flushTranscript(sessionId);
+        let raw: string;
+        try {
+          raw = await readFile(transcriptPath(sessionId), 'utf8');
+        } catch (error: unknown) {
+          if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return ok([]);
+          throw error;
+        }
+        const events = raw.split('\n').flatMap((line) => parseTranscriptLine(line) ?? []);
+        return ok(events);
+      }),
+    sendMessage: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseMessage, async ({ sessionId, prompt }) => {
+        if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
+        const store = await loadStore(deps.root);
+        const session = requireSession(store, sessionId);
+        const project = store.projects.find((item) => item.id === session.projectId);
         const account = store.accounts.find((item) => item.id === project?.accountId);
         if (!project || !account) return fail('Projeto não encontrado.');
-        return startSession({
-          account,
-          size,
-          title: `${basename(project.path)} · ${account.label}`,
-          buildSpec: async (baseEnv) => {
-            await providers[account.provider].prepareLaunch(account.homeDir);
-            return buildLaunch({ account, cwd: project.path, args: [], baseEnv });
-          },
+        const adapter = providers[account.provider];
+        const baseEnv = await deps.baseEnv();
+        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        if (file === undefined) {
+          return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
+        }
+        await adapter.prepareLaunch(account.homeDir);
+        return serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
+          return runTurn({
+            sessionId,
+            prompt,
+            account,
+            projectPath: project.path,
+            file,
+            baseEnv,
+          });
         });
+      }),
+    cancelTurn: (sessionId: string): void => deps.chat.cancel(sessionId),
+    getUsage: (input: unknown) =>
+      validated(input, parseUsageRequest, async ({ accountLabel }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        try {
+          return ok(await readUsage({ account, deps: deps.usageDeps }));
+        } catch (error: unknown) {
+          if (!(error instanceof Error)) throw error;
+          const cached = streamUsage.get(account.id);
+          if (account.provider === 'claude' && cached) return ok(cached);
+          if (error instanceof UsageError) throw error;
+          return fail('Não foi possível ler o consumo.');
+        }
       }),
     openLogin: (input: unknown): Promise<Result<OpenedSession>> =>
       validated(input, parseLoginLaunch, async ({ accountLabel, ...size }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
-        return startSession({
-          account,
-          size,
-          title: `login · ${account.label}`,
-          buildSpec: async (baseEnv) => buildLogin({ account, baseEnv }),
-        });
+        return startLogin({ account, size });
       }),
   };
 }
