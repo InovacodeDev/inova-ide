@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { providers } from './providers.js';
 import { loadStore, saveStore } from './store.js';
 import type { Account, ProviderId, Store } from './types.js';
@@ -47,7 +47,8 @@ export async function addAccount(ctx: {
 }
 
 function assertInsideAccountsRoot(root: string, account: Account): void {
-  if (resolve(account.homeDir) !== resolve(root, 'accounts', account.id)) {
+  const expected = resolve(root, 'accounts', account.id);
+  if (resolve(account.homeDir) !== expected || dirname(expected) !== resolve(root, 'accounts')) {
     throw new AccountError(
       'unsafe-path',
       `Account home is outside accounts root: ${account.label}`,

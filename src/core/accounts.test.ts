@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AccountError, addAccount, findAccount, removeAccount } from './accounts.js';
-import { loadStore, saveStore } from './store.js';
+import { loadStore, saveStore, StoreCorruptError } from './store.js';
 
 let root: string;
 
@@ -104,6 +104,31 @@ describe('accounts', () => {
     expect(await exists(join(root, 'accounts', 'a1', 'sub'))).toBe(true);
     expect(await exists(join(root, 'x'))).toBe(true);
     expect(await loadStore(root)).toEqual(before);
+  });
+
+  it.each([
+    ['an empty id', ''],
+    ['a dotdot id', '..'],
+  ])('removeAccount rejects a store with %s and deletes nothing', async (_name, id) => {
+    await mkdir(join(root, 'accounts', 'keep'), { recursive: true });
+    await saveStore(root, {
+      version: 1,
+      accounts: [
+        {
+          id,
+          provider: 'claude',
+          label: 'bad',
+          homeDir: join(root, 'accounts', id),
+          createdAt: 't',
+        },
+      ],
+      projects: [],
+    });
+    await expect(removeAccount({ root, label: 'bad', force: true })).rejects.toBeInstanceOf(
+      StoreCorruptError,
+    );
+    expect(await exists(join(root, 'accounts', 'keep'))).toBe(true);
+    expect(await exists(join(root, 'store.json'))).toBe(true);
   });
 
   it('removeAccount deletes only the account home', async () => {

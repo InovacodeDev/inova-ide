@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { isProviderId } from './providers.js';
 import type { Store } from './types.js';
 
 export class StoreCorruptError extends Error {
@@ -14,16 +15,47 @@ export class StoreCorruptError extends Error {
 }
 
 export function dataRoot(env: NodeJS.ProcessEnv): string {
-  return env['INOVA_HOME'] ?? join(homedir(), '.inova');
+  const configured = env['INOVA_HOME'];
+  return configured ? resolve(configured) : join(homedir(), '.inova');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function hasStrings(record: Record<string, unknown>, keys: readonly string[]): boolean {
+  return keys.every((key) => typeof record[key] === 'string');
+}
+
+function isSafeSegment(id: string): boolean {
+  return id !== '' && id !== '.' && id !== '..' && !id.includes('/') && !id.includes('\\');
+}
+
+function isAccount(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (!hasStrings(value, ['id', 'provider', 'label', 'homeDir', 'createdAt'])) return false;
+  const { id, provider } = value;
+  return (
+    typeof id === 'string' &&
+    typeof provider === 'string' &&
+    isProviderId(provider) &&
+    isSafeSegment(id)
+  );
+}
+
+function isProject(value: unknown): boolean {
+  return isRecord(value) && hasStrings(value, ['id', 'path', 'accountId']);
 }
 
 function isStore(value: unknown): value is Store {
-  if (typeof value !== 'object' || value === null) return false;
-  const candidate = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
+  const { version, accounts, projects } = value;
   return (
-    candidate['version'] === 1 &&
-    Array.isArray(candidate['accounts']) &&
-    Array.isArray(candidate['projects'])
+    version === 1 &&
+    Array.isArray(accounts) &&
+    accounts.every(isAccount) &&
+    Array.isArray(projects) &&
+    projects.every(isProject)
   );
 }
 
