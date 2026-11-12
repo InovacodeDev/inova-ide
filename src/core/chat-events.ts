@@ -103,6 +103,22 @@ function createClaudeParser(): ChatParser {
     return events;
   }
 
+  function fromUser(message: unknown): ChatEvent[] {
+    if (!isRecord(message) || !Array.isArray(message['content'])) return [];
+    const events: ChatEvent[] = [];
+    for (const block of message['content']) {
+      if (!isRecord(block) || block['type'] !== 'tool_result') continue;
+      const toolId = str(block['tool_use_id']);
+      if (toolId === null) continue;
+      events.push({
+        kind: 'tool-result',
+        toolId,
+        output: toolOutput(block['content']),
+        isError: block['is_error'] === true,
+      });
+    }
+    return events;
+  }
 
   return {
     parse(line) {
@@ -121,6 +137,8 @@ function createClaudeParser(): ChatParser {
           return fromStreamEvent(data['event']);
         case 'assistant':
           return fromAssistant(data['message']);
+        case 'user':
+          return fromUser(data['message']);
         case 'result':
           return [
             {
