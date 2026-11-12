@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check version sync
+        run: pnpm version:check
+
+      - name: Check root CLI
+        run: pnpm typecheck && pnpm lint && pnpm test
+
+      - name: Check desktop app
+        run: pnpm --filter @inova/desktop typecheck && pnpm --filter @inova/desktop test
