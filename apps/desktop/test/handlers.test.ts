@@ -194,34 +194,140 @@ test('a new claude turn persists the session id before spawning and derives the 
   expect(call?.spec.cwd).toBe(project.path);
   expect(call?.spec.env['CLAUDE_CONFIG_DIR']).toBe(account.homeDir);
   expect(call?.spec.env['ANTHROPIC_API_KEY']).toBeUndefined();
+  const flag = call?.spec.args.indexOf('--session-id') ?? -1;
+  const uuid = call?.spec.args[flag + 1];
+  expect(uuid).toMatch(/^[0-9a-f-]{36}$/);
+  const stored = (await loadStore(root)).sessions?.[0];
+  expect(stored?.providerSessionId).toBe(uuid);
+  expect(stored?.title).toBe('a'.repeat(60));
 });
 
-test('openProject marks claude onboarding before launch', async () => {
+test('sendMessage persists the session before the process is spawned', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  let storeAtSpawn: Promise<Store> | undefined;
+  send.mockImplementation(() => {
+    storeAtSpawn = loadStore(root);
+  });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  expect((await storeAtSpawn)?.sessions?.[0]?.providerSessionId).toMatch(/^[0-9a-f-]{36}$/);
+});
+
+test('a custom title is kept and a session with an id resumes', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  await updateSession({
+    root,
+    sessionId: session.id,
+    patch: { title: 'Meu título', providerSessionId: 'prov-1' },
+  });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'continue' }));
+  const args = send.mock.calls[0]?.[0].spec.args;
+  expect(args).toContain('--resume');
+  expect(args).toContain('prov-1');
+  expect(args).not.toContain('--session-id');
+  const stored = (await loadStore(root)).sessions?.[0];
+  expect(stored).toMatchObject({ title: 'Meu título', providerSessionId: 'prov-1' });
+});
+
+test('a claude child session forks from the parent provider session', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  await updateSession({ root, sessionId: parent.id, patch: { providerSessionId: 'parent-prov' } });
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  unwrap(await handlers.sendMessage({ sessionId: child.id, prompt: 'ramifique' }));
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 3)).toEqual([
+    '--resume',
+    'parent-prov',
+    '--fork-session',
+  ]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
+  expect(stored?.providerSessionId).toBe(args[args.indexOf('--session-id') + 1]);
+  expect(stored?.title).toBe('ramifique');
+});
+
+test('a child of a parent without provider session starts a new turn', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  unwrap(await handlers.sendMessage({ sessionId: child.id, prompt: 'x' }));
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args).not.toContain('--fork-session');
+  expect(args).toContain('--session-id');
+});
+
+test('a codex turn stores the provider session only when the session event arrives', async () => {
+  const { root, send, handlers } = await setup();
+  const account = await addAccount({ root, provider: 'codex', label: 'cx' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'cx' });
+  const session = await createSession({ root, projectId: project.id });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  const call = send.mock.calls[0]?.[0];
+  expect(call).toMatchObject({ provider: 'codex', accountId: account.id });
+  expect(call?.spec.args[0]).toBe('exec');
+  expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBeNull();
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'thread-9' });
+  await vi.waitFor(async () => {
+    expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBe('thread-9');
+  });
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'other' });
+  await handlers.loadTranscript({ sessionId: session.id });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBe('thread-9');
+});
+
+test('sendMessage refuses while a turn is running', async () => {
+  const { root, running, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  running.add(session.id);
+  expect(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' })).toEqual({
+    ok: false,
+    message: 'Já existe um turno em andamento nesta sessão.',
+  });
+  expect(send).not.toHaveBeenCalled();
+  expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBeNull();
+});
+
+test('sendMessage marks claude onboarding before launch', async () => {
   const { root, handlers } = await setup();
-  const { account, project } = await seedProject(root);
+  const { account, session } = await seedSession(root);
   const file = join(account.homeDir, '.claude.json');
   await writeFile(file, '{}');
-  unwrap(await handlers.openProject({ projectId: project.id, cols: 80, rows: 24 }));
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
   expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ hasCompletedOnboarding: true });
 });
 
-test('openProject reports missing binary with install hint', async () => {
-  const { root, open, handlers } = await setup({ withBinary: false });
-  const { project } = await seedProject(root);
-  const result = await handlers.openProject({ projectId: project.id, cols: 80, rows: 24 });
-  expect(result.ok).toBe(false);
-  expect(!result.ok && result.message).toContain('pnpm add -g @anthropic-ai/claude-code');
-  expect(open).not.toHaveBeenCalled();
+test('sendMessage emits and stores the user message before spawning', async () => {
+  const { root, emitted, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  send.mockImplementation(() => {
+    expect(emitted).toHaveLength(1);
+  });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '  oi  ' }));
+  expect(emitted[0]).toMatchObject({ sessionId: session.id, event: { kind: 'user', text: 'oi' } });
+  const transcript = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(transcript).toEqual([expect.objectContaining({ kind: 'user', text: 'oi' })]);
 });
 
-test('openProject rejects NaN size gracefully', async () => {
-  const { root, open, handlers } = await setup();
-  const { project } = await seedProject(root);
-  unwrap(await handlers.openProject({ projectId: project.id, cols: Number.NaN, rows: 24 }));
-  expect(open.mock.calls[0]?.[0].cols).toBeNaN();
-  const bad = await handlers.openProject({ projectId: project.id, cols: '80', rows: 24 });
-  expect(bad).toEqual(INVALID);
-  expect(open).toHaveBeenCalledTimes(1);
+test('transcript keeps event order, skips deltas and invalid lines', async () => {
+  const { root, emitted, handlers } = await setup();
+  const { session } = await seedSession(root);
+  const events: ChatEvent[] = [
+    { kind: 'user', text: 'oi', at: 't' },
+    { kind: 'text-delta', blockId: 'b', text: 'o' },
+    { kind: 'text', blockId: 'b', text: 'olá' },
+    { kind: 'tool-use', toolId: 't1', name: 'Read', input: '{}' },
+    { kind: 'tool-result', toolId: 't1', output: 'x', isError: false },
+    { kind: 'done', isError: false, costUsd: 0.1, durationMs: 5 },
+  ];
+  for (const event of events) handlers.handleChatEvent(session.id, event);
+  expect(emitted.map((item) => item.event)).toEqual(events);
+  const file = join(root, 'sessions', `${session.id}.jsonl`);
+  await handlers.loadTranscript({ sessionId: session.id });
+  await writeFile(file, `garbage\n{"kind":"nope"}\n${await readFile(file, 'utf8')}`);
+  const loaded = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(loaded).toEqual(events.filter((event) => event.kind !== 'text-delta'));
 });
 
 test('openProject reports an unknown project', async () => {
