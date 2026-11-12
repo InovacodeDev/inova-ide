@@ -56,6 +56,16 @@ Lançar = `spawn(binário, args, { cwd: projeto, env: env do processo − API ke
 2. **Plano B (próximo ciclo):** app desktop. Electron + React + `node-pty` + `xterm.js`. Barra lateral com projetos; cada aba abre um PTY com o resultado de `buildLaunch()` do core. Alternativa: Tauri (binário menor, mas PTY em Rust e menos reuso do TS).
 3. **Depois:** Antigravity. É uma IDE (fork do VS Code), não um CLI. Hipótese a verificar: abrir com `--user-data-dir <home da conta>`. ACP como protocolo de UI rica: viável para Gemini (`gemini --acp`, nativo) e Codex (`codex-acp`); não para Claude com assinatura (usa Agent SDK).
 
+## App desktop (Plano B) — decisões
+
+- Electron + React + `node-pty` + `@xterm/xterm`, em `apps/desktop` (workspace pnpm). O CLI continua na raiz.
+- O desktop importa `src/core` direto do código-fonte via alias `@core`. Não há pacote `packages/core` (YAGNI: um só consumidor extra).
+- MVP: barra lateral com projetos e contas (status); adicionar/remover conta; login da conta numa aba de terminal; vincular pasta (seletor nativo) a uma conta; abrir projeto numa aba de terminal; várias abas ao mesmo tempo, de contas diferentes.
+- O renderer nunca escolhe comando, args de binário nem env. Ele manda só ids e rótulos; o main monta tudo com `buildLaunch`/`buildLogin`.
+- App aberto pelo Finder não herda o `PATH` do shell. O main lê o `PATH` do shell de login do usuário e procura o binário por caminho absoluto.
+- Fechar aba mata o processo dela. Fechar o app mata todos.
+- Fora do MVP: empacotar `.dmg`, assinar, auto-update, editor de arquivos, Antigravity.
+
 ## Fora de escopo
 
 Sincronizar contas entre máquinas. Mostrar uso/cota. Trocar de conta no meio de uma sessão. Suporte Windows/Linux (o design é portátil, mas só testo macOS).
