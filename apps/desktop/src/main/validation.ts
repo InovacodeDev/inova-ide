@@ -83,23 +83,39 @@ export function parseLoginLaunch(input: unknown): ({ accountLabel: string } & Si
 
 export function requireAccount(store: Store, label: string): Account {
   const account = findAccount(store, label);
-  if (!account) throw new AccountError('not-found', `Account not found: ${label}`);
+  if (!account) throw new AccountError('not-found', `Conta não encontrada: ${label}.`);
   return account;
 }
 
-export async function guarded<T>(work: () => Promise<Result<T>>): Promise<Result<T>> {
+function accountMessage(error: AccountError, label: string): string {
+  switch (error.code) {
+    case 'duplicate-label':
+      return `Já existe uma conta com o rótulo "${label}".`;
+    case 'not-found':
+      return `Conta não encontrada: ${label}.`;
+    case 'has-projects':
+      return 'A conta tem projetos vinculados. Remova com force para desvinculá-los.';
+    case 'unsafe-path':
+      return 'Caminho da conta inválido; remoção recusada.';
+  }
+}
+
+export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Promise<Result<T>> {
   try {
     return await work();
   } catch (error: unknown) {
-    if (
-      error instanceof AccountError ||
-      error instanceof PathNotFoundError ||
-      error instanceof StoreCorruptError
-    ) {
-      return fail(error.message);
-    }
+    if (error instanceof AccountError) return fail(accountMessage(error, label));
+    if (error instanceof StoreCorruptError)
+      return fail(`Arquivo de dados corrompido: ${error.path}.`);
+    if (error instanceof PathNotFoundError) return fail(error.message);
     throw error;
   }
+}
+
+function labelOf(parsed: unknown): string {
+  if (!isRecord(parsed)) return '';
+  const label = parsed['label'] ?? parsed['accountLabel'];
+  return typeof label === 'string' ? label : '';
 }
 
 export function validated<I, T>(
@@ -108,5 +124,7 @@ export function validated<I, T>(
   work: (parsed: I) => Promise<Result<T>>,
 ): Promise<Result<T>> {
   const parsed = parse(input);
-  return parsed === undefined ? Promise.resolve(INVALID) : guarded(() => work(parsed));
+  return parsed === undefined
+    ? Promise.resolve(INVALID)
+    : guarded(() => work(parsed), labelOf(parsed));
 }

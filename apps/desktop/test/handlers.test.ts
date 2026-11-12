@@ -150,7 +150,7 @@ test('openLogin runs the login args in the account home', async () => {
   const spec = open.mock.calls[0]?.[0].spec;
   expect(spec).toMatchObject({ args: ['auth', 'login'], cwd: account.homeDir });
   const missing = await handlers.openLogin({ accountLabel: 'x', cols: 80, rows: 24 });
-  expect(missing).toEqual({ ok: false, message: 'Account not found: x' });
+  expect(missing).toEqual({ ok: false, message: 'Conta não encontrada: x.' });
 });
 
 test('removeAccount refuses while a session of the account is open', async () => {
@@ -188,4 +188,43 @@ test('bindProject accepts a 300+ character absolute path and fails on realpath',
   expect(long.length).toBeGreaterThan(300);
   const result = await handlers.bindProject({ path: long, accountLabel: 'pessoal' });
   expect(result).toEqual({ ok: false, message: `Caminho não encontrado: ${long}` });
+});
+
+test('account errors are reported in Portuguese', async () => {
+  const { root, handlers } = await setup();
+  const { project } = await seedProject(root);
+  const input = { provider: 'claude', label: 'pessoal' };
+  expect(await handlers.addAccount(input)).toEqual({
+    ok: false,
+    message: 'Já existe uma conta com o rótulo "pessoal".',
+  });
+  expect(await handlers.removeAccount({ label: 'ghost', force: false })).toEqual({
+    ok: false,
+    message: 'Conta não encontrada: ghost.',
+  });
+  expect(await handlers.bindProject({ path: project.path, accountLabel: 'ghost' })).toEqual({
+    ok: false,
+    message: 'Conta não encontrada: ghost.',
+  });
+  expect(await handlers.removeAccount({ label: 'pessoal', force: false })).toEqual({
+    ok: false,
+    message: 'A conta tem projetos vinculados. Remova com force para desvinculá-los.',
+  });
+});
+
+test('store and account path errors are reported in Portuguese', async () => {
+  const { root, handlers } = await setup();
+  const file = join(root, 'store.json');
+  await writeFile(file, 'not json');
+  expect(await handlers.listAccounts()).toEqual({
+    ok: false,
+    message: `Arquivo de dados corrompido: ${file}.`,
+  });
+  const account = { id: 'abc', provider: 'claude', label: 'x', homeDir: '/elsewhere' };
+  const store = { version: 1, accounts: [{ ...account, createdAt: 't' }], projects: [] };
+  await writeFile(file, JSON.stringify(store));
+  expect(await handlers.removeAccount({ label: 'x', force: false })).toEqual({
+    ok: false,
+    message: 'Caminho da conta inválido; remoção recusada.',
+  });
 });
