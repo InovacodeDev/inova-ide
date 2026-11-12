@@ -227,6 +227,7 @@ button:disabled {
   color: #89b4fa;
 }
 
+.session-archive,
 .session-delete {
   background: none;
   border: 0;
@@ -235,9 +236,15 @@ button:disabled {
   padding: 0 6px;
 }
 
+.session-row:hover .session-archive,
 .session-row:hover .session-delete,
+.session-archive:focus-visible,
 .session-delete:focus-visible {
   display: block;
+}
+
+.session-archive:hover {
+  color: #89b4fa;
 }
 
 .session-delete:hover {
@@ -247,6 +254,12 @@ button:disabled {
 .session-rename {
   flex: 1;
   min-width: 0;
+}
+
+.chat-readonly-hint {
+  color: #a6adc8;
+  font-size: 12px;
+  margin: 6px 0 0;
 }
 
 .session-empty {

@@ -7,6 +7,16 @@ export interface SessionNode {
 
 export const SESSION_LIMIT = 5;
 
+export function splitArchived(sessions: readonly Session[]): {
+  active: Session[];
+  archived: Session[];
+} {
+  return {
+    active: sessions.filter((session) => session.archivedAt === null),
+    archived: sessions.filter((session) => session.archivedAt !== null),
+  };
+}
+
 const byRecency = (a: SessionNode, b: SessionNode): number =>
   b.session.updatedAt.localeCompare(a.session.updatedAt);
 

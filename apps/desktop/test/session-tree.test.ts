@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { Session } from '@inova/core/types';
-import { buildSessionTree, visibleRoots } from '../src/renderer/session-tree';
+import { buildSessionTree, splitArchived, visibleRoots } from '../src/renderer/session-tree';
 
 const session = (id: string, parentId: string | null, rank: number): Session => ({
   id,
@@ -10,6 +10,33 @@ const session = (id: string, parentId: string | null, rank: number): Session => 
   providerSessionId: null,
   createdAt: new Date(0).toISOString(),
   updatedAt: new Date(rank * 1000).toISOString(),
+  archivedAt: null,
+});
+
+const archived = (id: string, parentId: string | null, rank: number): Session => ({
+  ...session(id, parentId, rank),
+  archivedAt: new Date(0).toISOString(),
+});
+
+describe('splitArchived', () => {
+  test('separates active from archived sessions preserving order', () => {
+    const all = [session('a', null, 1), archived('b', null, 2), archived('b1', 'b', 3)];
+    const split = splitArchived(all);
+    expect(split.active.map((s) => s.id)).toEqual(['a']);
+    expect(split.archived.map((s) => s.id)).toEqual(['b', 'b1']);
+  });
+
+  test('archived list builds its own tree with archived children nested', () => {
+    const { archived: list } = splitArchived([archived('b', null, 2), archived('b1', 'b', 3)]);
+    const tree = buildSessionTree(list);
+    expect(tree.map((n) => n.session.id)).toEqual(['b']);
+    expect(tree[0]?.children.map((n) => n.session.id)).toEqual(['b1']);
+  });
+
+  test('active child of an archived parent becomes an active root', () => {
+    const { active } = splitArchived([archived('p1', null, 1), session('c', 'p1', 2)]);
+    expect(buildSessionTree(active).map((n) => n.session.id)).toEqual(['c']);
+  });
 });
 
 describe('buildSessionTree', () => {
