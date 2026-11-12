@@ -160,6 +160,8 @@ function sessionMessage(error: SessionError): string {
       return 'Sessão não encontrada.';
     case 'invalid-title':
       return 'O título deve ter de 1 a 200 caracteres.';
+    case 'invalid-workspace':
+      return 'Área de trabalho inválida.';
   }
 }
 
