@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core';
@@ -101,27 +101,29 @@ async function highlight(input: { code: string; lang: string }): Promise<string 
 interface CodeBlockProps {
   lang: string;
   code: string;
+  streaming: boolean;
 }
 
-function CodeBlock({ lang, code }: CodeBlockProps) {
-  const [html, setHtml] = useState<string | null>(null);
+function CodeBlock({ lang, code, streaming }: CodeBlockProps) {
+  const [highlighted, setHighlighted] = useState<{ key: string; html: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
+  const key = `${lang}\u0000${code}`;
 
   useEffect(() => {
+    if (streaming) return;
     let cancelled = false;
     highlight({ code, lang })
-      .then((result) => {
-        if (!cancelled) setHtml(result);
+      .then((html) => {
+        if (!cancelled && html !== null) setHighlighted({ key, html });
       })
       .catch((error: unknown) => {
         console.error('inova: syntax highlighting failed', error);
-        if (!cancelled) setHtml(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [code, lang]);
+  }, [code, lang, key, streaming]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -135,6 +137,8 @@ function CodeBlock({ lang, code }: CodeBlockProps) {
       })
       .catch(() => setCopied(false));
   };
+
+  const html = !streaming && highlighted?.key === key ? highlighted.html : null;
 
   return (
     <div className="md-code">
@@ -161,34 +165,54 @@ function textOf(children: ReactNode): string {
   return '';
 }
 
-const components: Components = {
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-  table: ({ node: _node, ...props }) => (
-    <div className="md-table-wrap">
-      <table {...props} />
-    </div>
-  ),
-  pre: ({ children }) => <>{children}</>,
-  code: ({ node: _node, className, children, ...props }) => {
-    const match = LANG_CLASS.exec(className ?? '');
-    const text = textOf(children);
-    if (match === null && !text.includes('\n')) {
-      return (
-        <code className="md-inline-code" {...props}>
-          {children}
-        </code>
-      );
-    }
-    return <CodeBlock lang={match?.[1] ?? ''} code={text.replace(/\n$/, '')} />;
-  },
-};
+interface CodeElementProps {
+  className?: string;
+  children?: ReactNode;
+}
+
+function blockFromPre(children: ReactNode): { lang: string; code: string } {
+  const element = Array.isArray(children) ? children[0] : children;
+  const props: CodeElementProps = isValidElement<CodeElementProps>(element) ? element.props : {};
+  const match = LANG_CLASS.exec(props.className ?? '');
+  return { lang: match?.[1] ?? '', code: textOf(props.children).replace(/\n$/, '') };
+}
+
+function buildComponents(streaming: boolean): Components {
+  return {
+    a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+    table: ({ node: _node, ...props }) => (
+      <div className="md-table-wrap">
+        <table {...props} />
+      </div>
+    ),
+    pre: ({ children }) => {
+      const { lang, code } = blockFromPre(children);
+      return <CodeBlock lang={lang} code={code} streaming={streaming} />;
+    },
+    code: ({ node: _node, className, children, ...props }) => (
+      <code className={className ?? 'md-inline-code'} {...props}>
+        {children}
+      </code>
+    ),
+  };
+}
 
 const remarkPlugins = [remarkGfm];
+const streamingComponents = buildComponents(true);
+const settledComponents = buildComponents(false);
 
-function MarkdownImpl({ text }: { text: string }) {
+interface MarkdownProps {
+  text: string;
+  streaming?: boolean;
+}
+
+function MarkdownImpl({ text, streaming = false }: MarkdownProps) {
   return (
     <div className="md">
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        components={streaming ? streamingComponents : settledComponents}
+      >
         {text}
       </ReactMarkdown>
     </div>
