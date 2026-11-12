@@ -36,9 +36,9 @@ Siga esta sequência para publicar qualquer versão nova:
    git push origin main --tags
    ```
 4. Acompanhe o workflow `.github/workflows/release.yml`:
-   - Compila e testa os DMGs `arm64` (`macos-15`) e `x64` (`macos-15-intel`).
-   - Executa `INOVA_SELFTEST=1` e `inova --version` dentro dos `.app` empacotados.
-   - Publica o GitHub Release com os `.dmg` e `.sha256`.
+   - Compila e testa macOS Apple Silicon `arm64` (`macos-15`), Windows `x64` (`windows-latest`) e Linux `x64` (`ubuntu-latest`).
+   - Executa `INOVA_SELFTEST=1` e `inova --version` dentro dos pacotes gerados.
+   - Publica o GitHub Release com `.dmg`, `.exe`, `.zip`, `.AppImage`, `.deb`, `.tar.gz` e seus `.sha256`.
    - Atualiza `Casks/inova-ide.rb` no `InovacodeDev/homebrew-tap` após rodar `brew style` e `brew audit --cask`.
 
 ## 3. Comandos do Usuário Final (Homebrew)
@@ -59,13 +59,15 @@ Siga esta sequência para publicar qualquer versão nova:
 
 ## 5. Build Local para Diagnóstico
 
-Gere o DMG da arquitetura atual localmente:
+Gere o pacote da plataforma atual localmente:
 
 ```bash
 pnpm package:mac
+pnpm package:win
+pnpm package:linux
 ```
 
-Os arquivos ficam em `release/InovaIDE-<version>-<arch>.dmg` e `release/InovaIDE-<version>-<arch>.dmg.sha256`.
+Os arquivos ficam em `release/` acompanhados dos respectivos `.sha256`.
 
 ## 6. Migração para Assinatura Apple e Notarização
 

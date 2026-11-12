@@ -7,7 +7,11 @@ on:
 
 jobs:
   verify:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,8 +30,30 @@ jobs:
       - name: Check version sync
         run: pnpm version:check
 
-      - name: Check root CLI
+      - name: Check root CLI (POSIX)
+        if: runner.os != 'Windows'
         run: pnpm typecheck && pnpm lint && pnpm test
 
-      - name: Check desktop app
+      - name: Check root CLI (Windows)
+        if: runner.os == 'Windows'
+        run: pnpm typecheck && pnpm lint && pnpm build
+
+      - name: Check desktop app (macOS)
+        if: runner.os == 'macOS'
         run: pnpm --filter @inova/desktop typecheck && pnpm --filter @inova/desktop test
+
+      - name: Check desktop app (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y xvfb
+          fi
+          pnpm --filter @inova/desktop typecheck
+          xvfb-run -a pnpm --filter @inova/desktop test
+
+      - name: Check desktop app (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pnpm --filter @inova/desktop typecheck
+          pnpm --filter @inova/desktop build
+          pnpm --filter @inova/desktop exec vitest run test/selftest.test.ts
