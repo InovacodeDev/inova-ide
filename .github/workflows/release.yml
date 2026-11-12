@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: ver
+        run: |
+          VERSION="$(node scripts/version.mjs check --tag "${GITHUB_REF_NAME}")"
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+
+  build-mac:
+    needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: arm64
+            os: macos-14
+          - arch: x64
+            os: macos-15-intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run checks
+        run: |
+          pnpm version:check --tag "${GITHUB_REF_NAME}"
+          pnpm typecheck && pnpm lint && pnpm test
+          pnpm --filter @inova/desktop typecheck && pnpm --filter @inova/desktop test
+      - name: Package macOS DMG (${{ matrix.arch }})
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: node apps/desktop/scripts/package-mac.mjs --arch "${{ matrix.arch }}"
+      - name: Smoke test packaged DMG (${{ matrix.arch }})
+        run: |
+          zsh apps/desktop/scripts/smoke-dmg.sh \
+            "release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg" \
+            "${{ needs.validate.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: |
+            release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg
+            release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg.sha256
+          if-no-files-found: error
+
+  publish-release:
+    needs: [validate, build-mac]
+    runs-on: ubuntu-latest
+    outputs:
+      arm64_sha256: ${{ steps.hashes.outputs.arm64 }}
+      x64_sha256: ${{ steps.hashes.outputs.x64 }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - id: hashes
+        run: |
+          ARM_SHA="$(awk '{print $1}' "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256")"
+          X64_SHA="$(awk '{print $1}' "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg.sha256")"
+          echo "arm64=${ARM_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "x64=${X64_SHA}" >> "${GITHUB_OUTPUT}"
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg" \
+            "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256" \
+            "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg" \
+            "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg.sha256" \
+            --title "InovaIDE ${GITHUB_REF_NAME}" \
+            --generate-release-notes
+
+  update-homebrew-tap:
+    needs: [validate, publish-release]
+    runs-on: macos-14
+    steps:
+      - name: Check tap token
+        id: check
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "HOMEBREW_TAP_TOKEN not configured; skipping tap update."
+          else
+            echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          repository: InovacodeDev/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Update Cask and verify with brew
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          ARM_SHA: ${{ needs.publish-release.outputs.arm64_sha256 }}
+          X64_SHA: ${{ needs.publish-release.outputs.x64_sha256 }}
+        run: |
+          CASK="homebrew-tap/Casks/inova-ide.rb"
+          ruby -e 'c = File.read(ARGV[0]).sub(/version "[^"]+"/, %(version "#{ARGV[1]}")).sub(/sha256 arm:\s+"[^"]+",\n\s+intel:\s+"[^"]+"/, %(sha256 arm:   "#{ARGV[2]}",\n         intel: "#{ARGV[3]}")); File.write(ARGV[0], c)' "${CASK}" "${VERSION}" "${ARM_SHA}" "${X64_SHA}"
+          brew style "${CASK}"
+          TAP_DIR="$(brew --repository)/Library/Taps/inovacodedev"
+          mkdir -p "${TAP_DIR}"
+          ln -sfn "${PWD}/homebrew-tap" "${TAP_DIR}/homebrew-tap"
+          brew trust inovacodedev/tap
+          brew audit --cask --online inovacodedev/tap/inova-ide
+      - name: Commit and push tap update
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/inova-ide.rb
+          git commit -m "inova-ide ${VERSION}"
+          git push origin HEAD:main
