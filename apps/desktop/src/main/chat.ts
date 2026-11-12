@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { createChatParser } from '@inova/core/chat-events';
 import type { ChatParser } from '@inova/core/chat-events';
@@ -7,9 +9,9 @@ import type { ProviderId } from '@inova/core/types';
 
 export interface ChildProcessLike {
   pid?: number | undefined;
-  stdout: NodeJS.ReadableStream;
-  stderr: NodeJS.ReadableStream;
-  on(event: 'close', cb: (code: number | null) => void): void;
+  stdout: Readable;
+  stderr: Readable;
+  on(event: 'close' | 'exit', cb: (code: number | null) => void): void;
   on(event: 'error', cb: (error: Error) => void): void;
 }
 
@@ -42,6 +44,7 @@ export class ChatBusyError extends Error {
 }
 
 const KILL_AFTER_MS = 2000;
+const EXIT_GRACE_MS = 2000;
 const STDERR_TAIL_CHARS = 4096;
 
 interface Turn {
@@ -52,6 +55,8 @@ interface Turn {
   doneSeen: boolean;
   stderrTail: string;
   timer: ReturnType<typeof setTimeout> | undefined;
+  exitTimer: ReturnType<typeof setTimeout> | undefined;
+  release: () => void;
   settle: () => void;
   exited: Promise<void>;
 }
@@ -176,7 +181,7 @@ export function createChatRunner(deps: {
     turn.timer = setTimeout(() => {
       turn.timer = undefined;
       signal(turn, 'SIGKILL');
-      turn.settle();
+      turn.release();
     }, KILL_AFTER_MS);
     signal(turn, 'SIGTERM');
   }
@@ -186,6 +191,7 @@ export function createChatRunner(deps: {
     if (turn.finished) return;
     turn.finished = true;
     if (turn.timer !== undefined) clearTimeout(turn.timer);
+    if (turn.exitTimer !== undefined) clearTimeout(turn.exitTimer);
     turns.delete(sessionId);
     if (!turn.doneSeen) {
       deps.emit(sessionId, { kind: 'error', message });
@@ -215,6 +221,8 @@ export function createChatRunner(deps: {
       doneSeen: false,
       stderrTail: '',
       timer: undefined,
+      exitTimer: undefined,
+      release: () => undefined,
       settle,
       exited,
     };
@@ -233,7 +241,7 @@ export function createChatRunner(deps: {
       return;
     }
     turn.pid = child.pid;
-    const parser: ChatParser = createChatParser(input.provider);
+    const parser: ChatParser = createChatParser(input.provider, { turnId: randomUUID() });
     const decoder = new StringDecoder('utf8');
     let pending = '';
 
@@ -250,22 +258,40 @@ export function createChatRunner(deps: {
       lines.forEach(handleLine);
     };
 
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      consume(typeof chunk === 'string' ? chunk : decoder.write(chunk));
-    });
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      turn.stderrTail = (turn.stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
-    });
-    child.on('error', (error: Error) => {
-      finish({ sessionId, turn, message: `Falha ao iniciar o processo: ${error.message}` });
-    });
-    child.on('close', (code: number | null) => {
+    const drainAndFinish = (code: number | null): void => {
       if (turn.finished) return;
       consume(decoder.end());
       if (pending !== '') handleLine(pending);
       pending = '';
       finish({ sessionId, turn, message: failureMessage(turn, code) });
+    };
+    turn.release = () => {
+      drainAndFinish(null);
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      if (turn.finished) return;
+      consume(typeof chunk === 'string' ? chunk : decoder.write(chunk));
     });
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      if (turn.finished) return;
+      turn.stderrTail = (turn.stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
+    });
+    child.on('error', (error: Error) => {
+      finish({ sessionId, turn, message: `Falha ao iniciar o processo: ${error.message}` });
+    });
+    child.on('exit', (code: number | null) => {
+      if (turn.finished) return;
+      turn.exitTimer = setTimeout(() => {
+        turn.exitTimer = undefined;
+        drainAndFinish(code);
+        child.stdout.destroy();
+        child.stderr.destroy();
+      }, EXIT_GRACE_MS);
+    });
+    child.on('close', drainAndFinish);
   }
 
   return {
