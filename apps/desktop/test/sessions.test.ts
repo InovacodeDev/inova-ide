@@ -145,6 +145,40 @@ test('closeAll closes every session and KILLs the ones that stay alive', async (
   expect(manager.accountsInUse().size).toBe(0);
 });
 
+test('closeAll still signals the other sessions when one kill fails', async () => {
+  const { manager, killTree } = setup();
+  openSession(manager, 'acc-1');
+  openSession(manager, 'acc-2');
+  const failure = new Error('EPERM');
+  killTree.mockImplementationOnce(() => {
+    throw failure;
+  });
+  const done = manager.closeAll();
+  expect(killTree.mock.calls).toEqual([
+    [1000, 'SIGHUP'],
+    [1001, 'SIGHUP'],
+  ]);
+  vi.advanceTimersByTime(2000);
+  await expect(done).rejects.toMatchObject({ errors: [failure] });
+  expect(killTree.mock.calls.slice(2)).toEqual([[1001, 'SIGKILL']]);
+  expect(manager.accountsInUse().size).toBe(0);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test('a failing SIGKILL is logged instead of thrown from the timer', async () => {
+  const { manager, killTree } = setup();
+  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  openSession(manager);
+  const done = manager.closeAll();
+  killTree.mockImplementationOnce(() => {
+    throw new Error('EPERM');
+  });
+  expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
+  await done;
+  expect(log).toHaveBeenCalledTimes(1);
+  log.mockRestore();
+});
+
 test('closeAll resolves immediately without sessions', async () => {
   const { manager, killTree } = setup();
   await manager.closeAll();

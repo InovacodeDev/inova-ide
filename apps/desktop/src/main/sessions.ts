@@ -87,12 +87,19 @@ export function createSessionManager(deps: {
       closing.delete(sessionId);
       try {
         deps.killTree(pid, 'SIGKILL');
+      } catch (error: unknown) {
+        console.error(`inova: SIGKILL failed for session ${sessionId}`, error);
       } finally {
         settle();
       }
     }, KILL_AFTER_MS);
     closing.set(sessionId, { timer, settle, done });
-    deps.killTree(pid, 'SIGHUP');
+    try {
+      deps.killTree(pid, 'SIGHUP');
+    } catch (error: unknown) {
+      settleClosing(sessionId);
+      throw error;
+    }
   }
 
   return {
@@ -123,8 +130,16 @@ export function createSessionManager(deps: {
       sessions.get(sessionId)?.pty.resize(size.cols, size.rows);
     },
     async closeAll() {
-      for (const sessionId of [...sessions.keys()]) close(sessionId);
+      const errors: unknown[] = [];
+      for (const sessionId of [...sessions.keys()]) {
+        try {
+          close(sessionId);
+        } catch (error: unknown) {
+          errors.push(error);
+        }
+      }
       await Promise.all([...closing.values()].map((entry) => entry.done));
+      if (errors.length > 0) throw new AggregateError(errors, 'closeAll failed for some sessions');
     },
     accountsInUse() {
       return new Set([...sessions.values()].map((session) => session.accountId));
