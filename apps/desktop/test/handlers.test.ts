@@ -418,7 +418,7 @@ test('session crud maps session errors to Portuguese', async () => {
     await handlers.createSession({ projectId: project.id, parentId: session.id }),
   );
   expect(child).toMatchObject({ parentId: session.id, title: 'Subsessão' });
-  const renamed = unwrap(await handlers.renameSession({ sessionId: child.id, title: '  Novo ' }));
+  const renamed = unwrap(await handlers.updateSession({ sessionId: child.id, title: '  Novo ' }));
   expect(renamed.title).toBe('Novo');
   expect(await handlers.createSession({ projectId: 'nope' })).toEqual({
     ok: false,
@@ -428,13 +428,88 @@ test('session crud maps session errors to Portuguese', async () => {
     ok: false,
     message: 'Sessão pai não encontrada.',
   });
-  expect(await handlers.renameSession({ sessionId: 'ghost', title: 'x' })).toEqual({
+  expect(await handlers.updateSession({ sessionId: 'ghost', title: 'x' })).toEqual({
     ok: false,
     message: 'Sessão não encontrada.',
   });
-  expect(await handlers.renameSession({ sessionId: child.id, title: 'a'.repeat(201) })).toEqual({
+  expect(await handlers.updateSession({ sessionId: child.id, title: 'a'.repeat(201) })).toEqual({
     ok: false,
     message: 'O título deve ter de 1 a 200 caracteres.',
+  });
+  expect(await handlers.updateSession({ sessionId: child.id })).toEqual(INVALID);
+});
+
+test('updateSession archives the subtree, keeps listing it and closes it in the workspace', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: session.id });
+  const other = await createSession({ root, projectId: project.id });
+  unwrap(
+    await handlers.saveWorkspace({
+      openSessionIds: [session.id, child.id, other.id],
+      activeSessionId: child.id,
+    }),
+  );
+  const archived = unwrap(await handlers.updateSession({ sessionId: session.id, archived: true }));
+  expect(archived.archivedAt).not.toBeNull();
+  const listed = unwrap(await handlers.listSessions({ projectId: project.id }));
+  expect(listed.map((item) => [item.id, item.archivedAt !== null])).toEqual([
+    [session.id, true],
+    [child.id, true],
+    [other.id, false],
+  ]);
+  expect(unwrap(await handlers.getWorkspace())).toEqual({
+    openSessionIds: [other.id],
+    activeSessionId: null,
+  });
+  const restored = unwrap(await handlers.updateSession({ sessionId: session.id, archived: false }));
+  expect(restored.archivedAt).toBeNull();
+});
+
+test('updateSession refuses to archive while the session or a descendant is running', async () => {
+  const { root, running, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: session.id });
+  running.add(child.id);
+  expect(await handlers.updateSession({ sessionId: session.id, archived: true })).toEqual({
+    ok: false,
+    message: 'Pare o turno em andamento antes de arquivar.',
+  });
+  expect((await loadStore(root)).sessions?.every((item) => item.archivedAt === null)).toBe(true);
+  expect(unwrap(await handlers.updateSession({ sessionId: session.id, title: 'Ok' })).title).toBe(
+    'Ok',
+  );
+});
+
+test('sendMessage refuses an archived session', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.updateSession({ sessionId: session.id, archived: true }));
+  expect(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' })).toEqual({
+    ok: false,
+    message: 'Desarquive a sessão antes de enviar mensagens.',
+  });
+  expect(send).not.toHaveBeenCalled();
+});
+
+test('workspace round trips, validates input and survives session deletion', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const other = await createSession({ root, projectId: project.id });
+  expect(unwrap(await handlers.getWorkspace())).toEqual({
+    openSessionIds: [],
+    activeSessionId: null,
+  });
+  expect(await handlers.saveWorkspace({ openSessionIds: ['a/b'], activeSessionId: null })).toEqual(
+    INVALID,
+  );
+  const workspace = { openSessionIds: [session.id, other.id], activeSessionId: other.id };
+  expect(unwrap(await handlers.saveWorkspace(workspace))).toBeNull();
+  expect(unwrap(await handlers.getWorkspace())).toEqual(workspace);
+  unwrap(await handlers.deleteSession({ sessionId: other.id }));
+  expect(unwrap(await handlers.getWorkspace())).toEqual({
+    openSessionIds: [session.id],
+    activeSessionId: null,
   });
 });
 

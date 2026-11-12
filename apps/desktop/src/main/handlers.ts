@@ -8,9 +8,17 @@ import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import { PathNotFoundError, bindProject, realPathOf, unbindProject } from '@inova/core/projects';
 import { providers } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
-import { SessionError, createSession, deleteSession, updateSession } from '@inova/core/sessions';
+import {
+  SessionError,
+  createSession,
+  deleteSession,
+  descendantIds,
+  getWorkspace,
+  saveWorkspace,
+  updateSession,
+} from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
-import type { Account, ProviderId, Session, Store } from '@inova/core/types';
+import type { Account, ProviderId, Session, Store, Workspace } from '@inova/core/types';
 import { UsageError, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
 import type { OpenedSession, ProjectView, AccountView, Result } from '../shared/api.js';
@@ -30,9 +38,10 @@ import {
   parsePath,
   parseProjectRef,
   parseRemoval,
-  parseRename,
   parseSessionRef,
+  parseSessionUpdate,
   parseUsageRequest,
+  parseWorkspace,
   requireAccount,
   validated,
 } from './validation.js';
@@ -52,6 +61,7 @@ export interface HandlerDeps {
 const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão']);
 const TITLE_CHARS = 60;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
+const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
 
 export function isExternalWebUrl(url: string): boolean {
   try {
@@ -73,21 +83,6 @@ function projectView(project: { id: string; path: string }, account: Account): P
 
 function sessionsOf(store: Store): Session[] {
   return store.sessions ?? [];
-}
-
-function descendantIds(store: Store, sessionId: string): Set<string> {
-  const removed = new Set([sessionId]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const session of sessionsOf(store)) {
-      if (session.parentId !== null && removed.has(session.parentId) && !removed.has(session.id)) {
-        removed.add(session.id);
-        grew = true;
-      }
-    }
-  }
-  return removed;
 }
 
 function sessionIdsOfProjects(store: Store, projectIds: ReadonlySet<string>): string[] {
@@ -287,6 +282,7 @@ export function createHandlers(deps: HandlerDeps) {
     const { sessionId, prompt, account } = input;
     const store = await loadStore(deps.root);
     const session = requireSession(store, sessionId);
+    if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
     const parent = sessionsOf(store).find((item) => item.id === session.parentId);
     const { turn, newId } = decideTurn({
       session,
@@ -404,11 +400,31 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseNewSession, ({ projectId, parentId }) =>
         serialized(async () => ok(await createSession({ root: deps.root, projectId, parentId }))),
       ),
-    renameSession: (input: unknown): Promise<Result<Session>> =>
-      validated(input, parseRename, ({ sessionId, title }) =>
-        serialized(async () =>
-          ok(await updateSession({ root: deps.root, sessionId, patch: { title } })),
-        ),
+    updateSession: (input: unknown): Promise<Result<Session>> =>
+      validated(input, parseSessionUpdate, ({ sessionId, title, archived }) =>
+        serialized(async () => {
+          if (archived === true) {
+            const store = await loadStore(deps.root);
+            requireSession(store, sessionId);
+            if ([...descendantIds(store, sessionId)].some((id) => deps.chat.isRunning(id))) {
+              return fail('Pare o turno em andamento antes de arquivar.');
+            }
+          }
+          const patch = {
+            ...(title === undefined ? {} : { title }),
+            ...(archived === undefined ? {} : { archived }),
+          };
+          return ok(await updateSession({ root: deps.root, sessionId, patch }));
+        }),
+      ),
+    getWorkspace: (): Promise<Result<Workspace>> =>
+      guarded(async () => ok(await getWorkspace(deps.root))),
+    saveWorkspace: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseWorkspace, (workspace) =>
+        serialized(async () => {
+          await saveWorkspace({ root: deps.root, workspace });
+          return ok(null);
+        }),
       ),
     deleteSession: (input: unknown): Promise<Result<null>> =>
       validated(input, parseSessionRef, ({ sessionId }) =>
@@ -442,6 +458,7 @@ export function createHandlers(deps: HandlerDeps) {
         if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
+        if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
         const project = store.projects.find((item) => item.id === session.projectId);
         const account = store.accounts.find((item) => item.id === project?.accountId);
         if (!project || !account) return fail('Projeto não encontrado.');
