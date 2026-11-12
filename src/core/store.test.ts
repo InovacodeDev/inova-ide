@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -14,6 +14,19 @@ beforeEach(async () => {
 describe('store', () => {
   it('loadStore returns empty store when file is missing', async () => {
     expect(await loadStore(root)).toEqual({ version: 1, accounts: [], projects: [] });
+  });
+
+  it('saveStore survives concurrent writers and leaves no temp files', async () => {
+    const store: Store = { version: 1, accounts: [], projects: [] };
+    await Promise.all(Array.from({ length: 20 }, () => saveStore(root, store)));
+    expect(await loadStore(root)).toEqual(store);
+    expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('saveStore removes its temp file when the final rename fails', async () => {
+    await mkdir(join(root, 'store.json'));
+    await expect(saveStore(root, { version: 1, accounts: [], projects: [] })).rejects.toThrow();
+    expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('saveStore then loadStore round-trips', async () => {

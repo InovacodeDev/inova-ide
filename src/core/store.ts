@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isProviderId } from './providers.js';
@@ -102,7 +103,12 @@ export async function loadStore(root: string): Promise<Store> {
 export async function saveStore(root: string, store: Store): Promise<void> {
   await mkdir(root, { recursive: true, mode: 0o700 });
   const file = join(root, 'store.json');
-  const tmp = `${file}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(store, null, 2)}\n`);
-  await rename(tmp, file);
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, `${JSON.stringify(store, null, 2)}\n`);
+    await rename(tmp, file);
+  } catch (error: unknown) {
+    await rm(tmp, { force: true });
+    throw error;
+  }
 }
