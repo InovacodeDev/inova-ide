@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
@@ -11,6 +12,7 @@ export interface Size {
 }
 
 const MAX_TEXT = 255;
+const MAX_PATH = 4096;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
 
 export function ok<T>(value: T): Result<T> {
@@ -22,11 +24,19 @@ export function fail(message: string): Result<never> {
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isBoundedString(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value !== '' && value.length <= limit;
 }
 
 function isText(value: unknown): value is string {
-  return typeof value === 'string' && value !== '' && value.length <= MAX_TEXT;
+  return isBoundedString(value, MAX_TEXT);
+}
+
+function isPath(value: unknown): value is string {
+  return isBoundedString(value, MAX_PATH) && isAbsolute(value);
 }
 
 function parseSize(input: Record<string, unknown>): Size | undefined {
@@ -50,13 +60,13 @@ export function parseRemoval(input: unknown): { label: string; force: boolean } 
 }
 
 export function parsePath(input: unknown): { path: string } | undefined {
-  return isRecord(input) && isText(input['path']) ? { path: input['path'] } : undefined;
+  return isRecord(input) && isPath(input['path']) ? { path: input['path'] } : undefined;
 }
 
 export function parseBinding(input: unknown): { path: string; accountLabel: string } | undefined {
   if (!isRecord(input)) return undefined;
   const { path, accountLabel } = input;
-  return isText(path) && isText(accountLabel) ? { path, accountLabel } : undefined;
+  return isPath(path) && isText(accountLabel) ? { path, accountLabel } : undefined;
 }
 
 export function parseProjectLaunch(input: unknown): ({ projectId: string } & Size) | undefined {

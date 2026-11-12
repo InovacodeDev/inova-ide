@@ -172,3 +172,20 @@ test('bindProject maps PathNotFoundError to a message', async () => {
   const result = await handlers.bindProject({ path: missing, accountLabel: 'pessoal' });
   expect(result).toEqual({ ok: false, message: `Caminho não encontrado: ${missing}` });
 });
+
+test('bindProject and unbindProject reject relative paths', async () => {
+  const { root, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  expect(await handlers.bindProject({ path: 'rel/dir', accountLabel: 'pessoal' })).toEqual(INVALID);
+  expect(await handlers.unbindProject({ path: 'rel/dir' })).toEqual(INVALID);
+  expect((await loadStore(root)).projects).toEqual([]);
+});
+
+test('bindProject accepts a 300+ character absolute path and fails on realpath', async () => {
+  const { root, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const long = join(root, ...Array.from({ length: 4 }, () => 'd'.repeat(90)));
+  expect(long.length).toBeGreaterThan(300);
+  const result = await handlers.bindProject({ path: long, accountLabel: 'pessoal' });
+  expect(result).toEqual({ ok: false, message: `Caminho não encontrado: ${long}` });
+});
