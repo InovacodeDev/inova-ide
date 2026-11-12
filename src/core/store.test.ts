@@ -79,6 +79,52 @@ describe('store', () => {
     await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
   });
 
+  const goodSession = {
+    id: 's1',
+    projectId: 'p1',
+    parentId: null,
+    title: 'Chat',
+    providerSessionId: null,
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+  };
+
+  it('loadStore accepts a store without sessions and with valid sessions', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [] }),
+    );
+    expect((await loadStore(root)).sessions).toBeUndefined();
+    const withSessions = {
+      version: 1,
+      accounts: [],
+      projects: [],
+      sessions: [goodSession, { ...goodSession, id: 's2', parentId: 's1', providerSessionId: 'x' }],
+    };
+    await writeFile(join(root, 'store.json'), JSON.stringify(withSessions));
+    expect(await loadStore(root)).toEqual(withSessions);
+  });
+
+  it.each([
+    ['a non-array sessions field', 'nope'],
+    ['a null entry', null],
+    ['an empty id', { ...goodSession, id: '' }],
+    ['a dotdot id', { ...goodSession, id: '..' }],
+    ['an id with a slash', { ...goodSession, id: 'a/b' }],
+    ['an id with a backslash', { ...goodSession, id: 'a\\b' }],
+    ['a non-string title', { ...goodSession, title: 1 }],
+    ['a numeric parentId', { ...goodSession, parentId: 1 }],
+    ['a missing providerSessionId', { ...goodSession, providerSessionId: undefined }],
+    ['a missing updatedAt', { ...goodSession, updatedAt: undefined }],
+  ])('loadStore rejects sessions with %s', async (_name, session) => {
+    const sessions = typeof session === 'string' ? session : [session];
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [], sessions }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
+
   it('dataRoot prefers INOVA_HOME', () => {
     expect(dataRoot({ INOVA_HOME: '/x' })).toBe('/x');
     expect(dataRoot({})).toBe(join(homedir(), '.inova'));

@@ -14,8 +14,19 @@ export interface Project {
   accountId: string;
 }
 
+export interface Session {
+  id: string;
+  projectId: string;
+  parentId: string | null;
+  title: string;
+  providerSessionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Store {
   version: 1;
   accounts: Account[];
   projects: Project[];
+  sessions?: Session[];
 }

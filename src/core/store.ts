@@ -47,15 +47,32 @@ function isProject(value: unknown): boolean {
   return isRecord(value) && hasStrings(value, ['id', 'path', 'accountId']);
 }
 
+function isStringOrNull(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+function isSession(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
+  const { id, parentId, providerSessionId } = value;
+  return (
+    typeof id === 'string' &&
+    isSafeSegment(id) &&
+    isStringOrNull(parentId) &&
+    isStringOrNull(providerSessionId)
+  );
+}
+
 function isStore(value: unknown): value is Store {
   if (!isRecord(value)) return false;
-  const { version, accounts, projects } = value;
+  const { version, accounts, projects, sessions } = value;
   return (
     version === 1 &&
     Array.isArray(accounts) &&
     accounts.every(isAccount) &&
     Array.isArray(projects) &&
-    projects.every(isProject)
+    projects.every(isProject) &&
+    (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession)))
   );
 }
 
