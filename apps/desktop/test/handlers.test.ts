@@ -202,6 +202,64 @@ test('a new claude turn persists the session id before spawning and derives the 
   expect(stored?.title).toBe('a'.repeat(60));
 });
 
+const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
+
+async function providerSessionOf(root: string): Promise<string | null | undefined> {
+  return (await loadStore(root)).sessions?.[0]?.providerSessionId;
+}
+
+test('a failed first turn without a session event clears the provisional provider session', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  expect(await providerSessionOf(root)).not.toBeNull();
+  handlers.handleChatEvent(session.id, failedDone);
+  await vi.waitFor(async () => {
+    expect(await providerSessionOf(root)).toBeNull();
+  });
+});
+
+test('a failed first turn keeps the provider session once the CLI confirmed it', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  const provisional = await providerSessionOf(root);
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'confirmed' });
+  handlers.handleChatEvent(session.id, failedDone);
+  await handlers.loadTranscript({ sessionId: session.id });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(await providerSessionOf(root)).toBe(provisional);
+});
+
+test('a failed resumed turn keeps the existing provider session', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  await updateSession({
+    root,
+    sessionId: session.id,
+    patch: { providerSessionId: 'existing' },
+  });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  handlers.handleChatEvent(session.id, failedDone);
+  await handlers.loadTranscript({ sessionId: session.id });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(await providerSessionOf(root)).toBe('existing');
+});
+
+test('a later turn starts a new session after the provisional id was cleared', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  handlers.handleChatEvent(session.id, failedDone);
+  await vi.waitFor(async () => {
+    expect(await providerSessionOf(root)).toBeNull();
+  });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  const args = send.mock.calls[1]?.[0].spec.args ?? [];
+  expect(args).toContain('--session-id');
+  expect(args).not.toContain('--resume');
+});
+
 test('sendMessage persists the session before the process is spawned', async () => {
   const { root, send, handlers } = await setup();
   const { session } = await seedSession(root);
@@ -511,6 +569,39 @@ test('removeAccount refuses while a chat turn of the account is running', async 
   expect((await loadStore(root)).accounts).toHaveLength(1);
   chatInUse.clear();
   expect(unwrap(await handlers.removeAccount({ label: 'pessoal', force: true }))).toBeNull();
+});
+
+test('concurrent addAccount calls do not lose updates', async () => {
+  const { root, handlers } = await setup();
+  const labels = ['a', 'b', 'c', 'd', 'e', 'f'];
+  const results = await Promise.all(
+    labels.map((label) => handlers.addAccount({ provider: 'claude', label })),
+  );
+  for (const result of results) expect(result.ok).toBe(true);
+  expect((await loadStore(root)).accounts.map((item) => item.label).sort()).toEqual(labels);
+});
+
+test('concurrent bind, unbind and account changes keep every update', async () => {
+  const { root, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const paths = await Promise.all([tmp(), tmp(), tmp(), tmp()]);
+  await Promise.all([
+    ...paths.map((path) => handlers.bindProject({ path, accountLabel: 'pessoal' })),
+    handlers.addAccount({ provider: 'codex', label: 'extra' }),
+  ]);
+  const store = await loadStore(root);
+  expect(store.projects).toHaveLength(4);
+  expect(store.accounts).toHaveLength(2);
+  const first = paths[0] ?? '';
+  const results = await Promise.all([
+    handlers.unbindProject({ path: first }),
+    handlers.removeAccount({ label: 'extra', force: true }),
+    handlers.addAccount({ provider: 'claude', label: 'novo' }),
+  ]);
+  for (const result of results) expect(result.ok).toBe(true);
+  const after = await loadStore(root);
+  expect(after.projects).toHaveLength(3);
+  expect(after.accounts.map((item) => item.label).sort()).toEqual(['novo', 'pessoal']);
 });
 
 test('bindProject maps PathNotFoundError to a message', async () => {
