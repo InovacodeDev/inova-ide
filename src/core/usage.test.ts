@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -40,7 +40,7 @@ async function fixtureBody(): Promise<unknown> {
 }
 
 function recorder(options: {
-  platform: NodeJS.Platform;
+  platform?: NodeJS.Platform;
   runResult?: RunResult;
   response?: { ok: boolean; status: number; body: unknown };
 }): Recorder {
@@ -48,7 +48,7 @@ function recorder(options: {
   const requests: Recorder['requests'] = [];
   const response = options.response ?? { ok: true, status: 200, body: {} };
   const deps: UsageDeps = {
-    platform: options.platform,
+    platform: options.platform ?? 'linux',
     now: () => NOW,
     runner: {
       run: (cmd) => {
@@ -180,6 +180,117 @@ describe('readUsage claude response', () => {
     const rec = recorder({ platform: 'linux', response: { ok: true, status: 200, body: 'nope' } });
     const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
     expect(error.code).toBe('bad-response');
+  });
+});
+
+interface RolloutFile {
+  day: string;
+  name: string;
+  lines: unknown[];
+  mtime: Date;
+}
+
+async function writeRollout(file: RolloutFile): Promise<void> {
+  const dir = join(homeDir, 'sessions', ...file.day.split('-'));
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, file.name);
+  await writeFile(path, file.lines.map((line) => JSON.stringify(line)).join('\n'));
+  await utimes(path, file.mtime, file.mtime);
+}
+
+function tokenCount(limits: { primary: unknown; secondary: unknown }, timestamp?: string): unknown {
+  return {
+    ...(timestamp === undefined ? {} : { timestamp }),
+    type: 'event_msg',
+    payload: { type: 'token_count', rate_limits: limits },
+  };
+}
+
+describe('readUsage codex', () => {
+  it('is unavailable without rollout files', async () => {
+    const snapshot = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(snapshot).toMatchObject({ provider: 'codex', windows: [], source: 'unavailable' });
+  });
+
+  it('reads the last rate limits of the most recently modified rollout', async () => {
+    const limits = (used: number): unknown =>
+      tokenCount({ primary: { used_percent: used, resets_at: 1_794_484_800 }, secondary: null });
+    await writeRollout({
+      day: '2026-11-12',
+      name: 'rollout-old.jsonl',
+      lines: [limits(70)],
+      mtime: new Date('2026-11-12T09:00:00Z'),
+    });
+    await writeRollout({
+      day: '2026-11-11',
+      name: 'rollout-new.jsonl',
+      lines: [limits(10), limits(25), { type: 'event_msg', payload: { type: 'agent_message' } }],
+      mtime: new Date('2026-11-12T11:00:00Z'),
+    });
+    const snapshot = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(snapshot).toEqual({
+      provider: 'codex',
+      source: 'rollout',
+      fetchedAt: NOW.toISOString(),
+      windows: [{ kind: 'session', usedPercent: 25, resetsAt: '2026-11-12T12:00:00.000Z' }],
+    });
+  });
+
+  it('resolves resets_in_seconds from the line timestamp, else the file mtime', async () => {
+    await writeRollout({
+      day: '2026-11-12',
+      name: 'rollout-a.jsonl',
+      lines: [
+        tokenCount({
+          primary: { used_percent: 150, resets_in_seconds: 600 },
+          secondary: { used_percent: 40, resets_in_seconds: 3600 },
+        }),
+      ],
+      mtime: new Date('2026-11-12T10:00:00Z'),
+    });
+    await writeRollout({
+      day: '2026-11-12',
+      name: 'rollout-b.jsonl',
+      lines: [
+        tokenCount(
+          {
+            primary: { used_percent: 150, resets_in_seconds: 600 },
+            secondary: { used_percent: 'x' },
+          },
+          '2026-11-12T11:00:00.000Z',
+        ),
+      ],
+      mtime: new Date('2026-11-12T11:30:00Z'),
+    });
+    const fromTimestamp = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(fromTimestamp.windows).toEqual([
+      { kind: 'session', usedPercent: 100, resetsAt: '2026-11-12T11:10:00.000Z' },
+    ]);
+    await utimes(
+      join(homeDir, 'sessions', '2026', '11', '12', 'rollout-b.jsonl'),
+      new Date('2026-11-12T09:00:00Z'),
+      new Date('2026-11-12T09:00:00Z'),
+    );
+    const fromMtime = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(fromMtime.windows).toEqual([
+      { kind: 'session', usedPercent: 100, resetsAt: '2026-11-12T10:10:00.000Z' },
+      { kind: 'weekly', usedPercent: 40, resetsAt: '2026-11-12T11:00:00.000Z' },
+    ]);
+  });
+
+  it('only scans the three newest day directories', async () => {
+    const line = tokenCount({ primary: { used_percent: 5 }, secondary: null });
+    for (const day of ['2026-11-09', '2026-11-10', '2026-11-11']) {
+      await writeRollout({ day, name: 'rollout-x.jsonl', lines: [], mtime: new Date(day) });
+    }
+    await writeRollout({
+      day: '2026-10-01',
+      name: 'rollout-x.jsonl',
+      lines: [line],
+      mtime: new Date('2026-11-12T11:00:00Z'),
+    });
+    const snapshot = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(snapshot.source).toBe('unavailable');
   });
 });
 
