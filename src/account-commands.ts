@@ -42,6 +42,12 @@ export async function accountList(ctx: Context): Promise<number> {
 export async function accountRm(ctx: Context, args: string[]): Promise<number> {
   const force = args.includes('--force');
   const label = need(args.find((arg) => arg !== '--force'));
+  const account = await requireAccount(ctx, label);
+  if (account.provider === 'claude') {
+    ctx.io.out(
+      `Dica: rode antes "CLAUDE_CONFIG_DIR=${account.homeDir} claude auth logout" para remover a credencial do Keychain.`,
+    );
+  }
   await removeAccount({ root: root(ctx), label, force });
   return 0;
 }

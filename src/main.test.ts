@@ -1,6 +1,8 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { loadStore } from './core/store.js';
+import type { Account } from './core/types.js';
 import { makeHarness, useTmpRoot } from './test-harness.js';
 
 describe('inova account commands', () => {
@@ -58,6 +60,25 @@ describe('inova account commands', () => {
     expect(await tmp.run(h, ['account', 'rm', 'c'])).toBe(0);
     h.out.length = 0;
     await tmp.run(h, ['account', 'list']);
+    expect(h.out).toEqual([]);
+  });
+
+  it('rm of a claude account prints the keychain logout hint with its home', async () => {
+    const h = makeHarness();
+    await tmp.run(h, ['account', 'add', 'claude', 'pessoal']);
+    const { homeDir } = (await loadStore(tmp.root())).accounts[0] as Account;
+    h.out.length = 0;
+    expect(await tmp.run(h, ['account', 'rm', 'pessoal'])).toBe(0);
+    expect(h.out).toEqual([
+      `Dica: rode antes "CLAUDE_CONFIG_DIR=${homeDir} claude auth logout" para remover a credencial do Keychain.`,
+    ]);
+  });
+
+  it('rm of a codex account prints no hint', async () => {
+    const h = makeHarness();
+    await tmp.run(h, ['account', 'add', 'codex', 'c']);
+    h.out.length = 0;
+    await tmp.run(h, ['account', 'rm', 'c']);
     expect(h.out).toEqual([]);
   });
 
