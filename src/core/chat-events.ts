@@ -155,5 +155,137 @@ function createClaudeParser(): ChatParser {
   };
 }
 
+function createGeminiParser(): ChatParser {
+  let block = 0;
+
+  function errorMessage(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (isRecord(value)) return str(value['message']) ?? 'Gemini failed';
+    return 'Gemini failed';
+  }
+
+  return {
+    parse(line) {
+      const data = decodeLine(line);
+      if (data === null) return [];
+      switch (data['type']) {
+        case 'init': {
+          const sessionId = str(data['session_id']);
+          return sessionId === null ? [] : [{ kind: 'session', providerSessionId: sessionId }];
+        }
+        case 'message': {
+          const text = str(data['content']);
+          if (data['role'] !== 'assistant' || text === null) return [];
+          if (data['delta'] === true) {
+            if (block === 0) block = 1;
+            return [{ kind: 'text-delta', blockId: `gemini-${block}`, text }];
+          }
+          block += 1;
+          return [{ kind: 'text', blockId: `gemini-${block}`, text }];
+        }
+        case 'tool_use': {
+          const toolId = str(data['tool_id']);
+          const name = str(data['tool_name']);
+          if (toolId === null || name === null) return [];
+          block += 1;
+          return [{ kind: 'tool-use', toolId, name, input: prettyJson(data['parameters']) }];
+        }
+        case 'tool_result': {
+          const toolId = str(data['tool_id']);
+          if (toolId === null) return [];
+          const failed = data['status'] === 'error' || isRecord(data['error']);
+          const output = failed ? errorMessage(data['error']) : (str(data['output']) ?? '');
+          return [{ kind: 'tool-result', toolId, output, isError: failed }];
+        }
+        case 'error':
+          return [{ kind: 'error', message: errorMessage(data) }];
+        case 'result': {
+          const stats = isRecord(data['stats']) ? data['stats'] : {};
+          const failed = data['status'] !== 'success';
+          const done: ChatEvent = {
+            kind: 'done',
+            isError: failed,
+            costUsd: null,
+            durationMs: num(stats['duration_ms']),
+          };
+          return failed ? [{ kind: 'error', message: errorMessage(data['error']) }, done] : [done];
+        }
+        default:
+          return [];
+      }
+    },
+  };
+}
+
+function createCodexParser(): ChatParser {
+  const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
+
+  function fromItem(started: boolean, item: unknown): ChatEvent[] {
+    if (!isRecord(item)) return [];
+    const id = str(item['id']);
+    if (id === null) return [];
+    if (item['type'] === 'command_execution') {
+      if (started) {
+        return [
+          {
+            kind: 'tool-use',
+            toolId: id,
+            name: 'command_execution',
+            input: str(item['command']) ?? '',
+          },
+        ];
+      }
+      const exitCode = num(item['exit_code']);
+      const isError = item['status'] === 'failed' || (exitCode !== null && exitCode !== 0);
+      return [
+        { kind: 'tool-result', toolId: id, output: str(item['aggregated_output']) ?? '', isError },
+      ];
+    }
+    const text = str(item['text']);
+    if (!started && item['type'] === 'agent_message' && text !== null) {
+      return [{ kind: 'text', blockId: id, text }];
+    }
+    return [];
+  }
+
+  return {
+    parse(line) {
+      const data = decodeLine(line);
+      if (data === null) return [];
+      switch (data['type']) {
+        case 'thread.started': {
+          const threadId = str(data['thread_id']);
+          return threadId === null ? [] : [{ kind: 'session', providerSessionId: threadId }];
+        }
+        case 'item.started':
+          return fromItem(true, data['item']);
+        case 'item.completed':
+          return fromItem(false, data['item']);
+        case 'turn.completed':
+          return [{ kind: 'done', isError: false, costUsd: null, durationMs: null }];
+        case 'turn.failed': {
+          const error = isRecord(data['error']) ? data['error'] : {};
+          return [
+            { kind: 'error', message: str(error['message']) ?? 'Codex turn failed' },
+            failedDone,
+          ];
+        }
+        case 'error':
+          return [{ kind: 'error', message: str(data['message']) ?? 'Codex error' }];
+        default:
+          return [];
+      }
+    },
+  };
+}
+
 export function createChatParser(provider: ProviderId): ChatParser {
-  if (provider === 'claude') return createClaudeParser();\n  return { parse: () => [] };\n}
+  switch (provider) {
+    case 'claude':
+      return createClaudeParser();
+    case 'gemini':
+      return createGeminiParser();
+    case 'codex':
+      return createCodexParser();
+  }
+}
