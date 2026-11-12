@@ -23,8 +23,8 @@ export function useWarning() {
       try {
         return await action();
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
-        setWarning(`Erro inesperado: ${message}`);
+        console.error('inova: unexpected renderer error', error);
+        setWarning('Erro inesperado.');
         return undefined;
       }
     },
