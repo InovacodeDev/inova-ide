@@ -1,7 +1,7 @@
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'apps/desktop/out', 'graft', '.superpowers', 'docs', 'node_modules'] },
+  { ignores: ['dist', 'apps/desktop/out', 'release', 'graft', '.superpowers', 'docs', 'node_modules'] },
   ...tseslint.configs.recommended,
   {
     files: ['**/*.ts', '**/*.tsx'],

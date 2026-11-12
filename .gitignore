@@ -6,3 +6,4 @@ dist
 .superpowers/
 .vitest/
 apps/desktop/out
+release/

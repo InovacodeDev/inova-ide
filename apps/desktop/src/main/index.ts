@@ -130,6 +130,8 @@ async function runSelftest(): Promise<void> {
   console.log(`selftest:${output.trim()}:${Object.keys(providers).join(',')}`);
 }
 
+app.setName('InovaIDE');
+
 void app.whenReady().then(async () => {
   if (process.env['INOVA_SELFTEST'] !== '1') {
     const created = createHandlers({

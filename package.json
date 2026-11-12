@@ -11,7 +11,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "version:check": "node scripts/version.mjs check",
+    "version:bump": "node scripts/version.mjs bump",
+    "package:mac": "pnpm --filter @inova/desktop pack:mac"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

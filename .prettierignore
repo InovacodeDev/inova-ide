@@ -5,3 +5,5 @@ pnpm-lock.yaml
 dist
 .vitest/
 apps/desktop/out
+release/
+apps/desktop/build/icon.icns
