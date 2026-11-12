@@ -1,4 +1,24 @@
-#!/bin/zsh
-set -euo pipefail
-APP_CONTENTS="${0:A:h:h:h}"
-exec env ELECTRON_RUN_AS_NODE=1 "$APP_CONTENTS/MacOS/InovaIDE" "$APP_CONTENTS/Resources/cli/dist/cli.js" "$@"
+#!/bin/sh
+set -eu
+
+TARGET="$0"
+while [ -L "$TARGET" ]; do
+  LINK_DIR="$(CDPATH= cd -- "$(dirname -- "$TARGET")" && pwd)"
+  TARGET="$(readlink "$TARGET")"
+  case "$TARGET" in
+    /*) ;;
+    *) TARGET="$LINK_DIR/$TARGET" ;;
+  esac
+done
+
+BIN_DIR="$(CDPATH= cd -- "$(dirname -- "$TARGET")" && pwd)"
+RES_DIR="$(dirname "$BIN_DIR")"
+APP_DIR="$(dirname "$RES_DIR")"
+
+if [ -x "$APP_DIR/MacOS/InovaIDE" ]; then
+  EXEC_BIN="$APP_DIR/MacOS/InovaIDE"
+else
+  EXEC_BIN="$APP_DIR/inova-ide"
+fi
+
+exec env ELECTRON_RUN_AS_NODE=1 "$EXEC_BIN" "$RES_DIR/cli/dist/cli.js" "$@"

@@ -10,16 +10,14 @@ files:
   - package.json
   - node_modules/**/*
   - '!node_modules/.bin'
-  - '!**/prebuilds/win32-*'
-  - '!**/prebuilds/linux-*'
 asar: true
 asarUnpack:
   - '**/node_modules/node-pty/**'
 extraResources:
   - from: cli
     to: cli
-  - from: resources/bin/inova
-    to: bin/inova
+  - from: resources/bin
+    to: bin
 mac:
   category: public.app-category.developer-tools
   icon: build/icon.icns
@@ -39,4 +37,33 @@ dmg:
       y: 220
       type: link
       path: /Applications
+win:
+  icon: build/icon.ico
+  artifactName: InovaIDE-${version}-win-${arch}.${ext}
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+linux:
+  category: Development
+  icon: build/icon.png
+  executableName: inova-ide
+  artifactName: InovaIDE-${version}-linux-${arch}.${ext}
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
 afterPack: ./scripts/after-pack.mjs
