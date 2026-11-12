@@ -41,6 +41,28 @@ export class ChatBusyError extends Error {
   }
 }
 
+const KILL_AFTER_MS = 2000;
+const STDERR_TAIL_CHARS = 4096;
+
+interface Turn {
+  accountId: string;
+  pid: number | undefined;
+  cancelled: boolean;
+  finished: boolean;
+  doneSeen: boolean;
+  stderrTail: string;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  settle: () => void;
+  exited: Promise<void>;
+}
+
+function failureMessage(turn: Turn, code: number | null): string {
+  if (turn.cancelled) return 'Turno cancelado.';
+  const tail = turn.stderrTail.trim();
+  const base = `O processo terminou com código ${code ?? 'desconhecido'}`;
+  return tail === '' ? `${base}.` : `${base}: ${tail}`;
+}
+
 type Json = Record<string, unknown>;
 
 function isJson(value: unknown): value is Json {
@@ -131,3 +153,130 @@ export function parseTranscriptLine(line: string): ChatEvent | undefined {
   return isJson(value) ? eventOf(value) : undefined;
 }
 
+export function createChatRunner(deps: {
+  spawnChild: SpawnChild;
+  killTree: (pid: number, signal: NodeJS.Signals) => void;
+  emit: (sessionId: string, event: ChatEvent) => void;
+}): ChatRunner {
+  const turns = new Map<string, Turn>();
+
+  function signal(turn: Turn, name: NodeJS.Signals): void {
+    if (turn.pid === undefined) return;
+    try {
+      deps.killTree(turn.pid, name);
+    } catch (error: unknown) {
+      console.error(`inova: ${name} failed for chat process ${turn.pid}`, error);
+    }
+  }
+
+  function cancel(sessionId: string): void {
+    const turn = turns.get(sessionId);
+    if (!turn || turn.cancelled) return;
+    turn.cancelled = true;
+    turn.timer = setTimeout(() => {
+      turn.timer = undefined;
+      signal(turn, 'SIGKILL');
+      turn.settle();
+    }, KILL_AFTER_MS);
+    signal(turn, 'SIGTERM');
+  }
+
+  function finish(input: { sessionId: string; turn: Turn; message: string }): void {
+    const { sessionId, turn, message } = input;
+    if (turn.finished) return;
+    turn.finished = true;
+    if (turn.timer !== undefined) clearTimeout(turn.timer);
+    turns.delete(sessionId);
+    if (!turn.doneSeen) {
+      deps.emit(sessionId, { kind: 'error', message });
+      deps.emit(sessionId, { kind: 'done', isError: true, costUsd: null, durationMs: null });
+    }
+    turn.settle();
+  }
+
+  function send(input: {
+    sessionId: string;
+    accountId: string;
+    provider: ProviderId;
+    file: string;
+    spec: LaunchSpec;
+  }): void {
+    const { sessionId, spec } = input;
+    if (turns.has(sessionId)) throw new ChatBusyError(sessionId);
+    let settle: () => void = () => undefined;
+    const exited = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const turn: Turn = {
+      accountId: input.accountId,
+      pid: undefined,
+      cancelled: false,
+      finished: false,
+      doneSeen: false,
+      stderrTail: '',
+      timer: undefined,
+      settle,
+      exited,
+    };
+    turns.set(sessionId, turn);
+    let child: ChildProcessLike;
+    try {
+      child = deps.spawnChild({
+        file: input.file,
+        args: spec.args,
+        cwd: spec.cwd,
+        env: spec.env,
+      });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error;
+      finish({ sessionId, turn, message: `Falha ao iniciar o processo: ${error.message}` });
+      return;
+    }
+    turn.pid = child.pid;
+    const parser: ChatParser = createChatParser(input.provider);
+    const decoder = new StringDecoder('utf8');
+    let pending = '';
+
+    const handleLine = (line: string): void => {
+      for (const event of parser.parse(line)) {
+        if (event.kind === 'done') turn.doneSeen = true;
+        deps.emit(sessionId, event);
+      }
+    };
+    const consume = (text: string): void => {
+      pending += text;
+      const lines = pending.split('\n');
+      pending = lines.pop() ?? '';
+      lines.forEach(handleLine);
+    };
+
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      consume(typeof chunk === 'string' ? chunk : decoder.write(chunk));
+    });
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      turn.stderrTail = (turn.stderrTail + chunk.toString()).slice(-STDERR_TAIL_CHARS);
+    });
+    child.on('error', (error: Error) => {
+      finish({ sessionId, turn, message: `Falha ao iniciar o processo: ${error.message}` });
+    });
+    child.on('close', (code: number | null) => {
+      if (turn.finished) return;
+      consume(decoder.end());
+      if (pending !== '') handleLine(pending);
+      pending = '';
+      finish({ sessionId, turn, message: failureMessage(turn, code) });
+    });
+  }
+
+  return {
+    send,
+    cancel,
+    isRunning: (sessionId) => turns.has(sessionId),
+    accountsInUse: () => new Set([...turns.values()].map((turn) => turn.accountId)),
+    async closeAll() {
+      const running = [...turns.entries()];
+      for (const [sessionId] of running) cancel(sessionId);
+      await Promise.all(running.map(([, turn]) => turn.exited));
+    },
+  };
+}
