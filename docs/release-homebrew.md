@@ -36,7 +36,7 @@ Siga esta sequência para publicar qualquer versão nova:
    git push origin main --tags
    ```
 4. Acompanhe o workflow `.github/workflows/release.yml`:
-   - Compila e testa os DMGs `arm64` e `x64`.
+   - Compila e testa os DMGs `arm64` (`macos-15`) e `x64` (`macos-15-intel`).
    - Executa `INOVA_SELFTEST=1` e `inova --version` dentro dos `.app` empacotados.
    - Publica o GitHub Release com os `.dmg` e `.sha256`.
    - Atualiza `Casks/inova-ide.rb` no `InovacodeDev/homebrew-tap` após rodar `brew style` e `brew audit --cask`.

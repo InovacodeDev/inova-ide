@@ -28,8 +28,22 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'));
 }
 
+function sanitizedEnv(extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
+  for (const key of [
+    'CSC_LINK',
+    'CSC_KEY_PASSWORD',
+    'APPLE_ID',
+    'APPLE_APP_SPECIFIC_PASSWORD',
+    'APPLE_TEAM_ID',
+  ]) {
+    if (!env[key]) delete env[key];
+  }
+  return env;
+}
+
 function run(cmd, args, cwd, extraEnv = {}) {
-  execFileSync(cmd, args, { cwd, stdio: 'inherit', env: { ...process.env, ...extraEnv } });
+  execFileSync(cmd, args, { cwd, stdio: 'inherit', env: sanitizedEnv(extraEnv) });
 }
 
 function sha256File(file) {
