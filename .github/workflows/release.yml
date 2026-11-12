@@ -92,12 +92,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
             "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg" \
             "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256" \
             "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg" \
             "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg.sha256" \
             --title "InovaIDE ${GITHUB_REF_NAME}" \
-            --generate-release-notes
+            --generate-notes
 
   update-homebrew-tap:
     needs: [validate, publish-release]
