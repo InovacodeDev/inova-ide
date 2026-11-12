@@ -135,9 +135,17 @@ function collectPtyOutput(): Promise<string> {
   });
 }
 
+function stripVt(text: string): string {
+  // REGEX: remove VT OSC and CSI control sequences emitted by ConPTY
+  return text
+    .replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .trim();
+}
+
 async function runSelftest(): Promise<void> {
-  const output = await collectPtyOutput();
-  console.log(`selftest:${output.trim()}:${Object.keys(providers).join(',')}`);
+  const output = stripVt(await collectPtyOutput());
+  const ptyState = output.includes('pty-ok') ? 'pty-ok' : output;
+  console.log(`selftest:${ptyState}:${Object.keys(providers).join(',')}`);
 }
 
 app.setName('InovaIDE');
