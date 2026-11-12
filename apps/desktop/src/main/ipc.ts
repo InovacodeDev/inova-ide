@@ -5,6 +5,12 @@ import type { SessionManager } from './sessions.js';
 import { isRecord } from './validation.js';
 
 type Handlers = ReturnType<typeof createHandlers>;
+type SenderEvent = { senderFrame?: { url: string } | null };
+
+export function isAppUrl(url: string | undefined, appUrl: string): boolean {
+  if (url === undefined) return false;
+  return url === appUrl || ['/', '?', '#'].some((separator) => url.startsWith(appUrl + separator));
+}
 
 function resizeRequest(
   input: unknown,
@@ -16,26 +22,45 @@ function resizeRequest(
   return { sessionId, cols, rows };
 }
 
-export function registerIpc(deps: { handlers: Handlers; sessions: SessionManager }): void {
-  const { handlers, sessions } = deps;
-  ipcMain.handle(CHANNELS.listAccounts, () => handlers.listAccounts());
-  ipcMain.handle(CHANNELS.addAccount, (_event, input: unknown) => handlers.addAccount(input));
-  ipcMain.handle(CHANNELS.removeAccount, (_event, input: unknown) => handlers.removeAccount(input));
-  ipcMain.handle(CHANNELS.listProjects, () => handlers.listProjects());
-  ipcMain.handle(CHANNELS.pickFolder, () => handlers.pickFolder());
-  ipcMain.handle(CHANNELS.bindProject, (_event, input: unknown) => handlers.bindProject(input));
-  ipcMain.handle(CHANNELS.unbindProject, (_event, input: unknown) => handlers.unbindProject(input));
-  ipcMain.handle(CHANNELS.openProject, (_event, input: unknown) => handlers.openProject(input));
-  ipcMain.handle(CHANNELS.openLogin, (_event, input: unknown) => handlers.openLogin(input));
+export function registerIpc(deps: {
+  handlers: Handlers;
+  sessions: SessionManager;
+  allowedOrigin: string;
+}): void {
+  const { handlers, sessions, allowedOrigin } = deps;
+  const isTrusted = (event: SenderEvent): boolean =>
+    isAppUrl(event.senderFrame?.url, allowedOrigin);
 
-  ipcMain.on(CHANNELS.ptyWrite, (_event, sessionId: unknown, data: unknown) => {
+  const handle = (channel: string, run: (input: unknown) => Promise<unknown>): void => {
+    ipcMain.handle(channel, async (event, input: unknown) => {
+      if (!isTrusted(event)) throw new Error('Remetente não autorizado.');
+      return run(input);
+    });
+  };
+  const listen = (channel: string, run: (...args: unknown[]) => void): void => {
+    ipcMain.on(channel, (event, ...args: unknown[]) => {
+      if (isTrusted(event)) run(...args);
+    });
+  };
+
+  handle(CHANNELS.listAccounts, () => handlers.listAccounts());
+  handle(CHANNELS.addAccount, (input) => handlers.addAccount(input));
+  handle(CHANNELS.removeAccount, (input) => handlers.removeAccount(input));
+  handle(CHANNELS.listProjects, () => handlers.listProjects());
+  handle(CHANNELS.pickFolder, () => handlers.pickFolder());
+  handle(CHANNELS.bindProject, (input) => handlers.bindProject(input));
+  handle(CHANNELS.unbindProject, (input) => handlers.unbindProject(input));
+  handle(CHANNELS.openProject, (input) => handlers.openProject(input));
+  handle(CHANNELS.openLogin, (input) => handlers.openLogin(input));
+
+  listen(CHANNELS.ptyWrite, (sessionId, data) => {
     if (typeof sessionId === 'string' && typeof data === 'string') sessions.write(sessionId, data);
   });
-  ipcMain.on(CHANNELS.ptyResize, (_event, input: unknown) => {
+  listen(CHANNELS.ptyResize, (input) => {
     const request = resizeRequest(input);
     if (request) sessions.resize(request);
   });
-  ipcMain.on(CHANNELS.ptyClose, (_event, sessionId: unknown) => {
+  listen(CHANNELS.ptyClose, (sessionId) => {
     if (typeof sessionId === 'string') sessions.close(sessionId);
   });
 }

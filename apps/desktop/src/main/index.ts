@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
@@ -6,12 +7,15 @@ import { app, BrowserWindow, dialog } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
 import { createHandlers } from './handlers.js';
-import { registerIpc } from './ipc.js';
+import { isAppUrl, registerIpc } from './ipc.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { loginShellPath } from './shell-env.js';
 
 const SHELL_TIMEOUT_MS = 5000;
+const appUrl =
+  process.env['ELECTRON_RENDERER_URL'] ??
+  pathToFileURL(join(__dirname, '../renderer/index.html')).href;
 let mainWindow: BrowserWindow | undefined;
 let cachedBaseEnv: Promise<NodeJS.ProcessEnv> | undefined;
 
@@ -57,14 +61,12 @@ function createWindow(): void {
     },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!isAppUrl(url, appUrl)) event.preventDefault();
+  });
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
   mainWindow = window;
-
-  const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
-  if (devServerUrl) {
-    void window.loadURL(devServerUrl);
-  } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'));
-  }
+  void window.loadURL(appUrl);
 }
 
 async function pickFolder(): Promise<string | null> {
@@ -101,7 +103,7 @@ void app.whenReady().then(async () => {
       baseEnv,
       pickFolder,
     });
-    registerIpc({ handlers, sessions });
+    registerIpc({ handlers, sessions, allowedOrigin: appUrl });
     createWindow();
     return;
   }
@@ -113,6 +115,8 @@ void app.whenReady().then(async () => {
     app.exit(1);
   }
 });
+
+app.on('will-quit', () => sessions.closeAll());
 
 app.on('window-all-closed', () => {
   sessions.closeAll();
