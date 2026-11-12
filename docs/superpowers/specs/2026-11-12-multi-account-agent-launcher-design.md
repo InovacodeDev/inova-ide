@@ -28,7 +28,11 @@ Cada CLI oficial aceita uma variável que aponta o diretório de config. Um dire
 
 Evidência local (2026-11-12): o Keychain do macOS desta máquina tem `Claude Code-credentials`, `Claude Code-credentials-1b65d025` e `Claude Code-credentials-2db276ed`. Isso indica que o Claude Code 2.1.289 cria uma entrada de Keychain por `CLAUDE_CONFIG_DIR`.
 
-Task 1 confirmada (2026-11-12, Claude Code 2.1.289): duas contas Team de organizações diferentes logadas via `inova account login`. `claude auth status` mostra a identidade certa em cada `CLAUDE_CONFIG_DIR`. Surgiram duas entradas novas `Claude Code-credentials-<hash>` no Keychain. A conta padrão (`~/.claude`) não mudou. Codex e Gemini: não verificados.
+Task 1 confirmada (2026-11-12, Claude Code 2.1.289): duas contas Team de organizações diferentes logadas via `inova account login`. `claude auth status` mostra a identidade certa em cada `CLAUDE_CONFIG_DIR`. Surgiram duas entradas novas `Claude Code-credentials-<hash>` no Keychain. A conta padrão (`~/.claude`) não mudou. Codex: não verificado.
+
+Gemini confirmado (2026-11-12, Gemini CLI 0.68): login "Sign in with Google" via `inova account login` grava `oauth_creds.json` e `settings.json` (`oauth-personal`) em `<home>/.gemini/`. O `~/.gemini` padrão (que usa API key) não mudou. `inova run` abre direto na tela principal, sem pedir login.
+
+Claude: `claude auth login` não grava `hasCompletedOnboarding`; sem isso o `claude` interativo refaz onboarding e login. O adapter marca a flag em `prepareLaunch` antes do `run`.
 
 O núcleo tem três tipos:
 
