@@ -125,7 +125,7 @@ test('openProject reports missing binary with install hint', async () => {
   expect(open).not.toHaveBeenCalled();
 });
 
-test('openProject forwards NaN size but rejects non-number size', async () => {
+test('openProject rejects NaN size gracefully', async () => {
   const { root, open, handlers } = await setup();
   const { project } = await seedProject(root);
   unwrap(await handlers.openProject({ projectId: project.id, cols: Number.NaN, rows: 24 }));
