@@ -6,7 +6,10 @@ import {
   createSession,
   deleteSession,
   getSession,
+  getWorkspace,
   listSessions,
+  removeSessionsOfProjects,
+  saveWorkspace,
   SessionError,
   updateSession,
 } from './sessions.js';
@@ -116,5 +119,127 @@ describe('sessions', () => {
     expect(new Set(removed)).toEqual(new Set([a.id, b.id, c.id]));
     expect(await listSessions({ root, projectId: 'p1' })).toEqual([other]);
     expect(await codeOf(deleteSession({ root, sessionId: a.id }))).toBe('not-found');
+  });
+
+  it('createSession starts with archivedAt null', async () => {
+    expect((await createSession({ root, projectId: 'p1' })).archivedAt).toBeNull();
+  });
+
+  async function seedTree() {
+    const a = await createSession({ root, projectId: 'p1' });
+    const b = await createSession({ root, projectId: 'p1', parentId: a.id });
+    const c = await createSession({ root, projectId: 'p1', parentId: b.id });
+    const other = await createSession({ root, projectId: 'p1' });
+    return { a, b, c, other };
+  }
+
+  it('updateSession archives the session and descendants, and unarchives them', async () => {
+    const { a, b, c, other } = await seedTree();
+    const now = (): Date => new Date('2026-03-01T00:00:00.000Z');
+    const archived = await updateSession({ root, sessionId: a.id, patch: { archived: true }, now });
+    expect(archived.id).toBe(a.id);
+    expect(archived.archivedAt).toBe('2026-03-01T00:00:00.000Z');
+    const stored = await listSessions({ root, projectId: 'p1' });
+    const byId = new Map(stored.map((item) => [item.id, item.archivedAt]));
+    expect(byId.get(b.id)).toBe('2026-03-01T00:00:00.000Z');
+    expect(byId.get(c.id)).toBe('2026-03-01T00:00:00.000Z');
+    expect(byId.get(other.id)).toBeNull();
+    const restored = await updateSession({ root, sessionId: a.id, patch: { archived: false } });
+    expect(restored.archivedAt).toBeNull();
+    const after = await listSessions({ root, projectId: 'p1' });
+    expect(after.every((item) => item.archivedAt === null)).toBe(true);
+  });
+
+  it('archiving removes the subtree from the workspace', async () => {
+    const { a, b, other } = await seedTree();
+    await saveWorkspace({
+      root,
+      workspace: { openSessionIds: [a.id, b.id, other.id], activeSessionId: b.id },
+    });
+    await updateSession({ root, sessionId: a.id, patch: { archived: true } });
+    expect((await loadStore(root)).workspace).toEqual({
+      openSessionIds: [other.id],
+      activeSessionId: null,
+    });
+  });
+
+  it('deleteSession removes ids from the workspace', async () => {
+    const { a, b, other } = await seedTree();
+    await saveWorkspace({
+      root,
+      workspace: { openSessionIds: [a.id, b.id, other.id], activeSessionId: other.id },
+    });
+    await deleteSession({ root, sessionId: a.id });
+    expect(await getWorkspace(root)).toEqual({
+      openSessionIds: [other.id],
+      activeSessionId: other.id,
+    });
+    await deleteSession({ root, sessionId: other.id });
+    expect((await loadStore(root)).workspace).toEqual({
+      openSessionIds: [],
+      activeSessionId: null,
+    });
+  });
+
+  it('removeSessionsOfProjects removes ids from the workspace', async () => {
+    const a = await createSession({ root, projectId: 'p1' });
+    const b = await createSession({ root, projectId: 'p2' });
+    await saveWorkspace({
+      root,
+      workspace: { openSessionIds: [a.id, b.id], activeSessionId: a.id },
+    });
+    const store = await loadStore(root);
+    removeSessionsOfProjects(store, new Set(['p1']));
+    expect(store.workspace).toEqual({ openSessionIds: [b.id], activeSessionId: null });
+  });
+
+  it('getWorkspace returns an empty workspace when none is saved', async () => {
+    expect(await getWorkspace(root)).toEqual({ openSessionIds: [], activeSessionId: null });
+  });
+
+  it('getWorkspace filters unknown and archived ids and an inactive active id', async () => {
+    const a = await createSession({ root, projectId: 'p1' });
+    const b = await createSession({ root, projectId: 'p1' });
+    const store = await loadStore(root);
+    store.workspace = { openSessionIds: [a.id, 'ghost', b.id], activeSessionId: 'ghost' };
+    const [first] = store.sessions ?? [];
+    if (first) first.archivedAt = '2026-01-01T00:00:00.000Z';
+    await saveStore(root, store);
+    expect(await getWorkspace(root)).toEqual({ openSessionIds: [b.id], activeSessionId: null });
+  });
+
+  it('saveWorkspace drops unknown and archived ids, de-duplicates and keeps the active id', async () => {
+    const a = await createSession({ root, projectId: 'p1' });
+    const b = await createSession({ root, projectId: 'p1' });
+    const c = await createSession({ root, projectId: 'p1' });
+    await updateSession({ root, sessionId: c.id, patch: { archived: true } });
+    await saveWorkspace({
+      root,
+      workspace: { openSessionIds: [b.id, 'ghost', a.id, b.id, c.id], activeSessionId: a.id },
+    });
+    expect(await getWorkspace(root)).toEqual({
+      openSessionIds: [b.id, a.id],
+      activeSessionId: a.id,
+    });
+    await saveWorkspace({
+      root,
+      workspace: { openSessionIds: [a.id], activeSessionId: b.id },
+    });
+    expect(await getWorkspace(root)).toEqual({ openSessionIds: [a.id], activeSessionId: null });
+  });
+
+  it('saveWorkspace caps the open list at 50 and rejects unsafe ids', async () => {
+    const created = [];
+    for (let index = 0; index < 52; index += 1) {
+      created.push(await createSession({ root, projectId: 'p1' }));
+    }
+    const ids = created.map((item) => item.id);
+    await saveWorkspace({ root, workspace: { openSessionIds: ids, activeSessionId: null } });
+    expect((await getWorkspace(root)).openSessionIds).toEqual(ids.slice(0, 50));
+    expect(
+      await codeOf(
+        saveWorkspace({ root, workspace: { openSessionIds: ['a/b'], activeSessionId: null } }),
+      ),
+    ).toBe('invalid-workspace');
   });
 });
