@@ -31,8 +31,20 @@ test('loginShellPath falls back when shell is missing', async () => {
 });
 
 test('loginShellPath falls back on timeout', async () => {
-  const shell = await fakeShell('sleep 5');
+  const shell = await fakeShell('exec sleep 5');
   expect(await loginShellPath({ shell, fallback: '/fb', timeoutMs: 200 })).toBe('/fb');
+});
+
+test('loginShellPath falls back quickly when the shell ignores SIGTERM', async () => {
+  const shell = await fakeShell("trap '' TERM\nexec sleep 5");
+  const startedAt = Date.now();
+  expect(await loginShellPath({ shell, fallback: '/fb', timeoutMs: 200 })).toBe('/fb');
+  expect(Date.now() - startedAt).toBeLessThan(2000);
+});
+
+test('loginShellPath falls back when the marker is followed by an empty PATH', async () => {
+  const shell = await fakeShell('printf "__INOVA_PATH__"');
+  expect(await loginShellPath({ shell, fallback: '/fb', timeoutMs: 5000 })).toBe('/fb');
 });
 
 test('findBinary returns first executable match', async () => {

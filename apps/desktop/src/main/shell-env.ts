@@ -16,11 +16,11 @@ export async function loginShellPath(ctx: {
     const { stdout } = await execFileAsync(
       ctx.shell,
       ['-ilc', `printf "${PATH_MARKER}%s" "$PATH"`],
-      { timeout: ctx.timeoutMs, encoding: 'utf8' },
+      { timeout: ctx.timeoutMs, killSignal: 'SIGKILL', encoding: 'utf8' },
     );
     const index = stdout.lastIndexOf(PATH_MARKER);
     if (index === -1) return ctx.fallback;
-    return stdout.slice(index + PATH_MARKER.length);
+    return stdout.slice(index + PATH_MARKER.length) || ctx.fallback;
   } catch (error: unknown) {
     if (error instanceof Error) return ctx.fallback;
     throw error;
