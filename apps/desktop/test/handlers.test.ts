@@ -134,3 +134,41 @@ test('openProject forwards NaN size but rejects non-number size', async () => {
   expect(bad).toEqual(INVALID);
   expect(open).toHaveBeenCalledTimes(1);
 });
+
+test('openProject reports an unknown project', async () => {
+  const { handlers, open } = await setup();
+  const result = await handlers.openProject({ projectId: 'nope', cols: 80, rows: 24 });
+  expect(result).toEqual({ ok: false, message: 'Projeto não encontrado.' });
+  expect(open).not.toHaveBeenCalled();
+});
+
+test('openLogin runs the login args in the account home', async () => {
+  const { root, open, handlers } = await setup();
+  const { account } = await seedProject(root);
+  const result = await handlers.openLogin({ accountLabel: 'pessoal', cols: 80, rows: 24 });
+  expect(unwrap(result).title).toBe('login · pessoal');
+  const spec = open.mock.calls[0]?.[0].spec;
+  expect(spec).toMatchObject({ args: ['auth', 'login'], cwd: account.homeDir });
+  const missing = await handlers.openLogin({ accountLabel: 'x', cols: 80, rows: 24 });
+  expect(missing).toEqual({ ok: false, message: 'Account not found: x' });
+});
+
+test('removeAccount refuses while a session of the account is open', async () => {
+  const { root, inUse, handlers } = await setup();
+  const { account } = await seedProject(root);
+  inUse.add(account.id);
+  const result = await handlers.removeAccount({ label: 'pessoal', force: true });
+  expect(result).toEqual({ ok: false, message: 'Feche as abas desta conta antes de removê-la.' });
+  expect((await loadStore(root)).accounts).toHaveLength(1);
+  inUse.clear();
+  expect(unwrap(await handlers.removeAccount({ label: 'pessoal', force: true }))).toBeNull();
+  expect((await loadStore(root)).accounts).toEqual([]);
+});
+
+test('bindProject maps PathNotFoundError to a message', async () => {
+  const { root, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const missing = join(root, 'nope');
+  const result = await handlers.bindProject({ path: missing, accountLabel: 'pessoal' });
+  expect(result).toEqual({ ok: false, message: `Caminho não encontrado: ${missing}` });
+});
