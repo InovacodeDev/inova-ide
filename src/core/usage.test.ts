@@ -134,3 +134,66 @@ describe('readUsage claude', () => {
     expect(rec.requests[0]?.init.signal).toBeInstanceOf(AbortSignal);
   });
 });
+
+describe('readUsage claude response', () => {
+  beforeEach(async () => {
+    await writeFile(join(homeDir, '.credentials.json'), credentialsJson());
+  });
+
+  it('maps the fixture response to session and weekly windows', async () => {
+    const rec = recorder({
+      platform: 'linux',
+      response: { ok: true, status: 200, body: await fixtureBody() },
+    });
+    const snapshot = await readUsage({ account: account('claude'), deps: rec.deps });
+    expect(snapshot).toEqual({
+      provider: 'claude',
+      source: 'api',
+      fetchedAt: NOW.toISOString(),
+      windows: [
+        { kind: 'session', usedPercent: 9, resetsAt: '2026-11-13T01:00:00.858Z' },
+        { kind: 'weekly', usedPercent: 2, resetsAt: '2026-11-19T20:00:00.858Z' },
+      ],
+    });
+  });
+
+  it('clamps utilization and drops invalid windows', async () => {
+    const body = {
+      five_hour: { utilization: 140, resets_at: null },
+      seven_day: { utilization: 'high', resets_at: '2026-11-19T20:00:00Z' },
+    };
+    const rec = recorder({ platform: 'linux', response: { ok: true, status: 200, body } });
+    const snapshot = await readUsage({ account: account('claude'), deps: rec.deps });
+    expect(snapshot.windows).toEqual([{ kind: 'session', usedPercent: 100, resetsAt: null }]);
+  });
+
+  it('reports http errors with the status but never the token', async () => {
+    const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
+    const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
+    expect(error.code).toBe('http');
+    expect(error.message).toContain('401');
+    expect(error.message).not.toContain(TOKEN);
+    expect(JSON.stringify(error)).not.toContain(TOKEN);
+  });
+
+  it('reports bad-response for a non-object body', async () => {
+    const rec = recorder({ platform: 'linux', response: { ok: true, status: 200, body: 'nope' } });
+    const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
+    expect(error.code).toBe('bad-response');
+  });
+});
+
+describe('readUsage gemini', () => {
+  it('is always unavailable', async () => {
+    const rec = recorder({ platform: 'darwin' });
+    const snapshot = await readUsage({ account: account('gemini'), deps: rec.deps });
+    expect(snapshot).toEqual({
+      provider: 'gemini',
+      windows: [],
+      source: 'unavailable',
+      fetchedAt: NOW.toISOString(),
+    });
+    expect(rec.commands).toEqual([]);
+    expect(rec.requests).toEqual([]);
+  });
+});
