@@ -26,7 +26,9 @@ Cada CLI oficial aceita uma variável que aponta o diretório de config. Um dire
 | Codex | `codex` | `CODEX_HOME` | `codex login` | `codex login status` (exit code) |
 | Gemini | `gemini` | `GEMINI_CLI_HOME` | `gemini` interativo → "Login with Google" | arquivo `<home>/.gemini/oauth_creds.json` existe |
 
-Evidência local (2026-11-12): o Keychain do macOS desta máquina tem `Claude Code-credentials`, `Claude Code-credentials-1b65d025` e `Claude Code-credentials-2db276ed`. Isso indica que o Claude Code 2.1.289 cria uma entrada de Keychain por `CLAUDE_CONFIG_DIR`. A Task 1 do plano confirma isso com duas contas reais.
+Evidência local (2026-11-12): o Keychain do macOS desta máquina tem `Claude Code-credentials`, `Claude Code-credentials-1b65d025` e `Claude Code-credentials-2db276ed`. Isso indica que o Claude Code 2.1.289 cria uma entrada de Keychain por `CLAUDE_CONFIG_DIR`.
+
+Task 1 confirmada (2026-11-12, Claude Code 2.1.289): duas contas Team de organizações diferentes logadas via `inova account login`. `claude auth status` mostra a identidade certa em cada `CLAUDE_CONFIG_DIR`. Surgiram duas entradas novas `Claude Code-credentials-<hash>` no Keychain. A conta padrão (`~/.claude`) não mudou. Codex e Gemini: não verificados.
 
 O núcleo tem três tipos:
 
