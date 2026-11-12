@@ -15,6 +15,9 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -23,16 +26,24 @@ jobs:
           VERSION="$(node scripts/version.mjs check --tag "${GITHUB_REF_NAME}")"
           echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
 
-  build-mac:
+  build:
     needs: validate
     strategy:
       fail-fast: true
       matrix:
         include:
-          - arch: arm64
+          - target: mac-arm64
+            platform: darwin
+            arch: arm64
             os: macos-15
-          - arch: x64
-            os: macos-15-intel
+          - target: win-x64
+            platform: win32
+            arch: x64
+            os: windows-latest
+          - target: linux-x64
+            platform: linux
+            arch: x64
+            os: ubuntu-latest
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -45,58 +56,84 @@ jobs:
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run checks
+      - name: Verify version tag
+        shell: bash
+        run: pnpm version:check --tag "${GITHUB_REF_NAME}"
+      - name: Run checks (macOS)
+        if: runner.os == 'macOS'
         run: |
-          pnpm version:check --tag "${GITHUB_REF_NAME}"
           pnpm typecheck && pnpm lint && pnpm test
           pnpm --filter @inova/desktop typecheck && pnpm --filter @inova/desktop test
-      - name: Package macOS DMG (${{ matrix.arch }})
+      - name: Run checks (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y xvfb
+          fi
+          pnpm typecheck && pnpm lint && pnpm test
+          pnpm --filter @inova/desktop typecheck
+          xvfb-run -a pnpm --filter @inova/desktop test
+      - name: Run checks (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pnpm typecheck && pnpm lint
+          pnpm --filter @inova/desktop typecheck
+          pnpm --filter @inova/desktop build
+          pnpm --filter @inova/desktop exec vitest run test/selftest.test.ts
+      - name: Package ${{ matrix.target }}
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: node apps/desktop/scripts/package-mac.mjs --arch "${{ matrix.arch }}"
-      - name: Smoke test packaged DMG (${{ matrix.arch }})
+        run: node apps/desktop/scripts/package.mjs --platform "${{ matrix.platform }}" --arch "${{ matrix.arch }}"
+      - name: Smoke test macOS DMG
+        if: runner.os == 'macOS'
         run: |
           zsh apps/desktop/scripts/smoke-dmg.sh \
-            "release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg" \
+            "release/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg" \
             "${{ needs.validate.outputs.version }}"
+      - name: Smoke test Linux tar.gz
+        if: runner.os == 'Linux'
+        run: |
+          sh apps/desktop/scripts/smoke-linux.sh \
+            "release/InovaIDE-${{ needs.validate.outputs.version }}-linux-x64.tar.gz" \
+            "${{ needs.validate.outputs.version }}"
+      - name: Smoke test Windows zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          apps/desktop/scripts/smoke-win.ps1 `
+            -ZipPath "release/InovaIDE-${{ needs.validate.outputs.version }}-win-x64.zip" `
+            -ExpectedVersion "${{ needs.validate.outputs.version }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-${{ matrix.arch }}
-          path: |
-            release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg
-            release/InovaIDE-${{ needs.validate.outputs.version }}-${{ matrix.arch }}.dmg.sha256
+          name: ${{ matrix.target }}
+          path: release/*
           if-no-files-found: error
 
   publish-release:
-    needs: [validate, build-mac]
+    needs: [validate, build]
     runs-on: ubuntu-latest
     outputs:
       arm64_sha256: ${{ steps.hashes.outputs.arm64 }}
-      x64_sha256: ${{ steps.hashes.outputs.x64 }}
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: release-assets
+          merge-multiple: true
       - id: hashes
         run: |
-          ARM_SHA="$(awk '{print $1}' "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256")"
-          X64_SHA="$(awk '{print $1}' "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg.sha256")"
+          ARM_SHA="$(awk '{print $1}' "release-assets/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256")"
           echo "arm64=${ARM_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "x64=${X64_SHA}" >> "${GITHUB_OUTPUT}"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
-            "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg" \
-            "artifacts/mac-arm64/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256" \
-            "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg" \
-            "artifacts/mac-x64/InovaIDE-${{ needs.validate.outputs.version }}-x64.dmg.sha256" \
+            release-assets/* \
             --title "InovaIDE ${GITHUB_REF_NAME}" \
             --generate-notes
 
@@ -126,10 +163,9 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           ARM_SHA: ${{ needs.publish-release.outputs.arm64_sha256 }}
-          X64_SHA: ${{ needs.publish-release.outputs.x64_sha256 }}
         run: |
           CASK="homebrew-tap/Casks/inova-ide.rb"
-          ruby -e 'c = File.read(ARGV[0]).sub(/version "[^"]+"/, %(version "#{ARGV[1]}")).sub(/sha256 arm:\s+"[^"]+",\n\s+intel:\s+"[^"]+"/, %(sha256 arm:   "#{ARGV[2]}",\n         intel: "#{ARGV[3]}")); File.write(ARGV[0], c)' "${CASK}" "${VERSION}" "${ARM_SHA}" "${X64_SHA}"
+          ruby -e 'c = File.read(ARGV[0]).sub(/version "[^"]+"/, %(version "#{ARGV[1]}")).sub(/sha256 "[^"]+"/, %(sha256 "#{ARGV[2]}")); File.write(ARGV[0], c)' "${CASK}" "${VERSION}" "${ARM_SHA}"
           brew style "${CASK}"
           TAP_DIR="$(brew --repository)/Library/Taps/inovacodedev"
           mkdir -p "${TAP_DIR}"
