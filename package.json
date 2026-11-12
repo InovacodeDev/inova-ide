@@ -14,7 +14,9 @@
     "format:check": "prettier --check .",
     "version:check": "node scripts/version.mjs check",
     "version:bump": "node scripts/version.mjs bump",
-    "package:mac": "pnpm --filter @inova/desktop pack:mac"
+    "package:mac": "pnpm --filter @inova/desktop pack:mac",
+    "package:win": "pnpm --filter @inova/desktop pack:win",
+    "package:linux": "pnpm --filter @inova/desktop pack:linux"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
