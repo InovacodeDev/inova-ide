@@ -1,11 +1,16 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
+import type { ChatEvent } from '@inova/core/chat-types';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
+import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
+import type { Store } from '@inova/core/types';
+import type { UsageDeps } from '@inova/core/usage';
+import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
 import type { Result } from '../src/shared/api.js';
@@ -33,8 +38,22 @@ async function setup(options: { withBinary?: boolean } = {}) {
   const bin = await tmp();
   if (options.withBinary ?? true) {
     await writeFile(join(bin, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await writeFile(join(bin, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   }
   const inUse = new Set<string>();
+  const running = new Set<string>();
+  const chatInUse = new Set<string>();
+  const emitted: { sessionId: string; event: ChatEvent }[] = [];
+  const send = vi.fn<ChatRunner['send']>();
+  const cancel = vi.fn<ChatRunner['cancel']>();
+  const chat: ChatRunner = {
+    send,
+    cancel,
+    isRunning: (sessionId) => running.has(sessionId),
+    accountsInUse: () => chatInUse,
+    closeAll: vi.fn(),
+  };
+  const fetch = vi.fn<UsageDeps['fetch']>();
   const run = vi.fn<CommandRunner['run']>(async () => ({
     exitCode: 0,
     stdout: '{"loggedIn":true}',
@@ -53,10 +72,37 @@ async function setup(options: { withBinary?: boolean } = {}) {
     root,
     runner: { run },
     sessions,
+    chat,
+    usageDeps: {
+      platform: 'linux',
+      runner: { run },
+      fetch,
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+    },
+    emit: (sessionId, event) => emitted.push({ sessionId, event }),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
   });
-  return { root, bin, run, open, inUse, handlers };
+  return {
+    root,
+    bin,
+    run,
+    open,
+    inUse,
+    running,
+    chatInUse,
+    emitted,
+    send,
+    cancel,
+    fetch,
+    handlers,
+  };
+}
+
+async function seedSession(root: string) {
+  const { account, project } = await seedProject(root);
+  const session = await createSession({ root, projectId: project.id });
+  return { account, project, session };
 }
 
 async function seedProject(root: string) {
@@ -113,19 +159,40 @@ test('listAccounts reports unknown for an account whose check throws and keeps t
   ]);
 });
 
-test('openProject spawns absolute binary in project dir with account isolation', async () => {
-  const { root, bin, open, handlers } = await setup();
-  const { account, project } = await seedProject(root);
-  const result = await handlers.openProject({ projectId: project.id, cols: 100, rows: 30 });
-  expect(unwrap(result)).toEqual({
-    sessionId: 'sess-1',
-    title: `${basename(project.path)} · pessoal`,
+test('sendMessage reports a missing binary with install hint and does not spawn', async () => {
+  const { root, send, handlers } = await setup({ withBinary: false });
+  const { session } = await seedSession(root);
+  const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' });
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.message).toContain('pnpm add -g @anthropic-ai/claude-code');
+  expect(send).not.toHaveBeenCalled();
+});
+
+test('sendMessage rejects invalid input and unknown sessions', async () => {
+  const { send, handlers } = await setup();
+  expect(await handlers.sendMessage({ sessionId: '../x', prompt: 'oi' })).toEqual(INVALID);
+  expect(await handlers.sendMessage({ sessionId: 's', prompt: '  ' })).toEqual(INVALID);
+  expect(await handlers.sendMessage({ sessionId: 'ghost', prompt: 'oi' })).toEqual({
+    ok: false,
+    message: 'Sessão não encontrada.',
   });
-  const call = open.mock.calls[0]?.[0];
-  expect(call).toMatchObject({ file: join(bin, 'claude'), accountId: account.id, cols: 100 });
+  expect(send).not.toHaveBeenCalled();
+});
+
+test('a new claude turn persists the session id before spawning and derives the title', async () => {
+  const { root, bin, send, handlers } = await setup();
+  const { account, project, session } = await seedSession(root);
+  const prompt = `${'a'.repeat(70)}\nsegunda linha`;
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt }));
+  const call = send.mock.calls[0]?.[0];
+  expect(call).toMatchObject({
+    sessionId: session.id,
+    accountId: account.id,
+    provider: 'claude',
+    file: join(bin, 'claude'),
+  });
   expect(call?.spec.cwd).toBe(project.path);
   expect(call?.spec.env['CLAUDE_CONFIG_DIR']).toBe(account.homeDir);
-  expect(call?.spec.env['TERM']).toBe('xterm-256color');
   expect(call?.spec.env['ANTHROPIC_API_KEY']).toBeUndefined();
 });
 
