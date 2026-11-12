@@ -72,6 +72,40 @@ describe('accounts', () => {
     expect(findAccount(await loadStore(root), 'bad')).toBeDefined();
   });
 
+  it.each([
+    ['the accounts root', (r: string) => join(r, 'accounts')],
+    ['a traversal path', (r: string) => join(r, 'accounts', '..', 'x')],
+    ['another account home', (r: string) => join(r, 'accounts', 'other')],
+    ['a nested path', (r: string) => join(r, 'accounts', 'a1', 'sub')],
+  ])('removeAccount refuses homeDir that is %s', async (_name, pick) => {
+    const other = join(root, 'accounts', 'other');
+    await mkdir(join(root, 'accounts', 'a1', 'sub'), { recursive: true });
+    await mkdir(other, { recursive: true });
+    await writeFile(join(other, 'keep'), 'x');
+    await mkdir(join(root, 'x'), { recursive: true });
+    const before = {
+      version: 1 as const,
+      accounts: [
+        {
+          id: 'a1',
+          provider: 'claude' as const,
+          label: 'bad',
+          homeDir: pick(root),
+          createdAt: 't',
+        },
+        { id: 'other', provider: 'claude' as const, label: 'o', homeDir: other, createdAt: 't' },
+      ],
+      projects: [{ id: 'p1', path: '/repo', accountId: 'a1' }],
+    };
+    await saveStore(root, before);
+    const err = await removeAccount({ root, label: 'bad', force: true }).catch((e: unknown) => e);
+    expect((err as AccountError).code).toBe('unsafe-path');
+    expect(await exists(join(other, 'keep'))).toBe(true);
+    expect(await exists(join(root, 'accounts', 'a1', 'sub'))).toBe(true);
+    expect(await exists(join(root, 'x'))).toBe(true);
+    expect(await loadStore(root)).toEqual(before);
+  });
+
   it('removeAccount deletes only the account home', async () => {
     const account = await addAccount({ root, provider: 'claude', label: 'work' });
     const sibling = join(root, 'accounts', 'outro');
