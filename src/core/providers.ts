@@ -4,6 +4,8 @@ import type { ProviderId } from './types.js';
 
 export type AuthStatus = 'logged-in' | 'logged-out' | 'binary-missing' | 'unknown';
 
+export const RUNNER_ABORTED = -1;
+
 export interface CommandRunner {
   run(cmd: {
     command: string;
@@ -96,6 +98,7 @@ const codex: ProviderAdapter = {
   async checkStatus(ctx) {
     const result = await runInHome(codex, ctx, ['login', 'status']);
     if ('notFound' in result) return 'binary-missing';
+    if (result.exitCode === RUNNER_ABORTED) return 'unknown';
     return result.exitCode === 0 ? 'logged-in' : 'logged-out';
   },
 };

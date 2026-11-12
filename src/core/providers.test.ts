@@ -57,6 +57,12 @@ describe('providers', () => {
     expect(ok.envs[0]?.['CODEX_HOME']).toBe(homeDir);
   });
 
+  it('codex and claude status are unknown when the runner reports exit code -1', async () => {
+    const { runner } = fakeRunner({ exitCode: -1, stdout: '' });
+    expect(await providers.codex.checkStatus({ homeDir, env: {}, runner })).toBe('unknown');
+    expect(await providers.claude.checkStatus({ homeDir, env: {}, runner })).toBe('unknown');
+  });
+
   it('status returns binary-missing when runner reports notFound', async () => {
     const { runner } = fakeRunner({ notFound: true });
     for (const adapter of Object.values(providers)) {

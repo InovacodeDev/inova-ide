@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LaunchSpec } from './core/launch.js';
-import { nodeIO } from './node-io.js';
+import { nodeIO, nodeRunner } from './node-io.js';
 
 let dir: string;
 
@@ -97,5 +97,30 @@ describe('nodeIO.spawnInteractive', () => {
     const before = listenerCounts();
     await nodeIO.spawnInteractive(spec);
     expect(listenerCounts()).toEqual(before);
+  });
+});
+
+describe('nodeRunner', () => {
+  it('returns exit code and stdout', async () => {
+    const result = await nodeRunner.run({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('hi'); process.exit(3)"],
+      env: {},
+    });
+    expect(result).toEqual({ exitCode: 3, stdout: 'hi' });
+  });
+
+  it('reports notFound for a missing binary', async () => {
+    const result = await nodeRunner.run({ command: join(dir, 'missing'), args: [], env: {} });
+    expect(result).toEqual({ notFound: true });
+  });
+
+  it('maps a child killed by a signal to exit code -1 with empty stdout', async () => {
+    const result = await nodeRunner.run({
+      command: process.execPath,
+      args: ['-e', "process.stdout.write('partial'); process.kill(process.pid, 'SIGKILL')"],
+      env: {},
+    });
+    expect(result).toEqual({ exitCode: -1, stdout: '' });
   });
 });
