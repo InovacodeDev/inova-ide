@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageSnapshot, UsageWindow } from './chat-types.js';
 import type { CommandRunner } from './providers.js';
@@ -35,6 +35,7 @@ interface UsageContext {
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_OAUTH_BETA = 'oauth-2025-04-20';
 const USAGE_TIMEOUT_MS = 10_000;
+const CODEX_DAY_DIR_LIMIT = 3;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -46,6 +47,14 @@ function clampPercent(value: number): number {
 
 function toIsoOrNull(date: Date): string | null {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+function isMissingPath(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+  );
 }
 
 function parseJson(raw: string): unknown {
@@ -69,7 +78,7 @@ async function tokenFromFile(homeDir: string): Promise<string | null> {
   try {
     return accessTokenFrom(await readFile(join(homeDir, '.credentials.json'), 'utf8'));
   } catch (error: unknown) {
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+    if (isMissingPath(error)) return null;
     throw error;
   }
 }
@@ -136,13 +145,107 @@ async function readClaudeUsage(ctx: UsageContext): Promise<UsageWindow[]> {
   ].filter((window): window is UsageWindow => window !== null);
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function codexWindow(
+  kind: UsageWindow['kind'],
+  value: unknown,
+  baseMs: number,
+): UsageWindow | null {
+  if (!isRecord(value)) return null;
+  const used = finiteNumber(value['used_percent']);
+  if (used === null) return null;
+  const resetsAtSeconds = finiteNumber(value['resets_at']);
+  const resetsInSeconds = finiteNumber(value['resets_in_seconds']);
+  let resetsAt: string | null = null;
+  if (resetsAtSeconds !== null) resetsAt = toIsoOrNull(new Date(resetsAtSeconds * 1000));
+  else if (resetsInSeconds !== null)
+    resetsAt = toIsoOrNull(new Date(baseMs + resetsInSeconds * 1000));
+  return { kind, usedPercent: clampPercent(used), resetsAt };
+}
+
+function codexLineWindows(line: string, mtimeMs: number): UsageWindow[] {
+  const parsed = parseJson(line);
+  if (!isRecord(parsed) || parsed['type'] !== 'event_msg') return [];
+  const payload = parsed['payload'];
+  if (!isRecord(payload) || payload['type'] !== 'token_count') return [];
+  const limits = payload['rate_limits'];
+  if (!isRecord(limits)) return [];
+  const timestamp = parsed['timestamp'];
+  const lineMs = typeof timestamp === 'string' ? Date.parse(timestamp) : Number.NaN;
+  const baseMs = Number.isFinite(lineMs) ? lineMs : mtimeMs;
+  return [
+    codexWindow('session', limits['primary'], baseMs),
+    codexWindow('weekly', limits['secondary'], baseMs),
+  ].filter((window): window is UsageWindow => window !== null);
+}
+
+async function numericEntriesDescending(dir: string): Promise<string[]> {
+  try {
+    const names = await readdir(dir);
+    return names.filter((name) => /^\d+$/.test(name)).sort((a, b) => Number(b) - Number(a));
+  } catch (error: unknown) {
+    if (isMissingPath(error)) return [];
+    throw error;
+  }
+}
+
+async function newestDayDirs(sessionsDir: string): Promise<string[]> {
+  const days: string[] = [];
+  for (const year of await numericEntriesDescending(sessionsDir)) {
+    for (const month of await numericEntriesDescending(join(sessionsDir, year))) {
+      for (const day of await numericEntriesDescending(join(sessionsDir, year, month))) {
+        days.push(join(sessionsDir, year, month, day));
+        if (days.length >= CODEX_DAY_DIR_LIMIT) return days;
+      }
+    }
+  }
+  return days;
+}
+
+async function rolloutFilesByMtime(
+  dayDirs: string[],
+): Promise<{ path: string; mtimeMs: number }[]> {
+  const files: { path: string; mtimeMs: number }[] = [];
+  for (const dir of dayDirs) {
+    const names = await readdir(dir);
+    for (const name of names.filter((n) => n.startsWith('rollout-') && n.endsWith('.jsonl'))) {
+      const path = join(dir, name);
+      files.push({ path, mtimeMs: (await stat(path)).mtimeMs });
+    }
+  }
+  return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+async function readCodexUsage(homeDir: string): Promise<UsageWindow[]> {
+  const files = await rolloutFilesByMtime(await newestDayDirs(join(homeDir, 'sessions')));
+  for (const file of files) {
+    const lines = (await readFile(file.path, 'utf8')).split('\n').reverse();
+    for (const line of lines) {
+      const windows = codexLineWindows(line, file.mtimeMs);
+      if (windows.length > 0) return windows;
+    }
+  }
+  return [];
+}
+
 export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
   const provider = ctx.account.provider;
   const fetchedAt = ctx.deps.now().toISOString();
   switch (provider) {
     case 'claude':
       return { provider, windows: await readClaudeUsage(ctx), source: 'api', fetchedAt };
-    case 'codex':
+    case 'codex': {
+      const windows = await readCodexUsage(ctx.account.homeDir);
+      return {
+        provider,
+        windows,
+        source: windows.length > 0 ? 'rollout' : 'unavailable',
+        fetchedAt,
+      };
+    }
     case 'gemini':
       return { provider, windows: [], source: 'unavailable', fetchedAt };
   }
