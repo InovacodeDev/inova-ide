@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
+import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore } from './store.js';
 import type { Project, Store } from './types.js';
 
@@ -57,7 +58,11 @@ export async function unbindProject(ctx: { root: string; path: string }): Promis
   const store = await loadStore(ctx.root);
   const remaining = store.projects.filter((project) => project.path !== path);
   if (remaining.length === store.projects.length) return;
+  const removedIds = new Set(
+    store.projects.filter((project) => project.path === path).map((project) => project.id),
+  );
   store.projects = remaining;
+  removeSessionsOfProjects(store, removedIds);
   await saveStore(ctx.root, store);
 }
 

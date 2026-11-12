@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AccountError, addAccount, findAccount, removeAccount } from './accounts.js';
+import { createSession } from './sessions.js';
 import { loadStore, saveStore, StoreCorruptError } from './store.js';
 
 let root: string;
@@ -49,6 +50,21 @@ describe('accounts', () => {
     await removeAccount({ root, label: 'work', force: true });
     expect(await loadStore(root)).toEqual({ version: 1, accounts: [], projects: [] });
     expect(await exists(account.homeDir)).toBe(false);
+  });
+
+  it('removeAccount drops sessions of its projects and keeps others', async () => {
+    const account = await addAccount({ root, provider: 'claude', label: 'work' });
+    const keeper = await addAccount({ root, provider: 'claude', label: 'keep' });
+    const store = await loadStore(root);
+    store.projects.push(
+      { id: 'p1', path: '/repo', accountId: account.id },
+      { id: 'p2', path: '/other', accountId: keeper.id },
+    );
+    await saveStore(root, store);
+    await createSession({ root, projectId: 'p1' });
+    const kept = await createSession({ root, projectId: 'p2' });
+    await removeAccount({ root, label: 'work', force: true });
+    expect((await loadStore(root)).sessions).toEqual([kept]);
   });
 
   it('removeAccount throws not-found for unknown label', async () => {

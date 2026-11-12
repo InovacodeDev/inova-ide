@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AccountError, addAccount } from './accounts.js';
 import { bindProject, PathNotFoundError, resolveProject, unbindProject } from './projects.js';
+import { createSession } from './sessions.js';
 import { loadStore } from './store.js';
 import type { Store } from './types.js';
 
@@ -85,6 +86,19 @@ describe('unbindProject', () => {
     await unbindProject({ root, path: workDir });
     expect((await loadStore(root)).projects).toEqual([]);
     await expect(unbindProject({ root, path: workDir })).resolves.toBeUndefined();
+  });
+
+  it('drops only the sessions of the unbound project', async () => {
+    await addAccount({ root, provider: 'claude', label: 'work' });
+    const project = await bindProject({ root, path: workDir, accountLabel: 'work' });
+    const otherDir = join(root, 'other');
+    await mkdir(otherDir);
+    const other = await bindProject({ root, path: otherDir, accountLabel: 'work' });
+    const gone = await createSession({ root, projectId: project.id });
+    const kept = await createSession({ root, projectId: other.id });
+    await unbindProject({ root, path: workDir });
+    expect((await loadStore(root)).sessions).toEqual([kept]);
+    expect(gone.projectId).toBe(project.id);
   });
 
   it('unbinds a project whose folder no longer exists', async () => {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { providers } from './providers.js';
+import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore } from './store.js';
 import type { Account, ProviderId, Store } from './types.js';
 
@@ -71,6 +72,7 @@ export async function removeAccount(ctx: {
   assertInsideAccountsRoot(ctx.root, account);
   await rm(account.homeDir, { recursive: true, force: true });
   store.accounts = store.accounts.filter((item) => item.id !== account.id);
+  removeSessionsOfProjects(store, new Set(bound.map((project) => project.id)));
   store.projects = store.projects.filter((project) => project.accountId !== account.id);
   await saveStore(ctx.root, store);
 }
