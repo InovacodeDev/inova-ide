@@ -1,6 +1,20 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@inova/core/types';
-import type { AccountView, ProjectView } from '../shared/api';
+import type { ProjectView } from '../shared/api';
+import {
+  ArchiveIcon,
+  ChatIcon,
+  CheckIcon,
+  CloseIcon,
+  GridIcon,
+  KeyIcon,
+  PlusIcon,
+  TerminalIcon,
+  TrashIcon,
+} from './icons';
+import { ProviderBadge } from './ProviderBadge';
+import { relativeTime } from './relative-time';
+import { STATUS_LABEL, type SessionStatus } from './session-status';
 import {
   SESSION_LIMIT,
   buildSessionTree,
@@ -8,15 +22,22 @@ import {
   visibleRoots,
   type SessionNode,
 } from './session-tree';
+import type { Tab } from './tabs';
+import './sidebar.css';
+
+export type View = 'workspace' | 'agents' | 'accounts' | 'new-session';
 
 export interface SidebarProps {
-  accounts: AccountView[];
+  view: View;
+  onNavigate: (view: View) => void;
   projects: ProjectView[];
   sessions: Record<string, Session[]>;
   activeSessionId: string | null;
+  statusOf: (sessionId: string) => SessionStatus;
+  loginTabs: Tab[];
+  onActivateLogin: (sessionId: string) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
-  onAddProject: (accountLabel: string) => void;
   onUnbind: (project: ProjectView) => void;
   onRenameSession: (input: { session: Session; title: string }) => void;
   onDeleteSession: (session: Session) => void;
@@ -32,7 +53,14 @@ type SessionActions = Pick<
   | 'onDeleteSession'
   | 'onArchiveSession'
   | 'onUnarchiveSession'
+  | 'statusOf'
 >;
+
+const NAV_ITEMS: { view: Exclude<View, 'new-session'>; label: string; icon: ReactNode }[] = [
+  { view: 'workspace', label: 'Workspace', icon: <ChatIcon size={16} /> },
+  { view: 'agents', label: 'Agentes em paralelo', icon: <GridIcon size={16} /> },
+  { view: 'accounts', label: 'Contas e providers', icon: <KeyIcon size={16} /> },
+];
 
 interface TitleEditorProps {
   initial: string;
@@ -72,6 +100,25 @@ function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function StatusLine({ status }: { status: SessionStatus }) {
+  if (status === 'idle') return null;
+  if (status === 'done') {
+    return (
+      <span className="session-status session-status-done">
+        <CheckIcon size={12} />
+        {STATUS_LABEL.done}
+      </span>
+    );
+  }
+  const running = status === 'running';
+  return (
+    <span className={`session-status session-status-${status}`}>
+      <span className={running ? 'dot pulse' : 'dot'} />
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
 interface SessionRowProps extends SessionActions {
   node: SessionNode;
   project: ProjectView;
@@ -80,7 +127,7 @@ interface SessionRowProps extends SessionActions {
 
 function SessionRow(props: SessionRowProps) {
   const { node, project, activeSessionId, ...actions } = props;
-  const { onOpenSession, onNewSession, onRenameSession, onDeleteSession } = actions;
+  const { onOpenSession, onNewSession, onRenameSession, onDeleteSession, statusOf } = actions;
   const { session, children } = node;
   const [editing, setEditing] = useState(false);
   const archived = session.archivedAt !== null;
@@ -93,59 +140,75 @@ function SessionRow(props: SessionRowProps) {
     <li className="session-node">
       <div className={session.id === activeSessionId ? 'session-row active' : 'session-row'}>
         {editing ? (
-          <TitleEditor
-            initial={session.title}
-            onSave={(title) => {
-              setEditing(false);
-              onRenameSession({ session, title });
-            }}
-            onCancel={() => setEditing(false)}
-          />
+          <div className="session-main">
+            <ProviderBadge provider={project.provider} size={20} />
+            <TitleEditor
+              initial={session.title}
+              onSave={(title) => {
+                setEditing(false);
+                onRenameSession({ session, title });
+              }}
+              onCancel={() => setEditing(false)}
+            />
+          </div>
         ) : (
           <button
-            className="session-title"
+            className="session-main"
             title={session.title}
             onClick={() => onOpenSession(session)}
             onDoubleClick={() => setEditing(true)}
           >
-            {session.title}
+            <ProviderBadge provider={project.provider} size={20} />
+            <span className="session-text">
+              <span className="session-title">{session.title}</span>
+              <StatusLine status={statusOf(session.id)} />
+            </span>
+            <span className="session-time">
+              {relativeTime({ iso: session.updatedAt, now: new Date() })}
+            </span>
           </button>
         )}
-        {archived ? (
-          <button
-            className="session-archive"
-            aria-label="Desarquivar sessão"
-            title="Desarquivar"
-            onClick={() => actions.onUnarchiveSession(session)}
-          >
-            Desarquivar
-          </button>
-        ) : (
-          <>
+        {!editing && (
+          <div className="session-actions">
+            {archived ? (
+              <button
+                className="session-action"
+                aria-label="Desarquivar sessão"
+                title="Desarquivar"
+                onClick={() => actions.onUnarchiveSession(session)}
+              >
+                <ArchiveIcon size={14} />
+              </button>
+            ) : (
+              <>
+                <button
+                  className="session-action"
+                  aria-label="Nova subsessão"
+                  title="Nova subsessão"
+                  onClick={() => onNewSession({ project, parent: session })}
+                >
+                  <PlusIcon size={14} />
+                </button>
+                <button
+                  className="session-action"
+                  aria-label="Arquivar sessão"
+                  title="Arquivar"
+                  onClick={() => actions.onArchiveSession(session)}
+                >
+                  <ArchiveIcon size={14} />
+                </button>
+              </>
+            )}
             <button
-              className="session-add"
-              aria-label="Nova subsessão"
-              onClick={() => onNewSession({ project, parent: session })}
+              className="session-action session-action-danger"
+              aria-label={archived ? 'Excluir sessão' : 'Apagar sessão'}
+              title={archived ? 'Excluir' : 'Apagar'}
+              onClick={remove}
             >
-              +
+              <TrashIcon size={14} />
             </button>
-            <button
-              className="session-archive"
-              aria-label="Arquivar sessão"
-              title="Arquivar"
-              onClick={() => actions.onArchiveSession(session)}
-            >
-              Arquivar
-            </button>
-          </>
+          </div>
         )}
-        <button
-          className="session-delete"
-          aria-label={archived ? 'Excluir sessão' : 'Apagar sessão'}
-          onClick={remove}
-        >
-          ×
-        </button>
       </div>
       {children.length > 0 && (
         <ul className="session-children">
@@ -196,15 +259,30 @@ function ProjectSection(props: ProjectSectionProps) {
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
         >
-          <strong>{folderName(project.path)}</strong>
-          <small>
-            {project.accountLabel} · {project.provider}
-          </small>
+          <span className="section-label">{folderName(project.path)}</span>
+          <span className="project-account">{project.accountLabel}</span>
         </button>
-        <button aria-label="Nova sessão" onClick={() => onNewSession({ project, parent: null })}>
-          +
-        </button>
-        <button onClick={() => onUnbind(project)}>Desvincular</button>
+        <div className="project-actions">
+          <button
+            className="session-action"
+            aria-label="Nova sessão"
+            title="Nova sessão"
+            onClick={() => onNewSession({ project, parent: null })}
+          >
+            <PlusIcon size={14} />
+          </button>
+          <button
+            className="session-action"
+            aria-label="Desvincular projeto"
+            title="Desvincular projeto"
+            onClick={() => {
+              const message = `Desvincular o projeto "${folderName(project.path)}"? As sessões dele serão apagadas.`;
+              if (confirm(message)) onUnbind(project);
+            }}
+          >
+            <CloseIcon size={14} />
+          </button>
+        </div>
       </div>
       {!collapsed &&
         (roots.length === 0 ? (
@@ -262,44 +340,39 @@ function ProjectSection(props: ProjectSectionProps) {
   );
 }
 
-function AddProjectRow({
-  accounts,
-  onAddProject,
-}: Pick<SidebarProps, 'accounts' | 'onAddProject'>) {
-  const [accountLabel, setAccountLabel] = useState('');
-  const selected = accountLabel || accounts[0]?.label || '';
-
-  return (
-    <div className="row sidebar-add">
-      <select
-        aria-label="Conta do projeto"
-        value={selected}
-        onChange={(e) => setAccountLabel(e.target.value)}
-      >
-        {accounts.map((account) => (
-          <option key={account.id} value={account.label}>
-            {account.label}
-          </option>
-        ))}
-      </select>
-      <button disabled={!selected} onClick={() => onAddProject(selected)}>
-        Adicionar projeto
-      </button>
-    </div>
-  );
-}
-
 export function Sidebar(props: SidebarProps) {
-  const { accounts, projects, sessions, activeSessionId } = props;
+  const { view, onNavigate, projects, sessions, activeSessionId, loginTabs } = props;
   return (
-    <aside className="sidebar">
+    <nav className="sidebar" aria-label="Principal">
+      <button className="btn btn-primary sidebar-new" onClick={() => onNavigate('new-session')}>
+        <PlusIcon size={16} />
+        Nova sessão
+      </button>
+      <ul className="sidebar-nav">
+        {NAV_ITEMS.map((item) => (
+          <li key={item.view}>
+            <button
+              className={view === item.view ? 'sidebar-nav-item active' : 'sidebar-nav-item'}
+              aria-current={view === item.view ? 'page' : undefined}
+              onClick={() => onNavigate(item.view)}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          </li>
+        ))}
+      </ul>
       <div className="sidebar-projects">
+        {projects.length === 0 && (
+          <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>
+        )}
         {projects.map((project) => (
           <ProjectSection
             key={project.id}
             project={project}
             sessions={sessions[project.id] ?? []}
             activeSessionId={activeSessionId}
+            statusOf={props.statusOf}
             onOpenSession={props.onOpenSession}
             onNewSession={props.onNewSession}
             onRenameSession={props.onRenameSession}
@@ -309,8 +382,37 @@ export function Sidebar(props: SidebarProps) {
             onUnbind={props.onUnbind}
           />
         ))}
+        {loginTabs.length > 0 && (
+          <section className="project-section">
+            <div className="project-header">
+              <span className="section-label">Logins</span>
+            </div>
+            <ul className="session-tree">
+              {loginTabs.map((tab) => (
+                <li key={tab.sessionId} className="session-node">
+                  <div
+                    className={
+                      tab.sessionId === activeSessionId ? 'session-row active' : 'session-row'
+                    }
+                  >
+                    <button
+                      className="session-main"
+                      onClick={() => props.onActivateLogin(tab.sessionId)}
+                    >
+                      <TerminalIcon size={16} />
+                      <span className="session-text">
+                        <span className="session-title">
+                          {tab.exited ? `${tab.title} (encerrado)` : tab.title}
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </div>
-      <AddProjectRow accounts={accounts} onAddProject={props.onAddProject} />
-    </aside>
+    </nav>
   );
 }

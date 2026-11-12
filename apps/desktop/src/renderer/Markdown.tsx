@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
+import { CheckIcon, CopyIcon } from './icons';
 
 const LANG_CLASS = /language-([\w+#-]+)/;
 const CACHE_LIMIT = 100;
@@ -144,8 +145,14 @@ function CodeBlock({ lang, code, streaming }: CodeBlockProps) {
     <div className="md-code">
       <div className="md-code-header">
         <span className="md-code-lang">{lang === '' ? 'texto' : lang}</span>
-        <button type="button" className="md-code-copy" onClick={copy}>
-          {copied ? 'Copiado' : 'Copiar'}
+        <button
+          type="button"
+          className="md-code-copy"
+          aria-label={copied ? 'Copiado' : 'Copiar'}
+          title={copied ? 'Copiado' : 'Copiar'}
+          onClick={copy}
+        >
+          {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
         </button>
       </div>
       {html === null ? (

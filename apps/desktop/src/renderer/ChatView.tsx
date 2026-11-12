@@ -1,12 +1,17 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { ProviderId } from '@inova/core/types';
 import type { ChatItem, ChatState } from './chat-reducer';
+import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
 import { Markdown } from './Markdown';
+import { ProviderBadge } from './ProviderBadge';
+import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
 
 export interface ChatViewProps {
   state: ChatState;
   visible: boolean;
-  title: string;
+  provider: ProviderId | null;
+  accountLabel: string | null;
   readOnly?: boolean;
   onSend: (prompt: string) => void;
   onCancel: () => void;
@@ -20,15 +25,30 @@ function firstLine(input: string): string {
   return line.length > 100 ? `${line.slice(0, 100)}…` : line;
 }
 
+const SHELL_TOOL = /bash|shell|exec/i;
+const EDIT_TOOL = /edit|write/i;
+
+function ToolIcon({ name }: { name: string }) {
+  if (SHELL_TOOL.test(name)) return <TerminalIcon size={16} />;
+  if (EDIT_TOOL.test(name)) return <PencilIcon size={16} />;
+  return <FileIcon size={16} />;
+}
+
 function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
   return (
     <details className={item.isError ? 'chat-tool chat-tool-error' : 'chat-tool'}>
       <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <ToolIcon name={item.name} />
+        </span>
         <span className="chat-tool-name">{item.name}</span>
         <span className="chat-tool-preview">{firstLine(item.input)}</span>
-        {item.isError ? <span className="chat-tool-badge">negado/erro</span> : null}
+        {item.isError ? <span className="chat-tool-status chat-tool-failed">erro</span> : null}
         {item.output === null ? (
-          <span className="chat-tool-badge chat-tool-pending">executando</span>
+          <span className="chat-tool-status chat-tool-pending">
+            <span className="dot pulse" aria-hidden="true" />
+            executando
+          </span>
         ) : null}
       </summary>
       <div className="chat-tool-body">
@@ -45,24 +65,45 @@ function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
   );
 }
 
-function Message({ item }: { item: ChatItem }) {
+interface MessageProps {
+  item: ChatItem;
+  showAgentLabel: boolean;
+  provider: ProviderId | null;
+}
+
+function AgentLabel({ provider }: { provider: ProviderId | null }) {
+  return (
+    <div className={`chat-label chat-label-agent chat-label-${provider ?? 'none'}`}>
+      <ProviderBadge provider={provider} size={18} />
+      {provider ? PROVIDER_NAME[provider] : 'Agente'}
+    </div>
+  );
+}
+
+function Message({ item, showAgentLabel, provider }: MessageProps) {
+  const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   switch (item.type) {
     case 'user':
       return (
-        <div className="chat-row chat-row-user">
+        <div className="chat-row">
+          <div className="chat-label">Você</div>
           <div className="chat-user-bubble">{item.text}</div>
         </div>
       );
     case 'assistant':
       return (
         <div className="chat-row chat-row-assistant">
-          <Markdown text={item.text} streaming={item.streaming} />
-          {item.streaming ? <span className="chat-caret" aria-hidden="true" /> : null}
+          {label}
+          <div>
+            <Markdown text={item.text} streaming={item.streaming} />
+            {item.streaming ? <span className="chat-caret" aria-hidden="true" /> : null}
+          </div>
         </div>
       );
     case 'tool':
       return (
         <div className="chat-row">
+          {label}
           <ToolCard item={item} />
         </div>
       );
@@ -82,7 +123,8 @@ const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 export function ChatView({
   state,
   visible,
-  title,
+  provider,
+  accountLabel,
   readOnly = false,
   onSend,
   onCancel,
@@ -134,14 +176,21 @@ export function ChatView({
 
   return (
     <section className="chat-view" style={visible ? undefined : { display: 'none' }}>
-      <header className="chat-header">{title}</header>
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         <div className="chat-list-inner">
           {items.length === 0 && !running ? (
             <div className="chat-empty">Envie uma mensagem para começar</div>
           ) : null}
-          {items.map((item) => (
-            <Message key={item.id} item={item} />
+          {items.map((item, index) => (
+            <Message
+              key={item.id}
+              item={item}
+              provider={provider}
+              showAgentLabel={
+                (item.type === 'assistant' || item.type === 'tool') &&
+                (index === 0 || items[index - 1]?.type === 'user')
+              }
+            />
           ))}
           {thinking ? (
             <div className="chat-row chat-thinking" aria-live="polite">
@@ -162,25 +211,40 @@ export function ChatView({
             className="chat-input"
             rows={1}
             value={draft}
-            placeholder={readOnly ? ARCHIVED_HINT : 'Escreva uma mensagem…'}
+            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente…'}
             disabled={readOnly}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={onKeyDown}
           />
-          {running ? (
-            <button type="button" className="chat-button chat-button-stop" onClick={onCancel}>
-              Parar
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="chat-button"
-              disabled={readOnly || draft.trim() === ''}
-              onClick={submit}
-            >
-              Enviar
-            </button>
-          )}
+          <div className="chat-composer-bar">
+            {provider ? (
+              <span className="chat-chip">
+                <ProviderBadge provider={provider} size={16} />
+                {PROVIDER_NAME[provider]}
+                {accountLabel !== null ? ` · ${accountLabel}` : ''}
+              </span>
+            ) : null}
+            {running ? (
+              <button
+                type="button"
+                className="chat-send chat-send-stop"
+                aria-label="Parar"
+                onClick={onCancel}
+              >
+                <StopIcon />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="chat-send"
+                aria-label="Enviar mensagem"
+                disabled={readOnly || draft.trim() === ''}
+                onClick={submit}
+              >
+                <SendIcon size={16} />
+              </button>
+            )}
+          </div>
         </div>
         {readOnly ? <p className="chat-readonly-hint">{ARCHIVED_HINT}</p> : null}
       </div>

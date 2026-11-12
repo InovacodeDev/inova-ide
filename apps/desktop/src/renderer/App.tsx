@@ -2,13 +2,20 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import type { Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
+import { AccountsView } from './AccountsView';
+import { agentTail } from './agent-tail';
+import { AgentsView } from './AgentsView';
 import { ChatView } from './ChatView';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
 import { Footer, type UsageState } from './Footer';
+import { Header } from './Header';
+import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { createPtyRouter } from './pty-buffer';
-import { Sidebar } from './Sidebar';
-import { TabBar } from './TabBar';
+import { SessionDetails } from './SessionDetails';
+import { SessionHeader } from './SessionHeader';
+import { sessionStatus } from './session-status';
+import { Sidebar, type View } from './Sidebar';
 import { TerminalView, type TerminalSize } from './TerminalView';
 import { tabsReducer, type Tab } from './tabs';
 import { useWarning } from './useWarning';
@@ -17,6 +24,10 @@ import { restoreTabs, workspaceFromTabs, workspaceKey } from './workspace';
 const SAVE_DEBOUNCE_MS = 300;
 const DEFAULT_SIZE: TerminalSize = { cols: 120, rows: 32 };
 const GEMINI_HINT = 'No Gemini, escolha "Sign in with Google" e saia com /quit.';
+
+function folderName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
 
 function subtreeIds(input: { sessions: readonly Session[]; rootId: string }): string[] {
   const ids = new Set([input.rootId]);
@@ -38,6 +49,7 @@ export function App() {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [sessions, setSessions] = useState<Record<string, Session[]>>({});
   const [usage, setUsage] = useState<Record<string, UsageState>>({});
+  const [view, setView] = useState<View>('workspace');
   const { warning, dismiss, guard, call } = useWarning();
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
@@ -80,7 +92,11 @@ export function App() {
   }, [call, reloadSessions]);
 
   const loadUsage = useCallback(async (accountLabel: string) => {
-    setUsage((current) => ({ ...current, [accountLabel]: { status: 'loading' } }));
+    setUsage((current) =>
+      current[accountLabel]?.status === 'ready'
+        ? current
+        : { ...current, [accountLabel]: { status: 'loading' } },
+    );
     let next: UsageState;
     try {
       const result = await window.inova.getUsage({ accountLabel });
@@ -176,8 +192,11 @@ export function App() {
     };
   }, [router, reloadAccounts]);
 
-  const openChatTab = async (session: Session) => {
-    const project = latest.current.projects.find((candidate) => candidate.id === session.projectId);
+  const openChatTab = async (session: Session, knownProject?: ProjectView) => {
+    const project =
+      knownProject ??
+      latest.current.projects.find((candidate) => candidate.id === session.projectId);
+    setView('workspace');
     dispatch({
       type: 'open',
       tab: {
@@ -200,7 +219,8 @@ export function App() {
     );
     if (!result) return;
     await reloadSessions(input.project.id);
-    await openChatTab(result.value);
+    await openChatTab(result.value, input.project);
+    return result.value;
   };
 
   const sendMessage = async (sessionId: string, prompt: string) => {
@@ -223,6 +243,7 @@ export function App() {
     );
     if (!result) return;
     const { sessionId, title } = result.value;
+    setView('workspace');
     dispatch({
       type: 'open',
       tab: { sessionId, title, kind: 'login', provider: account.provider },
@@ -285,11 +306,19 @@ export function App() {
     await reloadSessions(input.session.projectId);
   };
 
-  const addProject = async (accountLabel: string) => {
-    const path = await guard(() => window.inova.pickFolder());
-    if (!path) return;
-    const result = await call(() => window.inova.bindProject({ path, accountLabel }));
-    if (result) await reloadProjects();
+  const startSession = async (input: { target: NewSessionTarget; prompt: string }) => {
+    let project: ProjectView;
+    if (input.target.kind === 'project') {
+      project = input.target.project;
+    } else {
+      const { path, accountLabel } = input.target;
+      const bound = await call(() => window.inova.bindProject({ path, accountLabel }));
+      if (!bound) return;
+      await reloadProjects();
+      project = bound.value;
+    }
+    const session = await newSession({ project, parent: null });
+    if (session && input.prompt !== '') await sendMessage(session.id, input.prompt);
   };
 
   const removeAccount = async (account: AccountView) => {
@@ -314,6 +343,21 @@ export function App() {
   );
 
   const activeTab = tabs.tabs.find((tab) => tab.sessionId === tabs.active);
+  const inWorkspace = view === 'workspace';
+
+  const sessionById = new Map(
+    Object.values(sessions)
+      .flat()
+      .map((session) => [session.id, session] as const),
+  );
+  const projectOf = (sessionId: string): ProjectView | undefined => {
+    const projectId = sessionById.get(sessionId)?.projectId;
+    return projects.find((project) => project.id === projectId);
+  };
+
+  const activeSession = activeTab?.kind === 'chat' ? sessionById.get(activeTab.sessionId) : null;
+  const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
 
   return (
     <div className="app">
@@ -322,75 +366,141 @@ export function App() {
           {warning}
         </div>
       )}
-      <Sidebar
-        accounts={accounts}
-        projects={projects}
-        sessions={sessions}
-        activeSessionId={activeTab?.kind === 'chat' ? activeTab.sessionId : null}
-        onOpenSession={(session) => void openChatTab(session)}
-        onNewSession={(input) => void newSession(input)}
-        onAddProject={(label) => void addProject(label)}
-        onUnbind={async (project) => {
-          const result = await call(() => window.inova.unbindProject({ path: project.path }));
-          if (!result) return;
-          dropSessions(sessionIdsOf([project.id]));
-          await reloadProjects();
-        }}
-        onRenameSession={(input) => void renameSession(input)}
-        onDeleteSession={(session) => void deleteSession(session)}
-        onArchiveSession={(session) => void setArchived({ session, archived: true })}
-        onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
-      />
-      <main className="main">
-        <TabBar
-          state={tabs}
-          onActivate={(sessionId) => dispatch({ type: 'activate', sessionId })}
-          onClose={(sessionId) => {
-            const tab = tabs.tabs.find((candidate) => candidate.sessionId === sessionId);
-            if (tab) closeTab(tab);
+      <Header runningCount={Object.values(chats).filter((chat) => chat.running).length} />
+      <div className="app-body">
+        <Sidebar
+          view={view}
+          onNavigate={setView}
+          projects={projects}
+          sessions={sessions}
+          activeSessionId={inWorkspace ? tabs.active : null}
+          statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+          loginTabs={tabs.tabs.filter((tab) => tab.kind === 'login')}
+          onActivateLogin={(sessionId) => {
+            setView('workspace');
+            dispatch({ type: 'activate', sessionId });
           }}
+          onOpenSession={(session) => void openChatTab(session)}
+          onNewSession={(input) => void newSession(input)}
+          onUnbind={async (project) => {
+            const result = await call(() => window.inova.unbindProject({ path: project.path }));
+            if (!result) return;
+            dropSessions(sessionIdsOf([project.id]));
+            await reloadProjects();
+          }}
+          onRenameSession={(input) => void renameSession(input)}
+          onDeleteSession={(session) => void deleteSession(session)}
+          onArchiveSession={(session) => void setArchived({ session, archived: true })}
+          onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
-        {activeTab?.kind === 'login' && activeTab.provider === 'gemini' && !activeTab.exited && (
-          <p className="hint">{GEMINI_HINT}</p>
-        )}
-        <div className="terminals">
-          {tabs.tabs.map((tab) =>
-            tab.kind === 'chat' ? (
-              <ChatView
-                key={tab.sessionId}
-                state={chats[tab.sessionId] ?? initialChatState}
-                visible={tab.sessionId === tabs.active}
-                title={tab.title}
-                readOnly={archivedIds.has(tab.sessionId)}
-                onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
-                onCancel={() => window.inova.cancelTurn(tab.sessionId)}
+        <main className="main">
+          {view === 'agents' && (
+            <AgentsView
+              agents={chatTabs.map((tab) => {
+                const project = projectOf(tab.sessionId);
+                return {
+                  sessionId: tab.sessionId,
+                  title: tab.title,
+                  provider: tab.provider,
+                  where: project ? `${folderName(project.path)} · ${project.accountLabel}` : '',
+                  status: sessionStatus(chats[tab.sessionId]),
+                  tail: agentTail({ items: chats[tab.sessionId]?.items ?? [], lines: 3 }),
+                };
+              })}
+              onOpen={(sessionId) => {
+                setView('workspace');
+                dispatch({ type: 'activate', sessionId });
+              }}
+              onNewSession={() => setView('new-session')}
+            />
+          )}
+          {view === 'accounts' && (
+            <AccountsView
+              accounts={accounts}
+              projects={projects}
+              usage={usage}
+              onLoadUsage={(account) => void loadUsage(account.label)}
+              onLogin={(account) => void openLogin(account)}
+              onRemove={(account) => void removeAccount(account)}
+              onAddAccount={async (input) => {
+                const result = await call(() => window.inova.addAccount(input));
+                if (!result) return false;
+                await reloadAccounts();
+                return true;
+              }}
+            />
+          )}
+          {view === 'new-session' && (
+            <NewSessionView
+              accounts={accounts}
+              projects={projects}
+              onPickFolder={async () => (await guard(() => window.inova.pickFolder())) ?? null}
+              onStart={startSession}
+              onCancel={() => setView('workspace')}
+              onManageAccounts={() => setView('accounts')}
+            />
+          )}
+          <div className="main-content" style={inWorkspace ? undefined : { display: 'none' }}>
+            {activeTab ? (
+              <SessionHeader
+                title={activeTab.title}
+                provider={activeTab.provider}
+                accountLabel={activeProject?.accountLabel ?? null}
+                path={activeProject?.path ?? null}
+                status={
+                  activeTab.kind === 'chat' ? sessionStatus(chats[activeTab.sessionId]) : null
+                }
+                exited={activeTab.exited}
+                onClose={() => closeTab(activeTab)}
               />
             ) : (
-              <TerminalView
-                key={tab.sessionId}
-                sessionId={tab.sessionId}
-                visible={tab.sessionId === tabs.active}
-                exited={tab.exited}
-                attach={router.attach}
-                onSize={(size) => {
-                  sizeRef.current = size;
-                }}
-              />
-            ),
-          )}
-        </div>
-      </main>
+              <p className="hint">Nenhuma sessão aberta. Escolha uma sessão ou crie uma nova.</p>
+            )}
+            {activeTab?.kind === 'login' &&
+              activeTab.provider === 'gemini' &&
+              !activeTab.exited && <p className="hint">{GEMINI_HINT}</p>}
+            {tabs.tabs.map((tab) =>
+              tab.kind === 'chat' ? (
+                <ChatView
+                  key={tab.sessionId}
+                  state={chats[tab.sessionId] ?? initialChatState}
+                  visible={inWorkspace && tab.sessionId === tabs.active}
+                  provider={tab.provider}
+                  accountLabel={projectOf(tab.sessionId)?.accountLabel ?? null}
+                  readOnly={archivedIds.has(tab.sessionId)}
+                  onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
+                  onCancel={() => window.inova.cancelTurn(tab.sessionId)}
+                />
+              ) : (
+                <TerminalView
+                  key={tab.sessionId}
+                  sessionId={tab.sessionId}
+                  visible={inWorkspace && tab.sessionId === tabs.active}
+                  exited={tab.exited}
+                  attach={router.attach}
+                  onSize={(size) => {
+                    sizeRef.current = size;
+                  }}
+                />
+              ),
+            )}
+          </div>
+        </main>
+        {inWorkspace && activeSession && activeProject && (
+          <SessionDetails
+            session={activeSession}
+            project={activeProject}
+            account={accounts.find((account) => account.label === activeProject.accountLabel)}
+            usage={usage[activeProject.accountLabel]}
+          />
+        )}
+      </div>
       <Footer
         accounts={accounts}
-        focusedProvider={activeTab?.provider ?? null}
+        focusedAccountLabel={inWorkspace ? (activeProject?.accountLabel ?? null) : null}
         usage={usage}
         onLoadUsage={(account) => void loadUsage(account.label)}
-        onLogin={(account) => void openLogin(account)}
-        onRemove={(account) => void removeAccount(account)}
-        onAddAccount={async (input) => {
-          const result = await call(() => window.inova.addAccount(input));
-          if (result) await reloadAccounts();
-        }}
+        onManageAccounts={() => setView('accounts')}
       />
     </div>
   );

@@ -1,0 +1,216 @@
+import { useState, type FormEvent, type KeyboardEvent } from 'react';
+import type { ProviderId } from '@inova/core/types';
+import type { AccountView, ProjectView } from '../shared/api';
+import { FolderIcon } from './icons';
+import { PROVIDER_ORDER } from './footer-state';
+import { ProviderBadge } from './ProviderBadge';
+import { PROVIDER_NAME } from './provider-meta';
+import './views-forms.css';
+
+export type NewSessionTarget =
+  | { kind: 'project'; project: ProjectView }
+  | { kind: 'folder'; path: string; accountLabel: string };
+
+export interface NewSessionViewProps {
+  accounts: AccountView[];
+  projects: ProjectView[];
+  onPickFolder: () => Promise<string | null>;
+  onStart: (input: { target: NewSessionTarget; prompt: string }) => Promise<void>;
+  onCancel: () => void;
+  onManageAccounts: () => void;
+}
+
+const OTHER_FOLDER = '__other__';
+
+function baseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+export function NewSessionView(props: NewSessionViewProps) {
+  const { accounts, projects, onPickFolder, onStart, onCancel, onManageAccounts } = props;
+  const [choice, setChoice] = useState<string>(projects[0]?.id ?? OTHER_FOLDER);
+  const [folderPath, setFolderPath] = useState<string | null>(null);
+  const [pickedProvider, setPickedProvider] = useState<ProviderId | null>(null);
+  const [pickedLabel, setPickedLabel] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  if (accounts.length === 0) {
+    return (
+      <div className="view-scroll">
+        <div className="new-session">
+          <h1>Nova sessão</h1>
+          <div className="new-session-empty">
+            <p>Nenhuma conta conectada.</p>
+            <button type="button" className="btn btn-primary" onClick={onManageAccounts}>
+              Adicionar conta
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const project = projects.find((p) => p.id === choice) ?? null;
+  const selectedChoice = project ? choice : OTHER_FOLDER;
+  const providers = PROVIDER_ORDER.filter((id) => accounts.some((a) => a.provider === id));
+  const provider: ProviderId | null =
+    project?.provider ??
+    (pickedProvider && providers.includes(pickedProvider) ? pickedProvider : providers[0]) ??
+    null;
+  const providerAccounts = accounts.filter((a) => a.provider === provider);
+  const accountLabel =
+    project?.accountLabel ??
+    (providerAccounts.find((a) => a.label === pickedLabel) ?? providerAccounts[0])?.label ??
+    null;
+  const target: NewSessionTarget | null = project
+    ? { kind: 'project', project }
+    : folderPath && accountLabel
+      ? { kind: 'folder', path: folderPath, accountLabel }
+      : null;
+
+  const pickFolder = async () => {
+    const path = await onPickFolder();
+    if (!path) return;
+    const existing = projects.find((p) => p.path === path);
+    if (existing) setChoice(existing.id);
+    else setFolderPath(path);
+  };
+
+  const submit = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!target || submitting) return;
+    setSubmitting(true);
+    try {
+      await onStart({ target, prompt: prompt.trim() });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onCancel();
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      void submit();
+    }
+  };
+
+  return (
+    <div className="view-scroll">
+      <form className="new-session" onSubmit={(event) => void submit(event)} onKeyDown={onKeyDown}>
+        <div>
+          <h1>Nova sessão</h1>
+          <p>Escolha onde o agente vai trabalhar e qual conta roda por baixo.</p>
+        </div>
+
+        <div className="new-session-group">
+          <label htmlFor="new-session-dir" className="section-label">
+            Diretório de trabalho
+          </label>
+          <select
+            id="new-session-dir"
+            className="field"
+            value={selectedChoice}
+            onChange={(e) => setChoice(e.target.value)}
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {baseName(p.path)} — {p.accountLabel}
+              </option>
+            ))}
+            <option value={OTHER_FOLDER}>Outra pasta…</option>
+          </select>
+          {project ? null : (
+            <div className="new-session-folder">
+              <div className="new-session-path">
+                <FolderIcon size={16} />
+                {folderPath ? (
+                  folderPath
+                ) : (
+                  <span className="new-session-path-empty">Nenhuma pasta escolhida</span>
+                )}
+              </div>
+              <button type="button" className="btn" onClick={() => void pickFolder()}>
+                Escolher pasta
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="new-session-group" role="radiogroup" aria-label="Provider">
+          <span className="section-label">Provider</span>
+          <div className="new-session-providers">
+            {providers.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={provider === id}
+                className="new-session-card"
+                disabled={project !== null}
+                onClick={() => {
+                  setPickedProvider(id);
+                  setPickedLabel(null);
+                }}
+              >
+                <ProviderBadge provider={id} size={28} />
+                <span className="new-session-card-name">{PROVIDER_NAME[id]}</span>
+                <span className="new-session-card-bin">{id}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="new-session-group">
+          <label htmlFor="new-session-account" className="section-label">
+            Conta
+          </label>
+          <select
+            id="new-session-account"
+            className="field"
+            value={accountLabel ?? ''}
+            disabled={project !== null}
+            onChange={(e) => setPickedLabel(e.target.value)}
+          >
+            {providerAccounts.map((a) => (
+              <option key={a.id} value={a.label}>
+                {a.label}
+                {a.status === 'logged-in' ? '' : ' (desconectada)'}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="new-session-group">
+          <label htmlFor="new-session-prompt" className="section-label">
+            Primeira mensagem (opcional)
+          </label>
+          <textarea
+            id="new-session-prompt"
+            className="field"
+            rows={3}
+            placeholder="O que o agente deve fazer primeiro?"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+          />
+        </div>
+
+        <div className="new-session-footer">
+          <button type="button" className="btn" onClick={onCancel}>
+            Cancelar
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            disabled={target === null || submitting}
+          >
+            Iniciar sessão <kbd>⌘↵</kbd>
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}

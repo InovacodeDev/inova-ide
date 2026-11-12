@@ -35,7 +35,8 @@ export function TerminalView({ sessionId, visible, exited, attach, onSize }: Ter
     const term = new Terminal({
       fontSize: 13,
       cursorBlink: true,
-      theme: { background: '#11111b' },
+      fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace",
+      theme: { background: '#0F1012', foreground: '#C8C9CC', cursor: '#FF5A1F' },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
