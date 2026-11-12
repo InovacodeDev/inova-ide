@@ -20,13 +20,35 @@ describe('chatStoreReducer', () => {
     expect(store['b']?.items).toHaveLength(1);
   });
 
-  test('load replaces the session state with the transcript', () => {
+  test('load fills a session without state', () => {
+    const store = chatStoreReducer(
+      {},
+      {
+        sessionId: 'a',
+        action: { type: 'load', events: [{ kind: 'user', text: 'oi', at: AT }] },
+      },
+    );
+    expect(store['a']?.running).toBe(false);
+    expect(store['a']?.items).toHaveLength(1);
+  });
+
+  test('a late load does not wipe a live running turn', () => {
     const start = chatStoreReducer({}, { sessionId: 'a', action: { type: 'started' } });
     const store = chatStoreReducer(start, {
       sessionId: 'a',
       action: { type: 'load', events: [{ kind: 'user', text: 'oi', at: AT }] },
     });
-    expect(store['a']?.running).toBe(false);
-    expect(store['a']?.items).toHaveLength(1);
+    expect(store['a']?.running).toBe(true);
+    expect(store['a']?.items).toEqual([]);
+  });
+
+  test('drop removes the listed sessions only', () => {
+    const base: ChatStore = {
+      a: { items: [], running: false },
+      b: { items: [], running: false },
+      c: { items: [], running: false },
+    };
+    const store = chatStoreReducer(base, { type: 'drop', sessionIds: ['a', 'c'] });
+    expect(Object.keys(store)).toEqual(['b']);
   });
 });

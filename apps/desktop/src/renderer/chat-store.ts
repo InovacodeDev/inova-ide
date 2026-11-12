@@ -2,14 +2,14 @@ import { chatReducer, initialChatState, type ChatAction, type ChatState } from '
 
 export type ChatStore = Record<string, ChatState>;
 
-export interface ChatStoreAction {
-  sessionId: string;
-  action: ChatAction;
-}
+export type ChatStoreAction =
+  { sessionId: string; action: ChatAction } | { type: 'drop'; sessionIds: string[] };
 
-export function chatStoreReducer(
-  store: ChatStore,
-  { sessionId, action }: ChatStoreAction,
-): ChatStore {
+export function chatStoreReducer(store: ChatStore, input: ChatStoreAction): ChatStore {
+  if ('type' in input) {
+    const dropped = new Set(input.sessionIds);
+    return Object.fromEntries(Object.entries(store).filter(([id]) => !dropped.has(id)));
+  }
+  const { sessionId, action } = input;
   return { ...store, [sessionId]: chatReducer(store[sessionId] ?? initialChatState, action) };
 }

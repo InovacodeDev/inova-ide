@@ -16,10 +16,9 @@ export type ChatItem =
 export interface ChatState {
   items: ChatItem[];
   running: boolean;
-  costUsd: number | null;
 }
 
-export const initialChatState: ChatState = { items: [], running: false, costUsd: null };
+export const initialChatState: ChatState = { items: [], running: false };
 
 export type ChatAction =
   { type: 'event'; event: ChatEvent } | { type: 'load'; events: ChatEvent[] } | { type: 'started' };
@@ -98,7 +97,6 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
           item.type === 'assistant' && item.streaming ? { ...item, streaming: false } : item,
         ),
         running: false,
-        costUsd: event.costUsd === null ? state.costUsd : (state.costUsd ?? 0) + event.costUsd,
       };
     case 'session':
     case 'usage-limits':
@@ -113,9 +111,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'event':
       return applyEvent(state, action.event);
     case 'load':
-      return {
-        ...action.events.reduce(applyEvent, initialChatState),
-        running: false,
-      };
+      if (state.running || state.items.length > 0) return state;
+      return { ...action.events.reduce(applyEvent, initialChatState), running: false };
   }
 }

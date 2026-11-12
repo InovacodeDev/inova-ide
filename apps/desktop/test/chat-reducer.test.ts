@@ -54,16 +54,15 @@ describe('chatReducer', () => {
     ]);
   });
 
-  test('started sets running; done clears it, stops streaming and adds cost', () => {
+  test('started sets running; done clears it and stops streaming', () => {
     const started = chatReducer(initialChatState, { type: 'started' });
     expect(started.running).toBe(true);
     const streaming = run([{ kind: 'text-delta', blockId: 'b1', text: 'a' }], started);
-    const first = run([{ kind: 'done', isError: false, costUsd: 0.5, durationMs: 1 }], streaming);
-    expect(first.running).toBe(false);
-    expect(first.items).toEqual([{ type: 'assistant', id: 'b1', text: 'a', streaming: false }]);
-    expect(first.costUsd).toBe(0.5);
-    const second = run([{ kind: 'done', isError: false, costUsd: 0.25, durationMs: null }], first);
-    expect(second.costUsd).toBe(0.75);
+    const done = run([{ kind: 'done', isError: false, costUsd: 0.5, durationMs: 1 }], streaming);
+    expect(done).toEqual({
+      running: false,
+      items: [{ type: 'assistant', id: 'b1', text: 'a', streaming: false }],
+    });
   });
 
   test('session and usage-limits do not change items', () => {
@@ -74,17 +73,27 @@ describe('chatReducer', () => {
     expect(state.items).toEqual([]);
   });
 
-  test('load replays events from scratch and ends not running', () => {
-    const dirty = chatReducer(initialChatState, { type: 'started' });
-    const action: ChatAction = {
-      type: 'load',
-      events: [
-        { kind: 'user', text: 'oi', at: 'now' },
-        { kind: 'text', blockId: 'b1', text: 'olá' },
-      ],
-    };
-    const state = chatReducer(dirty, action);
+  const loadAction: ChatAction = {
+    type: 'load',
+    events: [
+      { kind: 'user', text: 'oi', at: 'now' },
+      { kind: 'text', blockId: 'b1', text: 'olá' },
+    ],
+  };
+
+  test('load replays events into an empty idle state', () => {
+    const state = chatReducer(initialChatState, loadAction);
     expect(state.running).toBe(false);
     expect(state.items).toHaveLength(2);
+  });
+
+  test('load is ignored while a turn is running', () => {
+    const running = chatReducer(initialChatState, { type: 'started' });
+    expect(chatReducer(running, loadAction)).toBe(running);
+  });
+
+  test('load is ignored when the state already has items', () => {
+    const live = run([{ kind: 'user', text: 'novo', at: 'now' }]);
+    expect(chatReducer(live, loadAction)).toBe(live);
   });
 });
