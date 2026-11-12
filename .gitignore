@@ -4,3 +4,4 @@ dist
 .harness.json
 .claude-flow/
 .superpowers/
+.vitest/

@@ -3,3 +3,4 @@ graft/
 docs/
 pnpm-lock.yaml
 dist
+.vitest/
