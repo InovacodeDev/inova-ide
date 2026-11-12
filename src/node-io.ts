@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { constants } from 'node:os';
 import type { LaunchSpec } from './core/launch.js';
 import type { CommandRunner } from './core/providers.js';
@@ -21,6 +22,26 @@ export const nodeRunner: CommandRunner = {
     }),
 };
 
+const IGNORED_SIGNALS = ['SIGINT', 'SIGQUIT'] as const;
+const FORWARDED_SIGNALS = ['SIGTERM', 'SIGHUP'] as const;
+
+function ignoreSignal(): void {
+  return undefined;
+}
+
+function relaySignals(child: ChildProcess): () => void {
+  const forwards = FORWARDED_SIGNALS.map((signal) => ({
+    signal,
+    handler: () => child.kill(signal),
+  }));
+  for (const signal of IGNORED_SIGNALS) process.on(signal, ignoreSignal);
+  for (const { signal, handler } of forwards) process.on(signal, handler);
+  return () => {
+    for (const signal of IGNORED_SIGNALS) process.off(signal, ignoreSignal);
+    for (const { signal, handler } of forwards) process.off(signal, handler);
+  };
+}
+
 function spawnInteractive(spec: LaunchSpec): Promise<number | 'not-found'> {
   return new Promise((resolve, reject) => {
     const child = spawn(spec.command, spec.args, {
@@ -28,11 +49,14 @@ function spawnInteractive(spec: LaunchSpec): Promise<number | 'not-found'> {
       env: spec.env,
       stdio: 'inherit',
     });
+    const release = relaySignals(child);
     child.on('error', (error) => {
+      release();
       if (errorCode(error) === 'ENOENT') return resolve('not-found');
       return reject(error);
     });
     child.on('close', (code, signal) => {
+      release();
       if (code !== null) return resolve(code);
       resolve(signal === null ? 1 : 128 + (constants.signals[signal] ?? 0));
     });
