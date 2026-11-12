@@ -227,6 +227,28 @@ button:disabled {
   color: #89b4fa;
 }
 
+.session-delete {
+  background: none;
+  border: 0;
+  color: #a6adc8;
+  display: none;
+  padding: 0 6px;
+}
+
+.session-row:hover .session-delete,
+.session-delete:focus-visible {
+  display: block;
+}
+
+.session-delete:hover {
+  color: #f38ba8;
+}
+
+.session-rename {
+  flex: 1;
+  min-width: 0;
+}
+
 .session-empty {
   color: #a6adc8;
   margin: 4px 0 0;
