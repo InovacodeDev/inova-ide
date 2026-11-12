@@ -24,8 +24,16 @@ let mainWindow: BrowserWindow | undefined;
 let cachedBaseEnv: Promise<NodeJS.ProcessEnv> | undefined;
 
 function baseEnv(): Promise<NodeJS.ProcessEnv> {
+  if (process.platform === 'win32') {
+    return Promise.resolve({
+      ...process.env,
+      TERM: 'xterm-256color',
+      COLORTERM: 'truecolor',
+    });
+  }
+  const defaultShell = process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
   cachedBaseEnv ??= loginShellPath({
-    shell: process.env['SHELL'] ?? '/bin/zsh',
+    shell: process.env['SHELL'] ?? defaultShell,
     fallback: process.env['PATH'] ?? '',
     timeoutMs: SHELL_TIMEOUT_MS,
   }).then((path) => ({
@@ -111,8 +119,10 @@ async function pickFolder(): Promise<string | null> {
 }
 
 function collectPtyOutput(): Promise<string> {
+  const file = process.platform === 'win32' ? 'cmd.exe' : '/bin/echo';
+  const args = process.platform === 'win32' ? ['/c', 'echo', 'pty-ok'] : ['pty-ok'];
   return new Promise((resolve) => {
-    const child = pty.spawn('/bin/echo', ['pty-ok'], {
+    const child = pty.spawn(file, args, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,

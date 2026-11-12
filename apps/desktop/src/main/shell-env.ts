@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -30,7 +30,7 @@ export async function loginShellPath(ctx: {
 async function isExecutableFile(path: string): Promise<boolean> {
   try {
     if (!(await stat(path)).isFile()) return false;
-    await access(path, constants.X_OK);
+    if (process.platform !== 'win32') await access(path, constants.X_OK);
     return true;
   } catch (error: unknown) {
     if (error instanceof Error) return false;
@@ -39,10 +39,13 @@ async function isExecutableFile(path: string): Promise<boolean> {
 }
 
 export async function findBinary(name: string, pathValue: string): Promise<string | undefined> {
-  for (const dir of pathValue.split(':')) {
+  const suffixes = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+  for (const dir of pathValue.split(delimiter)) {
     if (dir === '') continue;
-    const candidate = join(dir, name);
-    if (await isExecutableFile(candidate)) return candidate;
+    for (const suffix of suffixes) {
+      const candidate = join(dir, `${name}${suffix}`);
+      if (await isExecutableFile(candidate)) return candidate;
+    }
   }
   return undefined;
 }

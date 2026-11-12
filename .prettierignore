@@ -7,3 +7,5 @@ dist
 apps/desktop/out
 release/
 apps/desktop/build/icon.icns
+apps/desktop/build/icon.ico
+apps/desktop/build/icon.png

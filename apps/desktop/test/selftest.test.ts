@@ -7,7 +7,9 @@ test('selftest spawns a pty and resolves the core', async () => {
   const env: NodeJS.ProcessEnv = { ...process.env, INOVA_SELFTEST: '1' };
   delete env.ELECTRON_RUN_AS_NODE;
 
-  const result = spawnSync(electronBinary, ['out/main/index.js'], {
+  const args =
+    process.platform === 'linux' ? ['--no-sandbox', 'out/main/index.js'] : ['out/main/index.js'];
+  const result = spawnSync(electronBinary, args, {
     cwd: resolve(import.meta.dirname, '..'),
     env,
     encoding: 'utf8',

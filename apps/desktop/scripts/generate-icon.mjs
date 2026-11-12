@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const outIcns = join(root, 'build', 'icon.icns');
+const buildDir = join(root, 'build');
+const outIcns = join(buildDir, 'icon.icns');
+const outPng = join(buildDir, 'icon.png');
+const outIco = join(buildDir, 'icon.ico');
 const workDir = mkdtempSync(join(tmpdir(), 'inova-icon-'));
 const iconsetDir = join(workDir, 'icon.iconset');
-const masterPng = join(workDir, 'icon_1024.png');
 const swiftScript = join(workDir, 'render.swift');
 
 const swiftSource = `
@@ -89,27 +91,61 @@ let pngData = rep.representation(using: .png, properties: [:])!
 try pngData.write(to: URL(fileURLWithPath: outPath))
 `;
 
+function buildIco(entries) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(entries.length, 4);
+
+  const dir = Buffer.alloc(entries.length * 16);
+  let offset = header.length + dir.length;
+  for (let i = 0; i < entries.length; i += 1) {
+    const { size, data } = entries[i];
+    const base = i * 16;
+    dir.writeUInt8(size === 256 ? 0 : size, base);
+    dir.writeUInt8(size === 256 ? 0 : size, base + 1);
+    dir.writeUInt8(0, base + 2);
+    dir.writeUInt8(0, base + 3);
+    dir.writeUInt16LE(1, base + 4);
+    dir.writeUInt16LE(32, base + 6);
+    dir.writeUInt32LE(data.length, base + 8);
+    dir.writeUInt32LE(offset, base + 12);
+    offset += data.length;
+  }
+  return Buffer.concat([header, dir, ...entries.map((entry) => entry.data)]);
+}
+
 try {
-  mkdirSync(dirname(outIcns), { recursive: true });
+  mkdirSync(buildDir, { recursive: true });
   mkdirSync(iconsetDir, { recursive: true });
   writeFileSync(swiftScript, swiftSource);
-  execFileSync('swift', [swiftScript, masterPng], { stdio: 'inherit' });
+  execFileSync('swift', [swiftScript, outPng], { stdio: 'inherit' });
 
   const sizes = [16, 32, 128, 256, 512];
   for (const s of sizes) {
     execFileSync(
       'sips',
-      ['-z', String(s), String(s), masterPng, '--out', join(iconsetDir, `icon_${s}x${s}.png`)],
+      ['-z', String(s), String(s), outPng, '--out', join(iconsetDir, `icon_${s}x${s}.png`)],
       { stdio: 'ignore' },
     );
     const s2 = s * 2;
     execFileSync(
       'sips',
-      ['-z', String(s2), String(s2), masterPng, '--out', join(iconsetDir, `icon_${s}x${s}@2x.png`)],
+      ['-z', String(s2), String(s2), outPng, '--out', join(iconsetDir, `icon_${s}x${s}@2x.png`)],
       { stdio: 'ignore' },
     );
   }
   execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', outIcns], { stdio: 'inherit' });
+
+  const icoSizes = [16, 32, 48, 64, 128, 256];
+  const icoEntries = icoSizes.map((size) => {
+    const file = join(workDir, `ico_${size}.png`);
+    execFileSync('sips', ['-z', String(size), String(size), outPng, '--out', file], {
+      stdio: 'ignore',
+    });
+    return { size, data: readFileSync(file) };
+  });
+  writeFileSync(outIco, buildIco(icoEntries));
 } finally {
   rmSync(workDir, { recursive: true, force: true });
 }
