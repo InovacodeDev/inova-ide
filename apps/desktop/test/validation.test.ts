@@ -2,9 +2,14 @@ import { expect, test } from 'vitest';
 import {
   parseBinding,
   parseNewAccount,
+  parseMessage,
+  parseNewSession,
   parsePath,
-  parseProjectLaunch,
+  parseProjectRef,
   parseRemoval,
+  parseRename,
+  parseSessionRef,
+  parseUsageRequest,
 } from '../src/main/validation.js';
 
 test('array and primitive inputs are rejected', () => {
@@ -13,7 +18,12 @@ test('array and primitive inputs are rejected', () => {
     expect(parseRemoval(input)).toBeUndefined();
     expect(parsePath(input)).toBeUndefined();
     expect(parseBinding(input)).toBeUndefined();
-    expect(parseProjectLaunch(input)).toBeUndefined();
+    expect(parseProjectRef(input)).toBeUndefined();
+    expect(parseNewSession(input)).toBeUndefined();
+    expect(parseSessionRef(input)).toBeUndefined();
+    expect(parseRename(input)).toBeUndefined();
+    expect(parseMessage(input)).toBeUndefined();
+    expect(parseUsageRequest(input)).toBeUndefined();
   }
 });
 
@@ -21,8 +31,50 @@ test('labels and ids accept 255 characters and reject 256', () => {
   const label = 'a'.repeat(255);
   expect(parseNewAccount({ provider: 'claude', label })).toEqual({ provider: 'claude', label });
   expect(parseNewAccount({ provider: 'claude', label: `${label}a` })).toBeUndefined();
-  const launch = { cols: 80, rows: 24 };
-  expect(parseProjectLaunch({ projectId: `${label}a`, ...launch })).toBeUndefined();
+  expect(parseProjectRef({ projectId: label })).toEqual({ projectId: label });
+  expect(parseProjectRef({ projectId: `${label}a` })).toBeUndefined();
+});
+
+test('session ids must be safe path segments', () => {
+  for (const sessionId of ['', '.', '..', 'a/b', 'a\\b', '../x', 'a\0b']) {
+    expect(parseSessionRef({ sessionId })).toBeUndefined();
+    expect(parseMessage({ sessionId, prompt: 'oi' })).toBeUndefined();
+    expect(parseRename({ sessionId, title: 't' })).toBeUndefined();
+  }
+  expect(parseSessionRef({ sessionId: 'abc-123' })).toEqual({ sessionId: 'abc-123' });
+});
+
+test('new sessions default the parent to null and validate it', () => {
+  expect(parseNewSession({ projectId: 'p' })).toEqual({ projectId: 'p', parentId: null });
+  expect(parseNewSession({ projectId: 'p', parentId: null })).toEqual({
+    projectId: 'p',
+    parentId: null,
+  });
+  expect(parseNewSession({ projectId: 'p', parentId: 's' })).toEqual({
+    projectId: 'p',
+    parentId: 's',
+  });
+  expect(parseNewSession({ projectId: 'p', parentId: 5 })).toBeUndefined();
+  expect(parseNewSession({ projectId: 'p', parentId: '' })).toBeUndefined();
+});
+
+test('prompts are trimmed and limited to 100000 characters', () => {
+  expect(parseMessage({ sessionId: 's', prompt: '  oi \n' })).toEqual({
+    sessionId: 's',
+    prompt: 'oi',
+  });
+  expect(parseMessage({ sessionId: 's', prompt: '   ' })).toBeUndefined();
+  expect(parseMessage({ sessionId: 's', prompt: 5 })).toBeUndefined();
+  const longest = 'a'.repeat(100_000);
+  expect(parseMessage({ sessionId: 's', prompt: longest })?.prompt).toBe(longest);
+  expect(parseMessage({ sessionId: 's', prompt: `${longest}a` })).toBeUndefined();
+});
+
+test('rename and usage requests require their fields', () => {
+  expect(parseRename({ sessionId: 's', title: 'novo' })).toEqual({ sessionId: 's', title: 'novo' });
+  expect(parseRename({ sessionId: 's', title: '' })).toBeUndefined();
+  expect(parseUsageRequest({ accountLabel: 'a' })).toEqual({ accountLabel: 'a' });
+  expect(parseUsageRequest({ accountLabel: '' })).toBeUndefined();
 });
 
 test('extra fields are ignored', () => {

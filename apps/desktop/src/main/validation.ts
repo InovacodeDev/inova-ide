@@ -2,8 +2,10 @@ import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
+import { SessionError } from '@inova/core/sessions';
 import { StoreCorruptError } from '@inova/core/store';
 import type { Account, ProviderId, Store } from '@inova/core/types';
+import { UsageError } from '@inova/core/usage';
 import type { Result } from '../shared/api.js';
 
 export interface Size {
@@ -13,6 +15,7 @@ export interface Size {
 
 const MAX_TEXT = 255;
 const MAX_PATH = 4096;
+const MAX_PROMPT = 100_000;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
 
 export function ok<T>(value: T): Result<T> {
@@ -69,10 +72,57 @@ export function parseBinding(input: unknown): { path: string; accountLabel: stri
   return isPath(path) && isText(accountLabel) ? { path, accountLabel } : undefined;
 }
 
-export function parseProjectLaunch(input: unknown): ({ projectId: string } & Size) | undefined {
+function isSafeId(value: unknown): value is string {
+  return (
+    isText(value) &&
+    value !== '.' &&
+    value !== '..' &&
+    !value.includes('/') &&
+    !value.includes('\\') &&
+    !value.includes('\0')
+  );
+}
+
+export function parseProjectRef(input: unknown): { projectId: string } | undefined {
+  return isRecord(input) && isText(input['projectId'])
+    ? { projectId: input['projectId'] }
+    : undefined;
+}
+
+export function parseNewSession(
+  input: unknown,
+): { projectId: string; parentId: string | null } | undefined {
   if (!isRecord(input) || !isText(input['projectId'])) return undefined;
-  const size = parseSize(input);
-  return size && { projectId: input['projectId'], ...size };
+  const { projectId, parentId = null } = input;
+  if (!isText(projectId)) return undefined;
+  if (parentId !== null && !isText(parentId)) return undefined;
+  return { projectId, parentId };
+}
+
+export function parseSessionRef(input: unknown): { sessionId: string } | undefined {
+  return isRecord(input) && isSafeId(input['sessionId'])
+    ? { sessionId: input['sessionId'] }
+    : undefined;
+}
+
+export function parseRename(input: unknown): { sessionId: string; title: string } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId']) || !isText(input['title'])) {
+    return undefined;
+  }
+  return { sessionId: input['sessionId'], title: input['title'] };
+}
+
+export function parseMessage(input: unknown): { sessionId: string; prompt: string } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const prompt = typeof input['prompt'] === 'string' ? input['prompt'].trim() : '';
+  if (prompt === '' || prompt.length > MAX_PROMPT) return undefined;
+  return { sessionId: input['sessionId'], prompt };
+}
+
+export function parseUsageRequest(input: unknown): { accountLabel: string } | undefined {
+  return isRecord(input) && isText(input['accountLabel'])
+    ? { accountLabel: input['accountLabel'] }
+    : undefined;
 }
 
 export function parseLoginLaunch(input: unknown): ({ accountLabel: string } & Size) | undefined {
@@ -100,11 +150,37 @@ function accountMessage(error: AccountError, label: string): string {
   }
 }
 
+function sessionMessage(error: SessionError): string {
+  switch (error.code) {
+    case 'project-not-found':
+      return 'Projeto não encontrado.';
+    case 'parent-not-found':
+      return 'Sessão pai não encontrada.';
+    case 'not-found':
+      return 'Sessão não encontrada.';
+    case 'invalid-title':
+      return 'O título deve ter de 1 a 200 caracteres.';
+  }
+}
+
+function usageMessage(error: UsageError): string {
+  switch (error.code) {
+    case 'no-credentials':
+      return 'Não foi possível ler o consumo: credenciais não encontradas.';
+    case 'http':
+      return `Não foi possível ler o consumo (HTTP ${error.message.match(/(\d{3})$/)?.[1] ?? '?'}).`;
+    case 'bad-response':
+      return 'Não foi possível ler o consumo: resposta inválida.';
+  }
+}
+
 export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Promise<Result<T>> {
   try {
     return await work();
   } catch (error: unknown) {
     if (error instanceof AccountError) return fail(accountMessage(error, label));
+    if (error instanceof SessionError) return fail(sessionMessage(error));
+    if (error instanceof UsageError) return fail(usageMessage(error));
     if (error instanceof StoreCorruptError)
       return fail(`Arquivo de dados corrompido: ${error.path}.`);
     if (error instanceof PathNotFoundError) return fail(error.message);
