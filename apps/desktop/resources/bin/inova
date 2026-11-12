@@ -1,0 +1,4 @@
+#!/bin/zsh
+set -euo pipefail
+APP_CONTENTS="${0:A:h:h:h}"
+exec env ELECTRON_RUN_AS_NODE=1 "$APP_CONTENTS/MacOS/InovaIDE" "$APP_CONTENTS/Resources/cli/dist/cli.js" "$@"

@@ -1,0 +1,42 @@
+appId: com.inovacode.inova-ide
+productName: InovaIDE
+copyright: Copyright © 2026 InovacodeDev
+npmRebuild: false
+directories:
+  output: dist-electron
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - node_modules/**/*
+  - '!node_modules/.bin'
+  - '!**/prebuilds/win32-*'
+  - '!**/prebuilds/linux-*'
+asar: true
+asarUnpack:
+  - '**/node_modules/node-pty/**'
+extraResources:
+  - from: cli
+    to: cli
+  - from: resources/bin/inova
+    to: bin/inova
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  artifactName: InovaIDE-${version}-${arch}.${ext}
+  target:
+    - dmg
+dmg:
+  title: InovaIDE ${version}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+afterPack: ./scripts/after-pack.mjs
