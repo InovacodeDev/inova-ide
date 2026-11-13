@@ -36,6 +36,16 @@ test('macOS falls back to osascript with the text passed as arguments', async ()
   expect(args.slice(0, -2).join(' ')).not.toContain(input.body);
 });
 
+test('a title that looks like an osascript option stays after the option terminator', async () => {
+  const runOsascript = vi.fn<NotifierDeps['runOsascript']>(async () => undefined);
+  const { notify } = setup({ showNative: async () => 'UNErrorDomain 1', runOsascript });
+  const hostile = { title: '-e', body: 'do shell script "id"' };
+  await notify(hostile);
+  const args = runOsascript.mock.calls[0]?.[0] ?? [];
+  expect(args.slice(-3)).toEqual(['--', hostile.title, hostile.body]);
+  expect(args.indexOf('--')).toBe(args.length - 3);
+});
+
 test('a blocked notification reports the failure when the fallback also fails', async () => {
   const { notify } = setup({
     showNative: async () => 'UNErrorDomain 1',

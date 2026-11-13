@@ -22,8 +22,8 @@ const BLOCKED_MESSAGE =
   'O sistema bloqueou a notificação. Permita as notificações do InovaIDE nos ajustes do sistema.';
 const UNSUPPORTED_MESSAGE = 'Este sistema não oferece notificações.';
 
-// NOTE: the title and body travel as argv, never inside the script text, so they cannot inject
-// AppleScript.
+// NOTE: the title and body travel as argv after `--`, never inside the script text. Without the
+// `--`, osascript parses a title that starts with `-e` as one more script line.
 const OSASCRIPT_ARGS = [
   '-e',
   'on run argv',
@@ -31,6 +31,7 @@ const OSASCRIPT_ARGS = [
   'display notification (item 2 of argv) with title (item 1 of argv)',
   '-e',
   'end run',
+  '--',
 ];
 
 export function createNotifier(deps: NotifierDeps) {
