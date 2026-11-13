@@ -11,6 +11,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CompareIcon,
+  DownloadIcon,
   FolderIcon,
   GridIcon,
   KeyIcon,
@@ -45,6 +46,7 @@ export interface SidebarProps {
   onOpenInboxItem?: (sessionId: string) => void;
   onClearReadInbox?: () => void;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onImportSessions?: (project: ProjectView) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
   onUnbind: (project: ProjectView) => void;
@@ -283,6 +285,7 @@ interface ProjectSectionProps extends SessionActions {
   sessions: Session[];
   activeSessionId: string | null;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onImportSessions?: (project: ProjectView) => void;
   onRequestUnbind: (project: ProjectView) => void;
 }
 
@@ -294,6 +297,7 @@ function ProjectSection(props: ProjectSectionProps) {
     sessions,
     activeSessionId,
     onOpenProfileSync,
+    onImportSessions,
     onRequestUnbind,
     ...actions
   } = props;
@@ -344,6 +348,17 @@ function ProjectSection(props: ProjectSectionProps) {
               onClick={() => onOpenProfileSync(project)}
             >
               <SlidersIcon size={14} />
+            </button>
+          ) : null}
+          {onImportSessions ? (
+            <button
+              type="button"
+              className="session-action"
+              aria-label="Importar sessões externas"
+              title="Importar sessões externas"
+              onClick={() => onImportSessions(project)}
+            >
+              <DownloadIcon size={14} />
             </button>
           ) : null}
           <button
@@ -487,6 +502,7 @@ export function Sidebar(props: SidebarProps) {
               activeSessionId={activeSessionId}
               statusOf={props.statusOf}
               onOpenProfileSync={props.onOpenProfileSync}
+              onImportSessions={props.onImportSessions}
               onOpenSession={props.onOpenSession}
               onNewSession={props.onNewSession}
               onRenameSession={props.onRenameSession}

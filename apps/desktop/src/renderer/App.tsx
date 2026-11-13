@@ -31,6 +31,7 @@ import { initialChatState } from './chat-reducer';
 import { Footer, type UsageState } from './Footer';
 import { ForkModal } from './ForkModal';
 import { HandoffModal } from './HandoffModal';
+import { ImportSessionModal, type ImportRequest } from './ImportSessionModal';
 import { Header } from './Header';
 import { AlertIcon, CloseIcon, GitBranchIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
@@ -101,6 +102,7 @@ export function App() {
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
+  const [importProject, setImportProject] = useState<ProjectView | null>(null);
   const [applyingWorktree, setApplyingWorktree] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [compareMetrics, setCompareMetrics] = useState<
@@ -373,6 +375,27 @@ export function App() {
     await reloadSessions(input.project.id);
     await openChatTab(result.value, input.project);
     return result.value;
+  };
+
+  const listExternalSessions = useCallback(
+    (projectId: string) => window.inova.listExternalSessions({ projectId }),
+    [],
+  );
+
+  const importSessions = async (input: { project: ProjectView; requests: ImportRequest[] }) => {
+    const imported: Session[] = [];
+    for (const request of input.requests) {
+      const result = await call(() =>
+        window.inova.importSessions({ projectId: input.project.id, ...request }),
+      );
+      if (!result) break;
+      imported.push(...result.value);
+    }
+    await reloadSessions(input.project.id);
+    const first = imported[0];
+    if (!first) return;
+    setImportProject(null);
+    await openChatTab(first, input.project);
   };
 
   const sendMessage = async (sessionId: string, prompt: string) => {
@@ -902,6 +925,7 @@ export function App() {
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
           onOpenProfileSync={(project) => setProfileSyncProject(project)}
+          onImportSessions={(project) => setImportProject(project)}
           onUnbind={async (project) => {
             const result = await call(() => window.inova.unbindProject({ path: project.path }));
             if (!result) return;
@@ -1314,6 +1338,15 @@ export function App() {
           onPreview={previewProfileSync}
           onApply={applyProfileSync}
           onClose={() => setProfileSyncProject(null)}
+        />
+      )}
+      {importProject && (
+        <ImportSessionModal
+          project={importProject}
+          accounts={accounts}
+          onList={listExternalSessions}
+          onImport={(requests) => importSessions({ project: importProject, requests })}
+          onClose={() => setImportProject(null)}
         />
       )}
     </div>

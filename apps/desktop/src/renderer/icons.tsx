@@ -6,6 +6,7 @@ import { ChevronDown } from 'pulsoicon-react/icons/chevron-down';
 import { ChevronRight } from 'pulsoicon-react/icons/chevron-right';
 import { Clock } from 'pulsoicon-react/icons/clock';
 import { Copy } from 'pulsoicon-react/icons/copy';
+import { Download } from 'pulsoicon-react/icons/download';
 import { ExternalLink } from 'pulsoicon-react/icons/external-link';
 import { Eye } from 'pulsoicon-react/icons/eye';
 import { File } from 'pulsoicon-react/icons/file';
@@ -196,6 +197,10 @@ export function ClockIcon({ size = 16 }: IconProps) {
 
 export function CompareIcon({ size = 16 }: IconProps) {
   return <GitCompare size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function DownloadIcon({ size = 16 }: IconProps) {
+  return <Download size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function SlidersIcon({ size = 16 }: IconProps) {

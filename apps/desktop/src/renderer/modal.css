@@ -469,3 +469,89 @@
   height: 15px;
   accent-color: var(--accent);
 }
+
+.import-card {
+  width: min(600px, 100%);
+}
+
+.import-body {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+
+.import-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-group-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.import-group-header .select-root {
+  width: 220px;
+}
+
+.import-note {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.import-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.import-row:hover {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.import-row-disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.import-row input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.import-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.import-row-meta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
