@@ -40,6 +40,7 @@ import {
   type DroppedPath,
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
+import { DictationControl } from './DictationControl';
 import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
@@ -47,13 +48,11 @@ import {
   FileIcon,
   GitForkIcon,
   ListTodoIcon,
-  MicIcon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
   SendIcon,
   StopFilledIcon,
-  StopIcon,
   TerminalIcon,
 } from './icons';
 import { Markdown } from './Markdown';
@@ -534,7 +533,6 @@ export function ChatView({
       editor.insertText(appendDictation(current, text).slice(current.length));
     },
   });
-  const recording = dictation.phase === 'recording';
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -1083,19 +1081,7 @@ export function ChatView({
                 />
               </>
             ) : null}
-            {readOnly ? null : (
-              <button
-                type="button"
-                className={recording ? 'chat-mic chat-mic-recording' : 'chat-mic'}
-                aria-label={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
-                title={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
-                aria-pressed={recording}
-                disabled={dictation.phase !== 'idle' && !recording}
-                onClick={dictation.toggle}
-              >
-                {recording ? <StopIcon size={14} /> : <MicIcon size={16} />}
-              </button>
-            )}
+            {readOnly ? null : <DictationControl dictation={dictation} />}
             {running ? (
               <button
                 type="button"

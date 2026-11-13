@@ -160,58 +160,6 @@
   color: var(--accent);
 }
 
-.session-details-toggles,
-.session-details-checks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.session-details-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.session-details-check-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.session-details-actions {
-  display: flex;
-  gap: 6px;
-  margin: 10px 0 8px;
-}
-
-.session-details-add-check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.session-details-add-check .field {
-  flex: 1;
-  min-width: 0;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-}
-
-.session-details-add-check .btn {
-  flex: none;
-  height: 32px;
-}
-
 .new-session-check {
   display: inline-flex;
   align-items: center;

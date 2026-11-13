@@ -17,6 +17,7 @@ import {
   KeyIcon,
   PencilIcon,
   PlusIcon,
+  SettingsIcon,
   SlidersIcon,
   TrashIcon,
 } from './icons';
@@ -46,6 +47,7 @@ export interface SidebarProps {
   onOpenInboxItem?: (sessionId: string) => void;
   onClearReadInbox?: () => void;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onOpenProjectSettings?: (project: ProjectView) => void;
   onImportSessions?: (project: ProjectView) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
@@ -283,6 +285,7 @@ interface ProjectSectionProps extends SessionActions {
   sessions: Session[];
   activeSessionId: string | null;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onOpenProjectSettings?: (project: ProjectView) => void;
   onImportSessions?: (project: ProjectView) => void;
   onRequestUnbind: (project: ProjectView) => void;
 }
@@ -295,6 +298,7 @@ function ProjectSection(props: ProjectSectionProps) {
     sessions,
     activeSessionId,
     onOpenProfileSync,
+    onOpenProjectSettings,
     onImportSessions,
     onRequestUnbind,
     ...actions
@@ -337,6 +341,17 @@ function ProjectSection(props: ProjectSectionProps) {
           </span>
         </button>
         <div className="project-actions">
+          {onOpenProjectSettings ? (
+            <button
+              type="button"
+              className="session-action"
+              aria-label="Configurações do projeto"
+              title="Configurações do projeto"
+              onClick={() => onOpenProjectSettings(project)}
+            >
+              <SettingsIcon size={14} />
+            </button>
+          ) : null}
           {onOpenProfileSync ? (
             <button
               type="button"
@@ -502,6 +517,7 @@ export function Sidebar(props: SidebarProps) {
               activeSessionId={activeSessionId}
               statusOf={props.statusOf}
               onOpenProfileSync={props.onOpenProfileSync}
+              onOpenProjectSettings={props.onOpenProjectSettings}
               onImportSessions={props.onImportSessions}
               onOpenSession={props.onOpenSession}
               onNewSession={props.onNewSession}

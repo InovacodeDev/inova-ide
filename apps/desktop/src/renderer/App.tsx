@@ -37,6 +37,7 @@ import { AlertIcon, CloseIcon, GitBranchIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
+import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
@@ -111,6 +112,7 @@ export function App() {
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
+  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
   const [importProject, setImportProject] = useState<ProjectView | null>(null);
   const [applyingWorktree, setApplyingWorktree] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -903,6 +905,7 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
   const activeAccountLabel = activeAccount?.label ?? activeProject?.accountLabel ?? null;
@@ -1008,6 +1011,7 @@ export function App() {
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
           onOpenProfileSync={(project) => setProfileSyncProject(project)}
+          onOpenProjectSettings={(project) => setProjectSettingsId(project.id)}
           onImportSessions={(project) => setImportProject(project)}
           onUnbind={async (project) => {
             const result = await call(() => window.inova.unbindProject({ path: project.path }));
@@ -1229,15 +1233,8 @@ export function App() {
         </main>
         {inWorkspace && activeSession && activeProject && (
           <SessionDetails
-            project={activeProject}
-            running={Boolean(chats[activeSession.id]?.running)}
             subagents={chats[activeSession.id]?.subagents}
             context={chats[activeSession.id]?.context}
-            onDetectChecks={() => void detectChecks(activeProject)}
-            onRunVerification={() => void runVerification(activeSession.id)}
-            onUpdateProjectVerification={(patch) =>
-              void updateProjectVerification(activeProject.id, patch)
-            }
           />
         )}
       </div>
@@ -1451,6 +1448,19 @@ export function App() {
               createWorktree,
             });
           }}
+        />
+      )}
+      {projectSettingsTarget && (
+        <ProjectSettingsModal
+          project={projectSettingsTarget}
+          running={Boolean(activeSession && chats[activeSession.id]?.running)}
+          canRunVerification={activeSession?.projectId === projectSettingsTarget.id}
+          onUpdate={(patch) => void updateProjectVerification(projectSettingsTarget.id, patch)}
+          onDetectChecks={() => void detectChecks(projectSettingsTarget)}
+          onRunVerification={() => {
+            if (activeSession) void runVerification(activeSession.id);
+          }}
+          onClose={() => setProjectSettingsId(null)}
         />
       )}
       {profileSyncProject && (

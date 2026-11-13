@@ -878,12 +878,71 @@
 
 .chat-mic-recording,
 .chat-mic-recording:hover:not(:disabled) {
+  margin-left: 0;
+  border-radius: 50%;
   border-color: var(--error);
+  background: var(--error);
+  color: var(--on-error);
+}
+
+.chat-mic-recording:hover:not(:disabled) {
+  border-color: var(--error-hover);
+  background: var(--error-hover);
+}
+
+.chat-waveform {
+  margin-left: auto;
+  margin-right: 8px;
+  flex: none;
   color: var(--error);
 }
 
 .chat-mic + .chat-send {
   margin-left: 0;
+}
+
+.chat-listening {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+
+.chat-listening span {
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  animation: chat-listening-bar 1s ease-in-out infinite;
+}
+
+.chat-listening span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.chat-listening span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.chat-listening span:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+@keyframes chat-listening-bar {
+  0%,
+  100% {
+    height: 4px;
+  }
+  50% {
+    height: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-listening span {
+    animation: none;
+    height: 8px;
+  }
 }
 
 .chat-dictation {
