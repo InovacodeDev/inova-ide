@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { createHandlers } from './handlers.js';
+import type { VoiceHandlers } from './voice.js';
 
 type Handlers = ReturnType<typeof createHandlers>;
 type SenderEvent = { senderFrame?: { url: string } | null };
@@ -10,8 +11,12 @@ export function isAppUrl(url: string | undefined, appUrl: string): boolean {
   return url === appUrl || ['/', '?', '#'].some((separator) => url.startsWith(appUrl + separator));
 }
 
-export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string }): void {
-  const { handlers, allowedOrigin } = deps;
+export function registerIpc(deps: {
+  handlers: Handlers;
+  voice: VoiceHandlers;
+  allowedOrigin: string;
+}): void {
+  const { handlers, voice, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -39,6 +44,11 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.updateSession, (input) => handlers.updateSession(input));
   handle(CHANNELS.getDefaultModes, () => handlers.getDefaultModes());
   handle(CHANNELS.setDefaultMode, (input) => handlers.setDefaultMode(input));
+  handle(CHANNELS.getSettings, () => handlers.getSettings());
+  handle(CHANNELS.updateSettings, (input) => handlers.updateSettings(input));
+  handle(CHANNELS.sendTestNotification, () => handlers.sendTestNotification());
+  handle(CHANNELS.openNotificationSettings, () => handlers.openNotificationSettings());
+  handle(CHANNELS.openDataFolder, () => handlers.openDataFolder());
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
   handle(CHANNELS.applyWorktree, (input) => handlers.applyWorktree(input));
@@ -72,6 +82,10 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
+  handle(CHANNELS.getVoiceStatus, () => voice.getVoiceStatus());
+  handle(CHANNELS.downloadVoiceModel, (input) => voice.downloadVoiceModel(input));
+  handle(CHANNELS.deleteVoiceModel, (input) => voice.deleteVoiceModel(input));
+  handle(CHANNELS.transcribeAudio, (input) => voice.transcribeAudio(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);

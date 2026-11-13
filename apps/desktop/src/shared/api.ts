@@ -31,7 +31,10 @@ import type {
   ProviderId,
   QueuedTurn,
   Session,
+  Settings,
+  SettingsPatch,
   VerificationCheck,
+  VoiceModelId,
   Workspace,
 } from '@inova/core/types';
 
@@ -81,6 +84,27 @@ export interface ProjectView {
   verificationChecks?: VerificationCheck[];
 }
 
+export interface VoiceModelInfo {
+  id: VoiceModelId;
+  label: string;
+  bytes: number;
+}
+
+export interface VoiceStatus {
+  binary: boolean;
+  model: boolean;
+  modelBytes: number;
+  modelId: VoiceModelId;
+  installed: VoiceModelId[];
+  catalog: VoiceModelInfo[];
+}
+
+export interface VoiceModelProgress {
+  modelId: VoiceModelId;
+  receivedBytes: number;
+  totalBytes: number;
+}
+
 export type LoginStage =
   'starting' | 'waiting-auth' | 'verifying' | 'succeeded' | 'failed' | 'canceled';
 
@@ -125,6 +149,11 @@ export interface InovaApi {
     provider: ProviderId;
     mode: ExecutionMode;
   }): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
+  getSettings(): Promise<Result<Settings>>;
+  updateSettings(input: SettingsPatch): Promise<Result<Settings>>;
+  sendTestNotification(): Promise<Result<null>>;
+  openNotificationSettings(): Promise<Result<null>>;
+  openDataFolder(): Promise<Result<null>>;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
   getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
   applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
@@ -144,7 +173,22 @@ export interface InovaApi {
   getWorkspace(): Promise<Result<WorkspaceView>>;
   saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
   loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
-  sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
+  sendMessage(input: {
+    sessionId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }): Promise<Result<null>>;
+  getPathForFile(file: File): string;
+  getVoiceStatus(): Promise<Result<VoiceStatus>>;
+  downloadVoiceModel(input?: { modelId: VoiceModelId }): Promise<Result<null>>;
+  deleteVoiceModel(input: { modelId: VoiceModelId }): Promise<Result<VoiceStatus>>;
+  transcribeAudio(input: {
+    pcm: Uint8Array;
+    final: boolean;
+    language: string;
+    hints: string[];
+  }): Promise<Result<{ text: string }>>;
+  onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
   enqueueTurn(input: { sessionId: string; prompt: string }): Promise<Result<QueuedTurn>>;
   cancelQueuedTurn(input: { turnId: string }): Promise<Result<null>>;
   listTurnQueue(): Promise<Result<QueuedTurn[]>>;
@@ -239,6 +283,11 @@ export const CHANNELS = {
   updateSession: 'inova:updateSession',
   getDefaultModes: 'inova:getDefaultModes',
   setDefaultMode: 'inova:setDefaultMode',
+  getSettings: 'inova:getSettings',
+  updateSettings: 'inova:updateSettings',
+  sendTestNotification: 'inova:sendTestNotification',
+  openNotificationSettings: 'inova:openNotificationSettings',
+  openDataFolder: 'inova:openDataFolder',
   deleteSession: 'inova:deleteSession',
   getWorktreeStatus: 'inova:getWorktreeStatus',
   applyWorktree: 'inova:applyWorktree',
@@ -279,6 +328,11 @@ export const CHANNELS = {
   submitLoginCode: 'inova:submitLoginCode',
   cancelLogin: 'inova:cancelLogin',
   loginEvent: 'inova:login:event',
+  getVoiceStatus: 'inova:getVoiceStatus',
+  downloadVoiceModel: 'inova:downloadVoiceModel',
+  deleteVoiceModel: 'inova:deleteVoiceModel',
+  transcribeAudio: 'inova:transcribeAudio',
+  voiceModelProgress: 'inova:voice:model-progress',
 } as const;
 
 declare global {

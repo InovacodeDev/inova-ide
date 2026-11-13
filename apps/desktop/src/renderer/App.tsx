@@ -23,7 +23,7 @@ import type {
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
-import { ChatView } from './ChatView';
+import { ChatView, type ChatViewHandle } from './ChatView';
 import { CompareView } from './CompareView';
 import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
@@ -41,12 +41,18 @@ import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
 import { sessionStatus } from './session-status';
+import { SettingsModal } from './SettingsModal';
+import { formatShortcut, isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
-import { tabsReducer, type Tab } from './tabs';
+import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
+import { useGlobalShortcuts } from './useGlobalShortcuts';
+import { useSettings } from './useSettings';
+import { useTheme } from './useTheme';
 import { useWarning } from './useWarning';
 import { restoreTabs, workspaceFromTabs, workspaceKey } from './workspace';
 
 const SAVE_DEBOUNCE_MS = 300;
+const IS_MAC = isMacPlatform(navigator.platform);
 
 function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -112,6 +118,12 @@ export function App() {
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
   const { warning, dismiss, guard, call } = useWarning();
+  const { settings, update: updateSettings } = useSettings(call);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
+  const inboxRef = useRef<HTMLElement>(null);
+  const activeChatRef = useRef<ChatViewHandle>(null);
+  useTheme(settings?.appearance.theme);
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
@@ -398,9 +410,9 @@ export function App() {
     await openChatTab(first, input.project);
   };
 
-  const sendMessage = async (sessionId: string, prompt: string) => {
+  const sendMessage = async (sessionId: string, prompt: string, extraDirs: string[] = []) => {
     dispatchChat({ sessionId, action: { type: 'started' } });
-    const result = await guard(() => window.inova.sendMessage({ sessionId, prompt }));
+    const result = await guard(() => window.inova.sendMessage({ sessionId, prompt, extraDirs }));
     if (!result || !result.ok) {
       dispatchChat({
         sessionId,
@@ -580,6 +592,17 @@ export function App() {
   const closeTab = (tab: Tab) => {
     if (latest.current.chats[tab.sessionId]?.running) window.inova.cancelTurn(tab.sessionId);
     dispatch({ type: 'close', sessionId: tab.sessionId });
+  };
+
+  const requestCloseTab = (tab: Tab) => {
+    if (latest.current.chats[tab.sessionId]?.running) setPendingCloseTab(tab);
+    else closeTab(tab);
+  };
+
+  const activateTab = (sessionId: string) => {
+    setView('workspace');
+    dispatch({ type: 'activate', sessionId });
+    void window.inova.markInboxRead({ sessionId });
   };
 
   const dropSessions = (sessionIds: string[]) => {
@@ -886,6 +909,57 @@ export function App() {
     }
   }, [activeAccountLabel, modelsByAccount, loadModels]);
 
+  const runShortcut = ({ id, tabIndex }: ShortcutCommand): boolean => {
+    switch (id) {
+      case 'open-settings':
+        if (settingsOpen) {
+          setSettingsOpen(false);
+          return true;
+        }
+        if (settings === null) return false;
+        setSettingsOpen(true);
+        return true;
+      case 'new-session':
+        setView('new-session');
+        return true;
+      case 'open-inbox':
+        if (inboxRef.current === null) return false;
+        inboxRef.current.focus();
+        return true;
+      case 'close-tab':
+        if (!inWorkspace || !activeTab) return false;
+        requestCloseTab(activeTab);
+        return true;
+      case 'select-tab': {
+        const target = tabIndex === null ? undefined : chatTabs[tabIndex];
+        if (!target) return false;
+        activateTab(target.sessionId);
+        return true;
+      }
+      case 'prev-tab':
+      case 'next-tab': {
+        const sessionId = adjacentSessionId({ state: tabs, delta: id === 'next-tab' ? 1 : -1 });
+        if (sessionId === null) return false;
+        activateTab(sessionId);
+        return true;
+      }
+      case 'archive-session':
+        if (!inWorkspace || !activeSession || activeSession.archivedAt !== null) return false;
+        setPendingArchive(activeSession);
+        return true;
+      case 'focus-composer':
+        return inWorkspace && (activeChatRef.current?.focusComposer() ?? false);
+      case 'toggle-dictation':
+        return inWorkspace && (activeChatRef.current?.toggleDictation() ?? false);
+      case 'send-message':
+      case 'submit-new-session':
+      case 'dismiss':
+        return false;
+    }
+  };
+
+  useGlobalShortcuts({ isMac: IS_MAC, settingsOpen, run: runShortcut });
+
   return (
     <div className="app">
       {warning && (
@@ -901,10 +975,15 @@ export function App() {
           <span>{notice}</span>
         </div>
       )}
-      <Header runningCount={Object.values(chats).filter((chat) => chat.running).length} />
+      <Header
+        runningCount={Object.values(chats).filter((chat) => chat.running).length}
+        settingsShortcut={formatShortcut({ id: 'open-settings', isMac: IS_MAC })}
+        onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
+      />
       <div className="app-body">
         <Sidebar
           view={view}
+          inboxRef={inboxRef}
           onNavigate={setView}
           accounts={accounts}
           projects={projects}
@@ -934,7 +1013,7 @@ export function App() {
           }}
           onRenameSession={(input) => void renameSession(input)}
           onDeleteSession={(session) => void deleteSession(session)}
-          onArchiveSession={(session) => void setArchived({ session, archived: true })}
+          onRequestArchiveSession={setPendingArchive}
           onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
         <main className="main">
@@ -955,11 +1034,7 @@ export function App() {
                   tail: agentTail({ items: chats[tab.sessionId]?.items ?? [], lines: 3 }),
                 };
               })}
-              onOpen={(sessionId) => {
-                setView('workspace');
-                dispatch({ type: 'activate', sessionId });
-                void window.inova.markInboxRead({ sessionId });
-              }}
+              onOpen={activateTab}
               onNewSession={() => setView('new-session')}
             />
           )}
@@ -1045,10 +1120,7 @@ export function App() {
                   activeSession?.worktree ? () => void applyWorktree(activeSession) : undefined
                 }
                 onHandoff={activeSession ? () => setPendingHandoff(activeSession) : undefined}
-                onClose={() => {
-                  if (chats[activeTab.sessionId]?.running) setPendingCloseTab(activeTab);
-                  else closeTab(activeTab);
-                }}
+                onClose={() => requestCloseTab(activeTab)}
               />
             ) : (
               <p className="hint">Nenhuma sessão aberta. Escolha uma sessão ou crie uma nova.</p>
@@ -1070,6 +1142,7 @@ export function App() {
               return (
                 <ChatView
                   key={tab.sessionId}
+                  ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
                   sessionId={tab.sessionId}
                   projectId={tabProject?.id ?? null}
                   state={tabState}
@@ -1081,6 +1154,13 @@ export function App() {
                   mode={tabSession?.mode ?? null}
                   defaultModes={defaultModes}
                   inWorktree={Boolean(tabSession?.worktree)}
+                  workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
+                  voiceHints={[
+                    ...(tabProject ? [folderName(tabProject.path)] : []),
+                    ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
+                  ]}
+                  dictationLanguage={settings?.voice.language}
+                  collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   queuedTurns={tabQueuedTurns}
@@ -1127,7 +1207,7 @@ export function App() {
                     })
                   }
                   onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
-                  onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
+                  onSend={(prompt, extraDirs) => void sendMessage(tab.sessionId, prompt, extraDirs)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
               );
@@ -1204,6 +1284,24 @@ export function App() {
             const target = pendingCloseTab;
             setPendingCloseTab(null);
             closeTab(target);
+          }}
+        />
+      )}
+      {pendingArchive && (
+        <ConfirmModal
+          title={pendingArchive.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'}
+          description={
+            pendingArchive.parentId !== null
+              ? `Arquivar a subsessão "${pendingArchive.title}" e suas subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
+              : `Arquivar a sessão "${pendingArchive.title}" e todas as subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
+          }
+          confirmLabel={pendingArchive.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'}
+          danger
+          onCancel={() => setPendingArchive(null)}
+          onConfirm={() => {
+            const target = pendingArchive;
+            setPendingArchive(null);
+            void setArchived({ session: target, archived: true });
           }}
         />
       )}
@@ -1347,6 +1445,17 @@ export function App() {
           onList={listExternalSessions}
           onImport={(requests) => importSessions({ project: importProject, requests })}
           onClose={() => setImportProject(null)}
+        />
+      )}
+      {settingsOpen && settings && (
+        <SettingsModal
+          settings={settings}
+          defaultModes={defaultModes}
+          isMac={IS_MAC}
+          call={call}
+          onUpdate={(patch) => void updateSettings(patch)}
+          onSetDefaultMode={(provider, mode) => void setDefaultProviderMode(provider, mode)}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
     </div>

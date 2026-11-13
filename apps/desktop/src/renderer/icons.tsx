@@ -20,11 +20,13 @@ import { LayoutGrid } from 'pulsoicon-react/icons/layout-grid';
 import { ListTodo } from 'pulsoicon-react/icons/list-todo';
 import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
+import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
 import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
 import { RotateCcw } from 'pulsoicon-react/icons/rotate-ccw';
+import { Settings } from 'pulsoicon-react/icons/settings';
 import { Shield } from 'pulsoicon-react/icons/shield';
 import { ShieldAlert } from 'pulsoicon-react/icons/shield-alert';
 import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
@@ -40,21 +42,22 @@ interface IconProps {
   size?: number;
 }
 
-export function LogoIcon({ size = 18 }: IconProps) {
+export function LogoIcon({ size = 28 }: IconProps) {
   return (
     <svg
       aria-hidden="true"
+      className="logo-mark"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 32 32"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
+      strokeWidth={2.6}
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M3.5 7l5 5-5 5" />
-      <path d="M11.5 12h3M14.5 12l4.5-5.5M14.5 12h5.5M14.5 12l4.5 5.5" />
+      <rect className="logo-tile" width="32" height="32" rx="8" />
+      <path className="logo-prompt" d="M7.5 10l6 6-6 6" />
+      <path className="logo-spark" d="M17 16h3.5M20.5 16l4.5-5.5M20.5 16h5.5M20.5 16l4.5 5.5" />
     </svg>
   );
 }
@@ -93,6 +96,10 @@ export function StopIcon({ size = 16 }: IconProps) {
 
 export function SendIcon({ size = 16 }: IconProps) {
   return <ArrowRight size={size} strokeWidth={2.1} aria-hidden="true" />;
+}
+
+export function MicIcon({ size = 16 }: IconProps) {
+  return <Mic size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
 export function TerminalIcon({ size = 16 }: IconProps) {
@@ -201,6 +208,10 @@ export function CompareIcon({ size = 16 }: IconProps) {
 
 export function DownloadIcon({ size = 16 }: IconProps) {
   return <Download size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SettingsIcon({ size = 16 }: IconProps) {
+  return <Settings size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function SlidersIcon({ size = 16 }: IconProps) {

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { InovaApi } from '../shared/api.js';
@@ -24,6 +24,11 @@ const api: InovaApi = {
   updateSession: (input) => ipcRenderer.invoke(CHANNELS.updateSession, input),
   getDefaultModes: () => ipcRenderer.invoke(CHANNELS.getDefaultModes),
   setDefaultMode: (input) => ipcRenderer.invoke(CHANNELS.setDefaultMode, input),
+  getSettings: () => ipcRenderer.invoke(CHANNELS.getSettings),
+  updateSettings: (input) => ipcRenderer.invoke(CHANNELS.updateSettings, input),
+  sendTestNotification: () => ipcRenderer.invoke(CHANNELS.sendTestNotification),
+  openNotificationSettings: () => ipcRenderer.invoke(CHANNELS.openNotificationSettings),
+  openDataFolder: () => ipcRenderer.invoke(CHANNELS.openDataFolder),
   deleteSession: (input) => ipcRenderer.invoke(CHANNELS.deleteSession, input),
   getWorktreeStatus: (input) => ipcRenderer.invoke(CHANNELS.getWorktreeStatus, input),
   applyWorktree: (input) => ipcRenderer.invoke(CHANNELS.applyWorktree, input),
@@ -36,6 +41,12 @@ const api: InovaApi = {
   saveWorkspace: (input) => ipcRenderer.invoke(CHANNELS.saveWorkspace, input),
   loadTranscript: (input) => ipcRenderer.invoke(CHANNELS.loadTranscript, input),
   sendMessage: (input) => ipcRenderer.invoke(CHANNELS.sendMessage, input),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
+  getVoiceStatus: () => ipcRenderer.invoke(CHANNELS.getVoiceStatus),
+  downloadVoiceModel: (input) => ipcRenderer.invoke(CHANNELS.downloadVoiceModel, input),
+  deleteVoiceModel: (input) => ipcRenderer.invoke(CHANNELS.deleteVoiceModel, input),
+  transcribeAudio: (input) => ipcRenderer.invoke(CHANNELS.transcribeAudio, input),
+  onVoiceModelProgress: (callback) => subscribe(CHANNELS.voiceModelProgress, callback),
   enqueueTurn: (input) => ipcRenderer.invoke(CHANNELS.enqueueTurn, input),
   cancelQueuedTurn: (input) => ipcRenderer.invoke(CHANNELS.cancelQueuedTurn, input),
   listTurnQueue: () => ipcRenderer.invoke(CHANNELS.listTurnQueue),

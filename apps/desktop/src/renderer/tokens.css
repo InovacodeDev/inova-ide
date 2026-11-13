@@ -2,6 +2,7 @@
 @import '@fontsource-variable/jetbrains-mono';
 
 :root {
+  color-scheme: dark;
   --bg: #141518;
   --panel: #18191d;
   --surface: #1e2024;
@@ -22,9 +23,16 @@
   --on-accent: #1a0a04;
   --accent-soft: rgba(255, 90, 31, 0.07);
   --accent-border: rgba(255, 90, 31, 0.55);
+  --accent-ink: #fff;
   --waiting: #c4a1ff;
   --ok: #6ee7b7;
   --error: #f06a86;
+  --error-hover: #f5889f;
+  --on-error: #19070c;
+  --warn: #e3b341;
+  --success: #3fb950;
+  --success-border: rgba(63, 185, 80, 0.35);
+  --scrim: rgba(10, 11, 14, 0.72);
   --claude: #d9a68c;
   --claude-soft: rgba(217, 166, 140, 0.16);
   --gemini: #7eb0ff;
@@ -49,6 +57,52 @@
   --radius-md: 10px;
   --radius-lg: 12px;
   --radius-pill: 999px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #e2e3e5;
+  --panel: #e8e9eb;
+  --surface: #f0f1f2;
+  --surface-2: #dadbde;
+  --surface-3: #cdcfd3;
+  --row-selected: #d6d7da;
+  --code-bg: #f5f5f6;
+  --border: #c8c9cc;
+  --border-subtle: #d3d4d7;
+  --border-control: #b9bbc0;
+  --border-strong: #8f9196;
+  --text: #141518;
+  --text-2: #26282d;
+  --muted: #4a4d54;
+  --faint: #5f6167;
+  --accent-hover: #e64a12;
+  --accent-soft: rgba(255, 90, 31, 0.1);
+  --waiting: #6d3fd0;
+  --ok: #08704c;
+  --error: #c2203f;
+  --error-hover: #a81a35;
+  --on-error: #fff;
+  --warn: #8a5a00;
+  --success: #17722f;
+  --success-border: rgba(23, 114, 47, 0.4);
+  --scrim: rgba(20, 21, 24, 0.45);
+  --claude: #9a5530;
+  --claude-soft: rgba(154, 85, 48, 0.14);
+  --gemini: #2563c9;
+  --gemini-soft: rgba(37, 99, 201, 0.13);
+  --codex: #08704c;
+  --codex-soft: rgba(8, 112, 76, 0.13);
+  --deepseek: #2563c9;
+  --deepseek-soft: rgba(37, 99, 201, 0.13);
+  --kimi: #5b43c9;
+  --kimi-soft: rgba(91, 67, 201, 0.13);
+  --grok: #26282d;
+  --grok-soft: rgba(38, 40, 45, 0.1);
+  --qwen: #5140c4;
+  --qwen-soft: rgba(81, 64, 196, 0.13);
+  --opencode: #0f7052;
+  --opencode-soft: rgba(15, 112, 82, 0.13);
 }
 
 :focus-visible {
@@ -97,6 +151,7 @@
   color: var(--text);
   font-size: 13px;
   font-weight: 500;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     background 0.12s ease,
@@ -122,13 +177,13 @@
 
 .btn-danger {
   background: var(--error);
-  color: #19070c;
+  color: var(--on-error);
   font-weight: 600;
   border: none;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #f5889f;
+  background: var(--error-hover);
 }
 
 .btn-sm {

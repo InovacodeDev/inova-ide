@@ -179,6 +179,27 @@ describe('buildChatTurn', () => {
     expect(spec.env).toEqual({ HOME: '/h/gemini', PATH: '/bin' });
   });
 
+  it('grants extra directories to claude before the prompt separator', () => {
+    const args = buildChatTurn({
+      account: claudeAccount,
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'new', sessionId: 's1' },
+      baseEnv,
+      extraDirs: ['/Users/me/Downloads', '/tmp/x'],
+    }).args;
+    expect(args).toEqual([
+      ...claudeBase,
+      '--add-dir',
+      '/Users/me/Downloads',
+      '/tmp/x',
+      '--session-id',
+      's1',
+      '--',
+      'hi',
+    ]);
+  });
+
   it('passes model and effort flags for claude, gemini, and codex', () => {
     const claudeArgs = buildChatTurn({
       account: claudeAccount,

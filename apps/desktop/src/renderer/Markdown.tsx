@@ -71,7 +71,10 @@ let highlighterPromise: Promise<HighlighterCore> | null = null;
 
 function getHighlighter(): Promise<HighlighterCore> {
   highlighterPromise ??= createHighlighterCore({
-    themes: [import('shiki/themes/catppuccin-mocha.mjs')],
+    themes: [
+      import('shiki/themes/catppuccin-mocha.mjs'),
+      import('shiki/themes/catppuccin-latte.mjs'),
+    ],
     langs: [],
     engine: createJavaScriptRegexEngine(),
   });
@@ -90,7 +93,11 @@ async function highlight(input: { code: string; lang: string }): Promise<string 
   const loader = LANG_LOADERS[name];
   if (loader === undefined) return null;
   await highlighter.loadLanguage(loader());
-  const html = highlighter.codeToHtml(input.code, { lang: name, theme: 'catppuccin-mocha' });
+  const html = highlighter.codeToHtml(input.code, {
+    lang: name,
+    themes: { dark: 'catppuccin-mocha', light: 'catppuccin-latte' },
+    defaultColor: false,
+  });
   if (htmlCache.size >= CACHE_LIMIT) {
     const oldest = htmlCache.keys().next();
     if (!oldest.done) htmlCache.delete(oldest.value);

@@ -1,6 +1,8 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { getSettings } from '@inova/core/settings';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
@@ -11,15 +13,22 @@ import { createChatRunner } from './chat.js';
 import type { SpawnChild } from './chat.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
+import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { killProcessGroup } from './process-group.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
-import { loginShellPath } from './shell-env.js';
+import { findBinary, loginShellPath } from './shell-env.js';
+import { createVoiceHandlers, createVoiceService } from './voice.js';
 
+const execFileAsync = promisify(execFile);
 const SHELL_TIMEOUT_MS = 5000;
+const WHISPER_TIMEOUT_MS = 120_000;
+const WHISPER_MAX_OUTPUT_BYTES = 1024 * 1024;
+const AUTO_ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
 const appUrl =
   process.env['ELECTRON_RENDERER_URL'] ??
   pathToFileURL(join(__dirname, '../renderer/index.html')).href;
+const notificationSettingsUrl = NOTIFICATION_SETTINGS_URL[process.platform];
 let mainWindow: BrowserWindow | undefined;
 let cachedBaseEnv: Promise<NodeJS.ProcessEnv> | undefined;
 
@@ -167,14 +176,63 @@ void app.whenReady().then(async () => {
       emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
       emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
       emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
-      notify: ({ title, body }) => {
-        if (Notification.isSupported()) new Notification({ title, body }).show();
+      notify: createNotifier({
+        platform: process.platform,
+        isSupported: () => Notification.isSupported(),
+        showNative: ({ title, body }) =>
+          new Promise((resolve) => {
+            const notification = new Notification({ title, body });
+            notification.once('show', () => resolve(null));
+            notification.once('failed', (_event, error) => resolve(error));
+            notification.show();
+          }),
+        runOsascript: async (args) => {
+          await execFileAsync('/usr/bin/osascript', args, { timeout: SHELL_TIMEOUT_MS });
+        },
+      }),
+      ...(notificationSettingsUrl === undefined
+        ? {}
+        : { openNotificationSettings: () => shell.openExternal(notificationSettingsUrl) }),
+      openPath: async (path) => {
+        const failure = await shell.openPath(path);
+        if (failure !== '') throw new Error(failure);
       },
       baseEnv,
       pickFolder,
     });
     handlers = created;
-    registerIpc({ handlers: created, allowedOrigin: appUrl });
+    const autoArchive = (): void => {
+      created.runAutoArchive().catch((error: unknown) => {
+        console.error('inova: auto-archive failed', error);
+      });
+    };
+    autoArchive();
+    setInterval(autoArchive, AUTO_ARCHIVE_INTERVAL_MS);
+    const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+    const voice = createVoiceService({
+      modelDir: join(dataRoot(process.env), 'models'),
+      getModelId: async () => (await getSettings(dataRoot(process.env))).voice.modelId,
+      binaryCandidates: [
+        join(process.resourcesPath, 'whisper', whisperName),
+        join(app.getAppPath(), 'resources', 'whisper', whisperName),
+      ],
+      findOnPath: async () => findBinary('whisper-cli', (await baseEnv())['PATH'] ?? ''),
+      runWhisper: async ({ file, args, signal }) => {
+        const { stdout } = await execFileAsync(file, args, {
+          signal,
+          timeout: WHISPER_TIMEOUT_MS,
+          maxBuffer: WHISPER_MAX_OUTPUT_BYTES,
+        });
+        return stdout;
+      },
+      fetch: (url) => globalThis.fetch(url),
+      onProgress: (progress) => sendToWindow(CHANNELS.voiceModelProgress, progress),
+    });
+    registerIpc({
+      handlers: created,
+      voice: createVoiceHandlers(voice),
+      allowedOrigin: appUrl,
+    });
     createWindow();
     return;
   }

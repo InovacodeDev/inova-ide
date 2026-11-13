@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { InboxItem, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
@@ -52,14 +52,13 @@ export interface SidebarProps {
   onUnbind: (project: ProjectView) => void;
   onRenameSession: (input: { session: Session; title: string }) => void;
   onDeleteSession: (session: Session) => void;
-  onArchiveSession: (session: Session) => void;
+  onRequestArchiveSession: (session: Session) => void;
   onUnarchiveSession: (session: Session) => void;
+  inboxRef?: Ref<HTMLElement>;
 }
 
 type PendingConfirm =
-  | { kind: 'delete-session'; session: Session }
-  | { kind: 'archive-session'; session: Session }
-  | { kind: 'unbind-project'; project: ProjectView };
+  { kind: 'delete-session'; session: Session } | { kind: 'unbind-project'; project: ProjectView };
 
 type SessionActions = Pick<
   SidebarProps,
@@ -67,7 +66,6 @@ type SessionActions = Pick<
   | 'onNewSession'
   | 'onRenameSession'
   | 'onDeleteSession'
-  | 'onArchiveSession'
   | 'onUnarchiveSession'
   | 'statusOf'
 > & {
@@ -450,6 +448,7 @@ export function Sidebar(props: SidebarProps) {
     activeSessionId,
     onOpenInboxItem,
     onClearReadInbox,
+    inboxRef,
   } = props;
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const emailByLabel = useMemo(
@@ -480,6 +479,7 @@ export function Sidebar(props: SidebarProps) {
         </ul>
         {onOpenInboxItem && onClearReadInbox ? (
           <InboxView
+            ref={inboxRef}
             items={inboxItems}
             onOpenItem={onOpenInboxItem}
             onClearRead={onClearReadInbox}
@@ -507,12 +507,9 @@ export function Sidebar(props: SidebarProps) {
               onNewSession={props.onNewSession}
               onRenameSession={props.onRenameSession}
               onDeleteSession={props.onDeleteSession}
-              onArchiveSession={props.onArchiveSession}
               onUnarchiveSession={props.onUnarchiveSession}
               onRequestDelete={(session) => setPendingConfirm({ kind: 'delete-session', session })}
-              onRequestArchive={(session) =>
-                setPendingConfirm({ kind: 'archive-session', session })
-              }
+              onRequestArchive={props.onRequestArchiveSession}
               onRequestUnbind={(target) =>
                 setPendingConfirm({ kind: 'unbind-project', project: target })
               }
@@ -537,28 +534,6 @@ export function Sidebar(props: SidebarProps) {
             const target = pendingConfirm.session;
             setPendingConfirm(null);
             props.onDeleteSession(target);
-          }}
-        />
-      )}
-      {pendingConfirm?.kind === 'archive-session' && (
-        <ConfirmModal
-          title={
-            pendingConfirm.session.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'
-          }
-          description={
-            pendingConfirm.session.parentId !== null
-              ? `Arquivar a subsessão "${pendingConfirm.session.title}" e suas subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
-              : `Arquivar a sessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
-          }
-          confirmLabel={
-            pendingConfirm.session.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'
-          }
-          danger
-          onCancel={() => setPendingConfirm(null)}
-          onConfirm={() => {
-            const target = pendingConfirm.session;
-            setPendingConfirm(null);
-            props.onArchiveSession(target);
           }}
         />
       )}

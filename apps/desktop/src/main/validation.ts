@@ -12,12 +12,14 @@ import {
 } from '@inova/core/session-import';
 import type { ImportProvider } from '@inova/core/session-import';
 import { SessionError } from '@inova/core/sessions';
+import { SettingsError, isSettingsPatch } from '@inova/core/settings';
 import { StoreCorruptError } from '@inova/core/store';
 import type {
   Account,
   EffortLevel,
   ExecutionMode,
   ProviderId,
+  SettingsPatch,
   Store,
   VerificationCheck,
 } from '@inova/core/types';
@@ -28,6 +30,7 @@ const MAX_TEXT = 255;
 const MAX_PATH = 4096;
 const MAX_LOGIN_CODE = 512;
 const MAX_PROMPT = 100_000;
+const MAX_EXTRA_DIRS = 16;
 const MAX_WORKSPACE_INPUT = 1000;
 const MAX_IMPORT_SESSIONS = 50;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
@@ -231,6 +234,10 @@ export function parseDefaultMode(
   return { provider, mode };
 }
 
+export function parseSettingsPatch(input: unknown): SettingsPatch | undefined {
+  return isSettingsPatch(input) ? input : undefined;
+}
+
 export function parseWorkspace(
   input: unknown,
 ): { openSessionIds: string[]; activeSessionId: string | null } | undefined {
@@ -244,11 +251,17 @@ export function parseWorkspace(
   return { openSessionIds, activeSessionId };
 }
 
-export function parseMessage(input: unknown): { sessionId: string; prompt: string } | undefined {
+export function parseMessage(
+  input: unknown,
+): { sessionId: string; prompt: string; extraDirs: string[] } | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
   const prompt = typeof input['prompt'] === 'string' ? input['prompt'].trim() : '';
   if (prompt === '' || prompt.length > MAX_PROMPT) return undefined;
-  return { sessionId: input['sessionId'], prompt };
+  const rawDirs: unknown = input['extraDirs'] ?? [];
+  if (!Array.isArray(rawDirs) || rawDirs.length > MAX_EXTRA_DIRS) return undefined;
+  const extraDirs = rawDirs.filter((dir): dir is string => isPath(dir) && !dir.includes('\0'));
+  if (extraDirs.length !== rawDirs.length) return undefined;
+  return { sessionId: input['sessionId'], prompt, extraDirs };
 }
 
 export function parseTurnRef(input: unknown): { turnId: string } | undefined {
@@ -585,6 +598,7 @@ export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Pr
   } catch (error: unknown) {
     if (error instanceof AccountError) return fail(accountMessage(error, label));
     if (error instanceof SessionError) return fail(sessionMessage(error));
+    if (error instanceof SettingsError) return fail('Configurações inválidas.');
     if (error instanceof WorktreeError) return fail(error.message);
     if (error instanceof SessionImportError) return fail(error.message);
     if (error instanceof UsageError) return fail(usageMessage(error));

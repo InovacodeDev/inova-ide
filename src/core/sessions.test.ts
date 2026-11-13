@@ -11,9 +11,11 @@ import {
   removeSessionsOfProjects,
   saveWorkspace,
   SessionError,
+  sessionsToAutoArchive,
   updateSession,
 } from './sessions.js';
 import { loadStore, saveStore } from './store.js';
+import type { Session } from './types.js';
 
 let root: string;
 
@@ -308,5 +310,85 @@ describe('sessions', () => {
     expect(
       await codeOf(updateSession({ root, sessionId: created.id, patch: { mode: 'read-only' } })),
     ).toBe('invalid-mode');
+  });
+});
+
+describe('sessionsToAutoArchive', () => {
+  const now = new Date('2026-01-31T00:00:00.000Z');
+  const base = {
+    projectId: 'p1',
+    providerSessionId: null,
+    title: 't',
+    createdAt: '2025-01-01T00:00:00.000Z',
+    archivedAt: null,
+  };
+  const session = (id: string, parentId: string | null, updatedAt: string): Session => ({
+    ...base,
+    id,
+    parentId,
+    updatedAt,
+  });
+  const old = '2026-01-01T00:00:00.000Z';
+  const recent = '2026-01-30T00:00:00.000Z';
+  const pick = (
+    sessions: Session[],
+    options: { days?: number; busyIds?: string[] } = {},
+  ): string[] =>
+    sessionsToAutoArchive({
+      sessions,
+      now,
+      days: options.days ?? 7,
+      busyIds: new Set(options.busyIds ?? []),
+    });
+
+  it('returns nothing when days is 0', () => {
+    expect(pick([session('a', null, old)], { days: 0 })).toEqual([]);
+  });
+
+  it('selects only root sessions older than the limit', () => {
+    const sessions = [
+      session('old', null, old),
+      session('recent', null, recent),
+      session('child', 'old', old),
+    ];
+    expect(pick(sessions)).toEqual(['old']);
+  });
+
+  it('keeps a session exactly at the limit and archives one just past it', () => {
+    const atLimit = '2026-01-24T00:00:00.000Z';
+    const pastLimit = '2026-01-23T23:59:59.999Z';
+    expect(pick([session('at', null, atLimit), session('past', null, pastLimit)])).toEqual([
+      'past',
+    ]);
+  });
+
+  it('skips archived sessions and unparseable dates', () => {
+    const archived = { ...session('archived', null, old), archivedAt: old };
+    expect(pick([archived, session('bad', null, 'not-a-date')])).toEqual([]);
+  });
+
+  it('skips a root whose own id or any descendant is busy', () => {
+    const sessions = [
+      session('root-busy', null, old),
+      session('root-grandchild-busy', null, old),
+      session('child', 'root-grandchild-busy', old),
+      session('grandchild', 'child', old),
+      session('idle', null, old),
+    ];
+    expect(pick(sessions, { busyIds: ['root-busy', 'grandchild'] })).toEqual(['idle']);
+  });
+
+  it('skips a root whose descendant was active within the limit', () => {
+    const sessions = [
+      session('root', null, old),
+      session('child', 'root', old),
+      session('grandchild', 'child', recent),
+      session('idle', null, old),
+    ];
+    expect(pick(sessions)).toEqual(['idle']);
+  });
+
+  it('ignores busy ids that match no session', () => {
+    expect(pick([session('a', null, old)], { busyIds: ['ghost'] })).toEqual(['a']);
   });
 });

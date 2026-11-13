@@ -206,6 +206,32 @@ describe('store', () => {
     await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
   });
 
+  it('loadStore validates and preserves settings, and accepts a store without them', async () => {
+    const settings = { sessions: { autoArchiveDays: 7 }, voice: { language: 'pt' } };
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [], settings }),
+    );
+    expect((await loadStore(root)).settings).toEqual(settings);
+
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [], projects: [] }),
+    );
+    expect((await loadStore(root)).settings).toBeUndefined();
+
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        settings: { sessions: { autoArchiveDays: 99 } },
+      }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
+
   it('dataRoot prefers INOVA_HOME', () => {
     expect(dataRoot({ INOVA_HOME: '/x' })).toBe('/x');
     expect(dataRoot({})).toBe(join(homedir(), '.inova'));

@@ -8,6 +8,7 @@ import {
   filterCommands,
   isSameComposerTrigger,
   parseMessageFileSegments,
+  resolveDroppedPath,
 } from '../src/renderer/composer-trigger.js';
 import type { ProjectCommandView } from '../src/shared/api.js';
 
@@ -111,6 +112,31 @@ test('buildPromptWithAttachedFiles combines deduplicated files and prompt text',
       files: ['.prettierrc', 'docs/a.md', 'docs/a.md'],
     }),
   ).toBe('@docs/a.md\nExplique @.prettierrc aqui');
+});
+
+test('resolveDroppedPath mentions project files relatively and asks access for outside paths', () => {
+  const cwd = '/Users/me/proj';
+  expect(resolveDroppedPath({ path: '/Users/me/proj/src/a.ts', cwd, isDirectory: false })).toEqual({
+    mention: 'src/a.ts',
+    grantDir: null,
+  });
+  expect(resolveDroppedPath({ path: cwd, cwd: `${cwd}/`, isDirectory: true })).toEqual({
+    mention: '.',
+    grantDir: null,
+  });
+  expect(
+    resolveDroppedPath({ path: '/Users/me/Downloads/doc.pdf', cwd, isDirectory: false }),
+  ).toEqual({ mention: '/Users/me/Downloads/doc.pdf', grantDir: '/Users/me/Downloads' });
+  expect(
+    resolveDroppedPath({ path: '/Users/me/project-other/a.ts', cwd, isDirectory: false }).grantDir,
+  ).toBe('/Users/me/project-other');
+  expect(resolveDroppedPath({ path: '/Users/me/Shots', cwd, isDirectory: true }).grantDir).toBe(
+    '/Users/me/Shots',
+  );
+  expect(resolveDroppedPath({ path: '/a.txt', cwd: null, isDirectory: false }).grantDir).toBe('/');
+  expect(
+    resolveDroppedPath({ path: 'C:\\proj\\src\\a.ts', cwd: 'C:\\proj', isDirectory: false }),
+  ).toEqual({ mention: 'src\\a.ts', grantDir: null });
 });
 
 test('parseMessageFileSegments extracts relative file tags while preserving emails and punctuation', () => {

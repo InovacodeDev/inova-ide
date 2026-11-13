@@ -21,12 +21,18 @@ vi.mock('electron', () => ({
     send: electron.send,
     invoke: electron.invoke,
   },
+  webUtils: { getPathForFile: (file: { name: string }) => `/abs/${file.name}` },
 }));
 
 async function loadApi(): Promise<InovaApi> {
   await import('../src/preload/index.js');
   return electron.exposed.get('inova') as InovaApi;
 }
+
+test('getPathForFile resolves the dropped file path through webUtils', async () => {
+  const api = await loadApi();
+  expect(api.getPathForFile({ name: 'a.txt' } as File)).toBe('/abs/a.txt');
+});
 
 test('onLoginEvent delivers only the payload and unsubscribes the exact listener', async () => {
   const api = await loadApi();
@@ -126,6 +132,26 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     provider: 'claude',
     mode: 'plan',
   });
+  void api.getSettings();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getSettings');
+  void api.updateSettings({ notifications: { completed: true } });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:updateSettings', {
+    notifications: { completed: true },
+  });
+  void api.downloadVoiceModel();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:downloadVoiceModel', undefined);
+  void api.downloadVoiceModel({ modelId: 'base' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:downloadVoiceModel', { modelId: 'base' });
+  void api.deleteVoiceModel({ modelId: 'small-q5_1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:deleteVoiceModel', {
+    modelId: 'small-q5_1',
+  });
+  void api.sendTestNotification();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:sendTestNotification');
+  void api.openNotificationSettings();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:openNotificationSettings');
+  void api.openDataFolder();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:openDataFolder');
   void api.getWorktreeStatus({ sessionId: 's' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:getWorktreeStatus', { sessionId: 's' });
   void api.applyWorktree({ sessionId: 's' });

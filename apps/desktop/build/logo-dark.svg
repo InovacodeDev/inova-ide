@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+  <title>InovaIDE — tema escuro</title>
+  <rect width="32" height="32" rx="8" fill="#e2e3e5"/>
+  <path d="M7.5 10l6 6-6 6" stroke="#141518"/>
+  <path d="M17 16h3.5M20.5 16l4.5-5.5M20.5 16h5.5M20.5 16l4.5 5.5" stroke="#ff5a1f"/>
+</svg>

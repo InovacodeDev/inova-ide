@@ -82,6 +82,32 @@ export interface Workspace {
   activeSessionId: string | null;
 }
 
+export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-turbo-q5_0';
+
+export type ThemePreference = 'system' | 'dark' | 'light';
+
+export interface Settings {
+  appearance: {
+    theme: ThemePreference;
+  };
+  voice: {
+    language: 'auto' | 'pt' | 'en' | 'es';
+    modelId: VoiceModelId;
+  };
+  sessions: {
+    autoArchiveDays: 0 | 1 | 3 | 7 | 30;
+    collapseFinishedTurns: boolean;
+  };
+  notifications: {
+    waitingInput: boolean;
+    failed: boolean;
+    completed: boolean;
+    onlyWhenUnfocused: boolean;
+  };
+}
+
+export type SettingsPatch = { [Section in keyof Settings]?: Partial<Settings[Section]> };
+
 export interface Store {
   version: 1;
   accounts: Account[];
@@ -89,4 +115,5 @@ export interface Store {
   sessions?: Session[];
   workspace?: Workspace;
   defaultModes?: Partial<Record<ProviderId, ExecutionMode>>;
+  settings?: Settings;
 }

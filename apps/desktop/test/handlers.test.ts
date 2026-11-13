@@ -15,6 +15,7 @@ import type { Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
+import type { HandlerDeps } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
 import type { LoginEvent, Result } from '../src/shared/api.js';
 
@@ -36,7 +37,9 @@ function unwrap<T>(result: Result<T>): T {
   return result.value;
 }
 
-async function setup(options: { withBinary?: boolean; home?: string } = {}) {
+async function setup(
+  options: { withBinary?: boolean; home?: string; withOpenPath?: boolean } = {},
+) {
   const root = await tmp();
   const bin = await tmp();
   if (options.withBinary ?? true) {
@@ -80,8 +83,15 @@ async function setup(options: { withBinary?: boolean; home?: string } = {}) {
     ANTHROPIC_API_KEY: 'fake-key',
     ...(options.home === undefined ? {} : { HOME: options.home }),
   };
+  const notify = vi.fn<NonNullable<HandlerDeps['notify']>>(async () => ({
+    ok: true,
+    value: null,
+  }));
+  const openPath = vi.fn<NonNullable<HandlerDeps['openPath']>>(async () => undefined);
   const handlers = createHandlers({
     root,
+    notify,
+    ...(options.withOpenPath === false ? {} : { openPath }),
     runner: { run },
     sessions,
     chat,
@@ -111,6 +121,8 @@ async function setup(options: { withBinary?: boolean; home?: string } = {}) {
     send,
     cancel,
     fetch,
+    notify,
+    openPath,
     handlers,
   };
 }
@@ -212,6 +224,23 @@ test('sendMessage rejects invalid input and unknown sessions', async () => {
     message: 'Sessão não encontrada.',
   });
   expect(send).not.toHaveBeenCalled();
+});
+
+test('sendMessage grants the approved extra directories to the claude turn', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(
+    await handlers.sendMessage({
+      sessionId: session.id,
+      prompt: '@/Users/me/Downloads/doc.pdf resuma',
+      extraDirs: ['/Users/me/Downloads'],
+    }),
+  );
+  const args = send.mock.calls[0]?.[0]?.spec.args ?? [];
+  const flag = args.indexOf('--add-dir');
+  expect(args[flag + 1]).toBe('/Users/me/Downloads');
+  expect(flag).toBeGreaterThan(-1);
+  expect(flag).toBeLessThan(args.indexOf('--'));
 });
 
 test('a new claude turn persists the session id before spawning and derives the title', async () => {
@@ -1378,4 +1407,141 @@ test('importSessions targets another account of the same provider and rejects ot
 
   const [session] = unwrap(await handlers.importSessions({ ...base, accountId: other.id }));
   expect(session?.accountIdOverride).toBe(other.id);
+});
+
+test('settings default, update through the handler, reject invalid patches, and persist', async () => {
+  const { root, handlers } = await setup();
+  const defaults = unwrap(await handlers.getSettings());
+  expect(defaults.notifications).toEqual({
+    waitingInput: true,
+    failed: true,
+    completed: false,
+    onlyWhenUnfocused: true,
+  });
+  expect(defaults.sessions.autoArchiveDays).toBe(0);
+
+  const updated = unwrap(
+    await handlers.updateSettings({ sessions: { autoArchiveDays: 7 }, voice: { language: 'pt' } }),
+  );
+  expect(updated.sessions).toEqual({ autoArchiveDays: 7, collapseFinishedTurns: true });
+  expect(updated.voice.language).toBe('pt');
+  expect(unwrap(await handlers.getSettings())).toEqual(updated);
+  expect((await loadStore(root)).settings).toEqual(updated);
+
+  for (const input of [null, { sessions: { autoArchiveDays: 2 } }, { unknown: {} }]) {
+    expect(await handlers.updateSettings(input)).toEqual(INVALID);
+  }
+  expect(unwrap(await handlers.getSettings())).toEqual(updated);
+});
+
+test('sendTestNotification reports a notification the system blocked', async () => {
+  const { handlers, notify } = await setup();
+  notify.mockResolvedValueOnce({ ok: false, message: 'bloqueada' });
+  expect(await handlers.sendTestNotification()).toEqual({ ok: false, message: 'bloqueada' });
+});
+
+test('sendTestNotification notifies with the fixed title and body', async () => {
+  const { handlers, notify } = await setup();
+  unwrap(await handlers.sendTestNotification());
+  expect(notify).toHaveBeenCalledExactlyOnceWith({
+    title: 'Inova',
+    body: 'Notificação de teste',
+  });
+});
+
+test('openDataFolder creates and opens the data root and reports failures', async () => {
+  const { root, handlers, openPath } = await setup();
+  await rm(root, { recursive: true, force: true });
+  unwrap(await handlers.openDataFolder());
+  expect(openPath).toHaveBeenCalledExactlyOnceWith(root);
+  expect(await readdir(root)).toEqual([]);
+
+  openPath.mockRejectedValueOnce(new Error('no file manager'));
+  expect(await handlers.openDataFolder()).toEqual({
+    ok: false,
+    message: 'Não foi possível abrir a pasta de dados.',
+  });
+
+  const without = await setup({ withOpenPath: false });
+  expect((await without.handlers.openDataFolder()).ok).toBe(false);
+});
+
+test.each([
+  ['failed', {}, false, 1],
+  ['failed', {}, true, 0],
+  ['failed', { notifications: { failed: false } }, false, 0],
+  ['failed', { notifications: { onlyWhenUnfocused: false } }, true, 1],
+  ['waiting-input', {}, false, 1],
+  ['waiting-input', { notifications: { waitingInput: false } }, false, 0],
+  ['completed', {}, false, 0],
+  ['completed', { notifications: { completed: true } }, false, 1],
+  ['completed', { notifications: { completed: true } }, true, 0],
+  ['completed', { notifications: { completed: true, onlyWhenUnfocused: false } }, true, 1],
+] as const)(
+  'notification for %s with settings %j and windowFocused=%s fires %i time(s)',
+  async (kind, patch, windowFocused, expectedCalls) => {
+    const { root, handlers, notify } = await setup();
+    const { session } = await seedSession(root);
+    unwrap(await handlers.updateSettings(patch));
+    handlers.reportUiFocus({ activeSessionId: null, windowFocused });
+    if (kind === 'waiting-input') {
+      handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+    }
+    handlers.handleChatEvent(session.id, {
+      kind: 'done',
+      isError: kind !== 'completed',
+      costUsd: null,
+      durationMs: 5,
+    });
+    await handlers.listInbox();
+    expect(notify).toHaveBeenCalledTimes(expectedCalls);
+  },
+);
+
+test('runAutoArchive archives only idle expired root sessions and skips busy ones', async () => {
+  const { root, handlers, running, chatInUse } = await setup();
+  const { account, project } = await seedProject(root);
+  const staleDate = new Date('2025-12-01T00:00:00.000Z');
+  const make = (parentId: string | null = null, at = staleDate) =>
+    createSession({ root, projectId: project.id, parentId, now: () => at });
+  const idle = await make();
+  const idleChild = await make(idle.id);
+  await make(null, new Date('2025-12-31T00:00:00.000Z'));
+  const executing = await make();
+  const parentOfExecuting = await make();
+  const executingChild = await make(parentOfExecuting.id);
+  const opened = await make();
+  const focused = await make();
+  const unread = await make();
+  const queued = await make();
+  running.add(executing.id);
+  running.add(executingChild.id);
+  unwrap(await handlers.saveWorkspace({ openSessionIds: [opened.id], activeSessionId: null }));
+  handlers.reportUiFocus({ activeSessionId: focused.id, windowFocused: true });
+  handlers.handleChatEvent(unread.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+  await handlers.listInbox();
+  chatInUse.add(account.id);
+  unwrap(await handlers.enqueueTurn({ sessionId: queued.id, prompt: 'depois' }));
+
+  const archivedIds = async (): Promise<string[]> =>
+    ((await loadStore(root)).sessions ?? [])
+      .filter((session) => session.archivedAt !== null)
+      .map((session) => session.id)
+      .sort();
+
+  expect(await handlers.runAutoArchive()).toEqual([]);
+  expect(await archivedIds()).toEqual([]);
+
+  unwrap(await handlers.updateSettings({ sessions: { autoArchiveDays: 7 } }));
+  expect(await handlers.runAutoArchive()).toEqual([idle.id]);
+  expect(await archivedIds()).toEqual([idle.id, idleChild.id].sort());
+
+  unwrap(await handlers.markInboxRead({ sessionId: unread.id }));
+  expect(await handlers.runAutoArchive()).toEqual([unread.id]);
+  expect(await archivedIds()).toEqual([idle.id, idleChild.id, unread.id].sort());
 });

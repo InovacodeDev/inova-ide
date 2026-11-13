@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
+import type { VoiceHandlers } from '../src/main/voice.js';
 
 type Listener = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -30,6 +31,11 @@ function setup() {
       'updateSession',
       'getDefaultModes',
       'setDefaultMode',
+      'getSettings',
+      'updateSettings',
+      'sendTestNotification',
+      'openNotificationSettings',
+      'openDataFolder',
       'deleteSession',
       'getWorktreeStatus',
       'applyWorktree',
@@ -71,11 +77,18 @@ function setup() {
   handlers['cancelTurn'] = vi.fn();
   handlers['cancelLogin'] = vi.fn();
   handlers['reportUiFocus'] = vi.fn();
+  const voice = {
+    getVoiceStatus: vi.fn(async () => ({ ok: true as const, value: 'getVoiceStatus' })),
+    downloadVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'downloadVoiceModel' })),
+    deleteVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'deleteVoiceModel' })),
+    transcribeAudio: vi.fn(async () => ({ ok: true as const, value: 'transcribeAudio' })),
+  };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
+    voice: voice as unknown as VoiceHandlers,
     allowedOrigin: APP,
   });
-  return { handlers };
+  return { handlers, voice };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -106,13 +119,30 @@ test('a trusted invoke reaches the handler with the payload only', async () => {
 });
 
 test('invokes from a foreign or unknown sender are rejected', async () => {
-  const { handlers } = setup();
+  const { handlers, voice } = setup();
   for (const event of [foreign, { senderFrame: null }, {}]) {
     for (const channel of electron.invokes.keys()) {
       await expect(invoke(channel, event, {})).rejects.toThrow('Remetente não autorizado.');
     }
   }
-  for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+  for (const handler of [...Object.values(handlers), ...Object.values(voice)]) {
+    expect(handler).not.toHaveBeenCalled();
+  }
+});
+
+test('voice invokes reach the voice handlers', async () => {
+  const { voice } = setup();
+  const input = { pcm: new Uint8Array(2), final: true, language: 'pt', hints: [] };
+  await invoke('inova:transcribeAudio', trusted, input);
+  expect(voice.transcribeAudio).toHaveBeenCalledWith(input);
+  await invoke('inova:getVoiceStatus', trusted);
+  await invoke('inova:downloadVoiceModel', trusted);
+  expect(voice.getVoiceStatus).toHaveBeenCalledOnce();
+  expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith(undefined);
+  await invoke('inova:downloadVoiceModel', trusted, { modelId: 'base' });
+  expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith({ modelId: 'base' });
+  await invoke('inova:deleteVoiceModel', trusted, { modelId: 'base' });
+  expect(voice.deleteVoiceModel).toHaveBeenCalledWith({ modelId: 'base' });
 });
 
 test('terminal pty and openLogin channels are not registered', () => {
@@ -160,6 +190,11 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:listModels', trusted, input);
   await invoke('inova:getDefaultModes', trusted);
   await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
+  await invoke('inova:getSettings', trusted);
+  await invoke('inova:updateSettings', trusted, { voice: { language: 'pt' } });
+  await invoke('inova:sendTestNotification', trusted);
+  await invoke('inova:openNotificationSettings', trusted);
+  await invoke('inova:openDataFolder', trusted);
   await invoke('inova:getWorktreeStatus', trusted, { sessionId: 's' });
   await invoke('inova:applyWorktree', trusted, { sessionId: 's' });
   await invoke('inova:restoreCheckpoint', trusted, {
@@ -193,6 +228,11 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
   expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
   expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });
+  expect(handlers['getSettings']).toHaveBeenCalledWith();
+  expect(handlers['updateSettings']).toHaveBeenCalledWith({ voice: { language: 'pt' } });
+  expect(handlers['sendTestNotification']).toHaveBeenCalledWith();
+  expect(handlers['openNotificationSettings']).toHaveBeenCalledWith();
+  expect(handlers['openDataFolder']).toHaveBeenCalledWith();
   expect(handlers['getWorktreeStatus']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(handlers['applyWorktree']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(handlers['restoreCheckpoint']).toHaveBeenCalledWith({

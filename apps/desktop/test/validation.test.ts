@@ -22,6 +22,7 @@ import {
   parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
+  parseSettingsPatch,
   parseStartComparison,
   parseSwitchAccount,
   parseTurnRef,
@@ -82,7 +83,14 @@ test('prompts are trimmed and limited to 100000 characters', () => {
   expect(parseMessage({ sessionId: 's', prompt: '  oi \n' })).toEqual({
     sessionId: 's',
     prompt: 'oi',
+    extraDirs: [],
   });
+  expect(
+    parseMessage({ sessionId: 's', prompt: 'oi', extraDirs: ['/Users/me/Downloads'] })?.extraDirs,
+  ).toEqual(['/Users/me/Downloads']);
+  for (const extraDirs of ['/x', ['relative/dir'], ['/a\0b'], [5], new Array(17).fill('/x')]) {
+    expect(parseMessage({ sessionId: 's', prompt: 'oi', extraDirs })).toBeUndefined();
+  }
   expect(parseMessage({ sessionId: 's', prompt: '   ' })).toBeUndefined();
   expect(parseMessage({ sessionId: 's', prompt: 5 })).toBeUndefined();
   const longest = 'a'.repeat(100_000);
@@ -217,6 +225,38 @@ test('session mode update and default provider mode validation', () => {
   });
   expect(parseDefaultMode({ provider: 'unknown', mode: 'plan' })).toBeUndefined();
   expect(parseDefaultMode({ provider: 'claude', mode: 'invalid' })).toBeUndefined();
+});
+
+test('settings patch validation rejects the whole patch on any unknown key or invalid value', () => {
+  const valid = {
+    voice: { language: 'pt', modelId: 'medium-q5_0' },
+    sessions: { autoArchiveDays: 30, collapseFinishedTurns: false },
+    notifications: { waitingInput: true, onlyWhenUnfocused: false },
+  };
+  expect(parseSettingsPatch(valid)).toEqual(valid);
+  expect(parseSettingsPatch({})).toEqual({});
+  expect(parseSettingsPatch({ sessions: { autoArchiveDays: 3 } })).toEqual({
+    sessions: { autoArchiveDays: 3 },
+  });
+  for (const input of [
+    null,
+    'settings',
+    [],
+    { theme: 'dark' },
+    { voice: { language: 'fr' } },
+    { voice: { modelId: 'huge' } },
+    { voice: { modelId: '../base' } },
+    { voice: { modelId: 1 } },
+    { voice: { language: 'pt', volume: 1 } },
+    { sessions: { autoArchiveDays: 2 } },
+    { sessions: { autoArchiveDays: '7' } },
+    { notifications: { completed: 'true' } },
+    { notifications: 'all' },
+    { voice: { language: 'pt' }, sessions: { autoArchiveDays: 99 } },
+    JSON.parse('{"__proto__":{"language":"pt"}}'),
+  ]) {
+    expect(parseSettingsPatch(input)).toBeUndefined();
+  }
 });
 
 test('worktree, checkpoint restore, and project verification validation', () => {

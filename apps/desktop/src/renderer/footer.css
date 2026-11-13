@@ -1,9 +1,5 @@
-.footer-shell {
-  position: relative;
-  flex: none;
-}
-
 .footer-bar {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -21,6 +17,7 @@
 }
 
 .footer-group {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -107,16 +104,22 @@
 
 .footer-popover {
   position: absolute;
-  left: 12px;
+  left: 0;
   bottom: calc(100% + 8px);
   z-index: 40;
-  width: min(940px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
   padding: 12px;
+  cursor: default;
   border: 1px solid var(--border-control);
   border-radius: 10px;
   background: var(--panel);
   box-shadow: var(--shadow);
   color: var(--text);
+}
+
+.footer-popover-right {
+  left: auto;
+  right: 0;
 }
 
 .footer-popover::after {
@@ -139,6 +142,9 @@
 }
 
 .footer-popover-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
@@ -150,9 +156,11 @@
 }
 
 .footer-popover-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(275px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
 }
 
 .footer-popover-card {
@@ -169,42 +177,21 @@
   border-color: var(--accent);
 }
 
-.footer-popover-card-highlight {
-  border-color: var(--border-control);
-}
-
 .footer-popover-card-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.footer-popover-identity {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.footer-popover-titles {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 .footer-popover-account {
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.footer-popover-provider {
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .footer-popover-status {

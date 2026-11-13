@@ -412,7 +412,7 @@
   padding: 0 5px;
   border-radius: 999px;
   background: var(--accent);
-  color: var(--accent-ink, #fff);
+  color: var(--accent-ink);
   font-size: 11px;
   font-weight: 600;
   display: inline-flex;
@@ -521,7 +521,7 @@
 
 .inbox-kind-completed {
   background: rgba(63, 185, 80, 0.16);
-  color: var(--success, #3fb950);
+  color: var(--success);
 }
 
 .inbox-kind-failed {
@@ -531,7 +531,7 @@
 
 .inbox-kind-waiting-input {
   background: rgba(227, 179, 65, 0.16);
-  color: var(--warn, #e3b341);
+  color: var(--warn);
 }
 
 .inbox-item-summary {

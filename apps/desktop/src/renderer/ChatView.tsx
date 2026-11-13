@@ -1,7 +1,24 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ExecutionMode, ProviderId, QueuedTurn } from '@inova/core/types';
+import type {
+  EffortLevel,
+  ExecutionMode,
+  ProviderId,
+  QueuedTurn,
+  Settings,
+} from '@inova/core/types';
 import type { AccountView, ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
@@ -13,13 +30,19 @@ import {
   filterCommands,
   isSameComposerTrigger,
   parseMessageFileSegments,
+  resolveDroppedPath,
   type ComposerTrigger,
+  type DroppedPath,
 } from './composer-trigger';
+import { ConfirmModal } from './ConfirmModal';
+import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
   CloseIcon,
   FileIcon,
   GitForkIcon,
+  ListTodoIcon,
+  MicIcon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -32,9 +55,23 @@ import { ModelEffortPicker } from './ModelEffortPicker';
 import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
+import {
+  groupChatItems,
+  summarizeWork,
+  toolKind,
+  toolSummary,
+  type ChatEntry,
+} from './turn-groups';
+import { useDictation, type Dictation } from './useDictation';
 import './chat.css';
 
+export interface ChatViewHandle {
+  focusComposer: () => boolean;
+  toggleDictation: () => boolean;
+}
+
 export interface ChatViewProps {
+  ref?: Ref<ChatViewHandle>;
   sessionId?: string | null;
   projectId: string | null;
   state: ChatState;
@@ -46,6 +83,10 @@ export interface ChatViewProps {
   mode: ExecutionMode | null;
   defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
   inWorktree?: boolean;
+  workingDir?: string | null;
+  voiceHints?: readonly string[];
+  dictationLanguage?: Settings['voice']['language'];
+  collapseFinishedTurns?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
@@ -61,7 +102,7 @@ export interface ChatViewProps {
   onCancelQueuedTurn?: (turnId: string) => void;
   onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
   onDismissBusyConflict?: () => void;
-  onSend: (prompt: string) => void;
+  onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
 }
 
@@ -69,21 +110,15 @@ const NEAR_BOTTOM_PX = 80;
 const MAX_COMPOSER_PX = 200;
 const FILE_SEARCH_DEBOUNCE_MS = 80;
 
-function firstLine(input: string): string {
-  const line = input.split('\n').find((candidate) => candidate.trim() !== '') ?? '';
-  return line.length > 100 ? `${line.slice(0, 100)}…` : line;
-}
-
-const SHELL_TOOL = /bash|shell|exec/i;
-const EDIT_TOOL = /edit|write/i;
-
 function ToolIcon({ name }: { name: string }) {
-  if (SHELL_TOOL.test(name)) return <TerminalIcon size={16} />;
-  if (EDIT_TOOL.test(name)) return <PencilIcon size={16} />;
+  const kind = toolKind(name);
+  if (kind === 'shell') return <TerminalIcon size={16} />;
+  if (kind === 'edit') return <PencilIcon size={16} />;
   return <FileIcon size={16} />;
 }
 
 function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
+  const summary = toolSummary(item);
   return (
     <details className={item.isError ? 'chat-tool chat-tool-error' : 'chat-tool'}>
       <summary className="chat-tool-summary">
@@ -91,7 +126,10 @@ function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
           <ToolIcon name={item.name} />
         </span>
         <span className="chat-tool-name">{item.name}</span>
-        <span className="chat-tool-preview">{firstLine(item.input)}</span>
+        <span className="chat-tool-preview">{summary.title}</span>
+        {summary.result !== null ? (
+          <span className="chat-tool-status chat-tool-result">{summary.result}</span>
+        ) : null}
         {item.isError ? <span className="chat-tool-status chat-tool-failed">erro</span> : null}
         {item.output === null ? (
           <span className="chat-tool-status chat-tool-pending">
@@ -351,9 +389,95 @@ function Message({
   }
 }
 
+function WorkGroup({
+  entries,
+  label,
+  renderEntry,
+}: {
+  entries: readonly ChatEntry[];
+  label: ReactNode;
+  renderEntry: (entry: ChatEntry) => ReactNode;
+}) {
+  return (
+    <div className="chat-row">
+      {label}
+      <details className="chat-tool chat-work">
+        <summary className="chat-tool-summary">
+          <span className="chat-tool-icon">
+            <ListTodoIcon size={16} />
+          </span>
+          <span className="chat-tool-name">Trabalho do turno</span>
+          <span className="chat-tool-preview chat-work-preview">{summarizeWork(entries)}</span>
+        </summary>
+        <div className="chat-work-body">{entries.map((entry) => renderEntry(entry))}</div>
+      </details>
+    </div>
+  );
+}
+
+function dropAccessDescription(input: {
+  dropped: readonly DroppedPath[];
+  provider: ProviderId | null;
+}): string {
+  const { dropped, provider } = input;
+  const paths = dropped.map((item) => item.mention).join(', ');
+  const dirs = [...new Set(dropped.flatMap((item) => item.grantDir ?? []))].join(', ');
+  const agent = provider ? PROVIDER_NAME[provider] : 'O agente';
+  const scope =
+    provider === 'claude'
+      ? `${agent} recebe acesso à pasta ${dirs} enquanto esta sessão estiver aberta.`
+      : `${agent} recebe o caminho no prompt. O acesso depende do modo de execução da sessão.`;
+  return `${paths} está fora da pasta do projeto. ${scope}`;
+}
+
+function DictationStatus({ dictation }: { dictation: Dictation }) {
+  if (dictation.error !== null) {
+    return (
+      <div className="chat-dictation chat-dictation-error" role="alert">
+        <span className="chat-dictation-text">{dictation.error}</span>
+        <button
+          type="button"
+          className="chat-file-tag-remove"
+          aria-label="Fechar aviso do ditado"
+          onClick={dictation.dismissError}
+        >
+          <CloseIcon size={12} />
+        </button>
+      </div>
+    );
+  }
+  const text =
+    dictation.phase === 'recording'
+      ? dictation.interim === ''
+        ? 'Ouvindo…'
+        : dictation.interim
+      : dictation.phase === 'transcribing'
+        ? 'Transcrevendo…'
+        : dictation.phase === 'downloading'
+          ? `Baixando o modelo de voz… ${dictation.downloadPercent}%`
+          : null;
+  if (text === null) return null;
+  return (
+    <div className="chat-dictation" role="status">
+      {dictation.phase === 'recording' ? <span className="dot pulse" aria-hidden="true" /> : null}
+      <span className="chat-dictation-text">{text}</span>
+      <button
+        type="button"
+        className="chat-file-tag-remove"
+        aria-label="Cancelar ditado"
+        onClick={dictation.cancel}
+      >
+        <CloseIcon size={12} />
+      </button>
+    </div>
+  );
+}
+
+const NO_VOICE_HINTS: readonly string[] = [];
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
+  ref,
   sessionId = null,
   projectId,
   state,
@@ -365,6 +489,10 @@ export function ChatView({
   mode,
   defaultModes,
   inWorktree = false,
+  workingDir = null,
+  voiceHints = NO_VOICE_HINTS,
+  dictationLanguage,
+  collapseFinishedTurns = true,
   catalog,
   readOnly = false,
   queuedTurns = [],
@@ -385,6 +513,18 @@ export function ChatView({
 }: ChatViewProps) {
   const [draft, setDraft] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [pendingDrop, setPendingDrop] = useState<DroppedPath[] | null>(null);
+  const [grantedDirs, setGrantedDirs] = useState<string[]>([]);
+  const dictation = useDictation({
+    hints: voiceHints,
+    language: dictationLanguage,
+    onText: (text) => {
+      setDraft((current) => appendDictation(current, text));
+      inputRef.current?.focus();
+    },
+  });
+  const recording = dictation.phase === 'recording';
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -410,6 +550,29 @@ export function ChatView({
       return counter;
     });
   }, [items]);
+  const blocks = useMemo(
+    () => groupChatItems(items, running, collapseFinishedTurns),
+    [items, running, collapseFinishedTurns],
+  );
+
+  const toggleDictation = dictation.toggle;
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusComposer: () => {
+        const input = inputRef.current;
+        if (readOnly || input === null) return false;
+        input.focus();
+        return true;
+      },
+      toggleDictation: () => {
+        if (readOnly) return false;
+        toggleDictation();
+        return true;
+      },
+    }),
+    [readOnly, toggleDictation],
+  );
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
 
@@ -571,11 +734,73 @@ export function ChatView({
     stickRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < NEAR_BOTTOM_PX;
   };
 
+  const attachMentions = (dropped: readonly DroppedPath[]) => {
+    setAttachedFiles((current) => [...new Set([...current, ...dropped.map((d) => d.mention)])]);
+    inputRef.current?.focus();
+  };
+
+  const hasFiles = (event: DragEvent<HTMLElement>) => event.dataTransfer.types.includes('Files');
+
+  const onDragOver = (event: DragEvent<HTMLElement>) => {
+    if (readOnly || !hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'link';
+    setDragging(true);
+  };
+
+  const onDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
+      return;
+    }
+    setDragging(false);
+  };
+
+  const onDrop = (event: DragEvent<HTMLElement>) => {
+    if (readOnly || !hasFiles(event)) return;
+    event.preventDefault();
+    setDragging(false);
+    const dropped = Array.from(event.dataTransfer.items).flatMap((item) => {
+      const file = item.kind === 'file' ? item.getAsFile() : null;
+      const path = file ? window.inova.getPathForFile(file) : '';
+      if (path === '') return [];
+      const isDirectory = item.webkitGetAsEntry()?.isDirectory ?? false;
+      return [resolveDroppedPath({ path, cwd: workingDir, isDirectory })];
+    });
+    const outside = dropped.filter((item) => item.grantDir !== null);
+    attachMentions(dropped.filter((item) => item.grantDir === null));
+    if (outside.length > 0) setPendingDrop(outside);
+  };
+
+  const confirmPendingDrop = () => {
+    if (pendingDrop === null) return;
+    const dirs = pendingDrop.flatMap((item) => item.grantDir ?? []);
+    setGrantedDirs((current) => [...new Set([...current, ...dirs])]);
+    attachMentions(pendingDrop);
+    setPendingDrop(null);
+  };
+
+  const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => (
+    <Message
+      key={item.id}
+      item={item}
+      turnIndex={userTurnIndices[index] ?? 0}
+      provider={provider}
+      busy={running || readOnly}
+      onRestoreCheckpoint={onRestoreCheckpoint}
+      onForkTurn={onForkTurn}
+      onOpenHandoff={onOpenHandoff}
+      onFixVerification={(fixPrompt) => {
+        if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
+      }}
+      showAgentLabel={showAgentLabel}
+    />
+  );
+
   const submit = () => {
     const prompt = buildPromptWithAttachedFiles({ text: draft, files: attachedFiles });
     if (prompt === '' || running || readOnly) return;
     stickRef.current = true;
-    onSend(prompt);
+    onSend(prompt, grantedDirs);
     setDraft('');
     setAttachedFiles([]);
     commitTrigger(null);
@@ -625,31 +850,51 @@ export function ChatView({
   };
 
   return (
-    <section className="chat-view" style={visible ? undefined : { display: 'none' }}>
+    <section
+      className={dragging ? 'chat-view chat-view-dragging' : 'chat-view'}
+      style={visible ? undefined : { display: 'none' }}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
+      {pendingDrop ? (
+        <ConfirmModal
+          title="Permitir acesso ao arquivo?"
+          description={dropAccessDescription({ dropped: pendingDrop, provider })}
+          confirmLabel="Permitir acesso"
+          onConfirm={confirmPendingDrop}
+          onCancel={() => setPendingDrop(null)}
+        />
+      ) : null}
+      {dictation.phase === 'needs-model' ? (
+        <ConfirmModal
+          title="Baixar o modelo de voz?"
+          description={`A transcrição roda neste computador e o áudio não sai dele. O download tem ${formatMegabytes(dictation.modelBytes)} e acontece uma vez.`}
+          confirmLabel="Baixar modelo"
+          onConfirm={dictation.confirmDownload}
+          onCancel={dictation.cancel}
+        />
+      ) : null}
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         <div className="chat-list-inner">
           {items.length === 0 && !running ? (
             <div className="chat-empty">Envie uma mensagem para começar</div>
           ) : null}
-          {items.map((item, index) => (
-            <Message
-              key={item.id}
-              item={item}
-              turnIndex={userTurnIndices[index] ?? 0}
-              provider={provider}
-              busy={running || readOnly}
-              onRestoreCheckpoint={onRestoreCheckpoint}
-              onForkTurn={onForkTurn}
-              onOpenHandoff={onOpenHandoff}
-              onFixVerification={(fixPrompt) => {
-                if (!running && !readOnly) onSend(fixPrompt);
-              }}
-              showAgentLabel={
-                (item.type === 'assistant' || item.type === 'tool') &&
-                (index === 0 || items[index - 1]?.type === 'user')
-              }
-            />
-          ))}
+          {blocks.map((block) => {
+            const opensTurn = block.index === 0 || items[block.index - 1]?.type === 'user';
+            if (block.kind === 'work') {
+              return (
+                <WorkGroup
+                  key={block.id}
+                  entries={block.entries}
+                  label={opensTurn ? <AgentLabel provider={provider} /> : null}
+                  renderEntry={renderEntry}
+                />
+              );
+            }
+            const isAgent = block.item.type === 'assistant' || block.item.type === 'tool';
+            return renderEntry(block, isAgent && opensTurn);
+          })}
           {queuedTurns.map((queued) => (
             <div key={queued.turnId} className="chat-row">
               <div className="chat-queued">
@@ -759,6 +1004,7 @@ export function ChatView({
               ))}
             </div>
           ) : null}
+          <DictationStatus dictation={dictation} />
           <textarea
             ref={inputRef}
             className="chat-input"
@@ -820,6 +1066,19 @@ export function ChatView({
                 />
               </>
             ) : null}
+            {readOnly ? null : (
+              <button
+                type="button"
+                className={recording ? 'chat-mic chat-mic-recording' : 'chat-mic'}
+                aria-label={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
+                title={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
+                aria-pressed={recording}
+                disabled={dictation.phase !== 'idle' && !recording}
+                onClick={dictation.toggle}
+              >
+                {recording ? <StopIcon size={14} /> : <MicIcon size={16} />}
+              </button>
+            )}
             {running ? (
               <button
                 type="button"

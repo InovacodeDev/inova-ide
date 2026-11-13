@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildWhisper } from './build-whisper.mjs';
 
 const desktopDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(desktopDir, '..', '..');
@@ -162,6 +163,7 @@ if (isEntrypoint()) {
 
   run('pnpm', ['build'], { cwd: repoRoot });
   run('pnpm', ['--filter', '@inova/desktop', 'build'], { cwd: repoRoot });
+  buildWhisper({ platform: targetPlatform, arch: targetArch });
 
   const staging = fs.mkdtempSync(join(tmpdir(), 'inova-stage-'));
   try {
