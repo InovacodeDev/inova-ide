@@ -34,7 +34,12 @@ export function UpdateToast({ info, onDismiss }: UpdateToastProps) {
             Ver novidades
           </button>
         ) : null}
-        <button type="button" className="btn" onClick={copyCommand}>
+        <button
+          type="button"
+          className="btn"
+          data-tooltip="Copiar o comando de atualização"
+          onClick={copyCommand}
+        >
           <CopyIcon size={13} />
           {copied ? 'Comando copiado' : 'Copiar comando'}
         </button>
@@ -42,6 +47,7 @@ export function UpdateToast({ info, onDismiss }: UpdateToastProps) {
           type="button"
           className="icon-btn"
           aria-label="Dispensar aviso de atualização"
+          data-tooltip="Dispensar aviso de atualização"
           onClick={onDismiss}
         >
           <CloseIcon size={14} />

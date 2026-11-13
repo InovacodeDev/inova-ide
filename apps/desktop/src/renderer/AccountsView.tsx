@@ -330,7 +330,7 @@ export function AccountsView(props: AccountsViewProps) {
                               type="button"
                               className="icon-btn"
                               aria-label="Atualizar consumo"
-                              title="Atualizar consumo"
+                              data-tooltip="Atualizar consumo desta conta"
                               onClick={() => onLoadUsage(account)}
                             >
                               <RefreshIcon size={14} />
@@ -339,7 +339,7 @@ export function AccountsView(props: AccountsViewProps) {
                               type="button"
                               className="icon-btn"
                               aria-label={`Deslogar e remover conta ${display}`}
-                              title="Deslogar e remover conta"
+                              data-tooltip="Deslogar e remover conta"
                               onClick={() => onRemove(account)}
                             >
                               <TrashIcon size={14} />

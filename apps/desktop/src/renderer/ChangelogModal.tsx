@@ -59,6 +59,8 @@ export function ChangelogModal({ version, whatsNew, onClose }: ChangelogModalPro
             type="button"
             className="icon-btn"
             aria-label="Fechar novidades"
+            data-tooltip="Fechar novidades"
+            data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={15} />

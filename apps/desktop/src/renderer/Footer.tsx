@@ -285,14 +285,19 @@ export function Footer(props: FooterProps) {
           </div>
         );
       })}
-      <button type="button" className="footer-manage" onClick={onManageAccounts}>
+      <button
+        type="button"
+        className="footer-manage"
+        data-tooltip="Abrir contas e providers"
+        onClick={onManageAccounts}
+      >
         Gerenciar contas
       </button>
       {version !== null ? (
         <button
           type="button"
           className="footer-version mono"
-          title={updateAvailable ? 'Atualização disponível' : 'Ver novidades'}
+          data-tooltip={updateAvailable ? 'Atualização disponível: ver novidades' : 'Ver novidades'}
           aria-label={
             updateAvailable ? `Versão ${version}, atualização disponível` : `Versão ${version}`
           }

@@ -2,12 +2,10 @@ import { LogoIcon, SettingsIcon } from './icons';
 
 interface HeaderProps {
   runningCount: number;
-  settingsShortcut: string;
   onOpenSettings: () => void;
 }
 
-export function Header({ runningCount, settingsShortcut, onOpenSettings }: HeaderProps) {
-  const settingsLabel = `Configurações (${settingsShortcut})`;
+export function Header({ runningCount, onOpenSettings }: HeaderProps) {
   return (
     <header className="app-header">
       <div className="app-brand">
@@ -27,8 +25,9 @@ export function Header({ runningCount, settingsShortcut, onOpenSettings }: Heade
         <button
           type="button"
           className="icon-btn"
-          aria-label={settingsLabel}
-          title={settingsLabel}
+          aria-label="Configurações"
+          data-tooltip="Abrir configurações"
+          data-shortcut="open-settings"
           onClick={onOpenSettings}
         >
           <SettingsIcon size={16} />

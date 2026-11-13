@@ -293,7 +293,7 @@ function Message({
                 type="button"
                 className="chat-fork-btn"
                 disabled={busy}
-                title="Bifurcar sessão a partir deste turno"
+                data-tooltip="Bifurcar sessão a partir deste turno"
                 onClick={() => onForkTurn(turnIndex)}
               >
                 <GitForkIcon size={12} />
@@ -354,6 +354,7 @@ function Message({
                 type="button"
                 className="btn btn-sm"
                 disabled={busy}
+                data-tooltip="Restaurar os arquivos para este checkpoint"
                 onClick={() =>
                   onRestoreCheckpoint({
                     ref: item.ref,
@@ -384,7 +385,12 @@ function Message({
             <div>{item.message}</div>
             {onOpenHandoff && isRateLimitMessage(item.message) ? (
               <div className="chat-error-actions">
-                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  data-tooltip="Abrir um resumo desta sessão em outra conta"
+                  onClick={onOpenHandoff}
+                >
                   Continuar com resumo em outra conta
                 </button>
               </div>
@@ -445,6 +451,7 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
           type="button"
           className="chat-file-tag-remove"
           aria-label="Fechar aviso do ditado"
+          data-tooltip="Fechar aviso do ditado"
           onClick={dictation.dismissError}
         >
           <CloseIcon size={12} />
@@ -471,6 +478,7 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
         type="button"
         className="chat-file-tag-remove"
         aria-label="Cancelar ditado"
+        data-tooltip="Cancelar ditado e descartar o áudio"
         onClick={dictation.cancel}
       >
         <CloseIcon size={12} />
@@ -934,6 +942,7 @@ export function ChatView({
                     <button
                       type="button"
                       className="btn btn-sm"
+                      data-tooltip="Remover este turno da fila"
                       onClick={() => onCancelQueuedTurn(queued.turnId)}
                     >
                       Cancelar
@@ -969,6 +978,7 @@ export function ChatView({
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
+                  data-tooltip="Enviar este turno quando a conta ficar livre"
                   onClick={() => onEnqueuePrompt(busyConflict.prompt)}
                 >
                   Enfileirar turno
@@ -988,7 +998,12 @@ export function ChatView({
                   </button>
                 ))}
               {onOpenHandoff ? (
-                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  data-tooltip="Transferir a sessão para outra conta ou provedor"
+                  onClick={onOpenHandoff}
+                >
                   Handoff
                 </button>
               ) : null}
@@ -1011,9 +1026,7 @@ export function ChatView({
         ) : null}
         {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
-          {readOnly ? null : (
-            <ComposerToolbar isMac={IS_MAC} active={activeFormats} onFormat={formatDraft} />
-          )}
+          {readOnly ? null : <ComposerToolbar active={activeFormats} onFormat={formatDraft} />}
           {attachedFiles.length > 0 ? (
             <div className="chat-composer-files" aria-label="Arquivos anexados">
               {attachedFiles.map((filePath) => (
@@ -1024,6 +1037,7 @@ export function ChatView({
                     type="button"
                     className="chat-file-tag-remove"
                     aria-label={`Remover ${filePath}`}
+                    data-tooltip="Remover anexo"
                     onClick={() =>
                       setAttachedFiles((current) => current.filter((item) => item !== filePath))
                     }
@@ -1087,6 +1101,7 @@ export function ChatView({
                 type="button"
                 className="chat-send chat-send-stop"
                 aria-label="Parar"
+                data-tooltip="Parar resposta"
                 onClick={onCancel}
               >
                 <StopFilledIcon size={12} />
@@ -1096,6 +1111,8 @@ export function ChatView({
                 type="button"
                 className="chat-send"
                 aria-label="Enviar mensagem"
+                data-tooltip="Enviar mensagem"
+                data-shortcut-text="Enter"
                 disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}
               >

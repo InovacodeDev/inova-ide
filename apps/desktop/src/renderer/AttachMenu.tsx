@@ -41,7 +41,7 @@ export function AttachMenu({ onPick }: AttachMenuProps) {
         type="button"
         className={open ? 'chat-attach-btn chat-attach-btn-open' : 'chat-attach-btn'}
         aria-label="Anexar arquivos"
-        title="Anexar arquivos"
+        data-tooltip="Anexar arquivos ou imagens"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}

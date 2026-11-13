@@ -78,6 +78,7 @@ export function ModelEffortPicker({
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         aria-label="Selecionar modelo e nível de esforço"
+        data-tooltip="Escolher modelo e nível de esforço"
         onClick={() => setOpen((current) => !current)}
       >
         <span className="chat-picker-chevron">

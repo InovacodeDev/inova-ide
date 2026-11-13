@@ -88,6 +88,8 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
             type="button"
             className="icon-btn"
             aria-label="Fechar configurações do projeto"
+            data-tooltip="Fechar configurações do projeto"
+            data-shortcut="dismiss"
             onClick={props.onClose}
           >
             <CloseIcon size={15} />
@@ -152,6 +154,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
                       type="button"
                       className="btn btn-sm"
                       aria-label={`Remover ${check.label}`}
+                      data-tooltip="Remover comando de verificação"
                       onClick={() =>
                         onUpdate({ verificationChecks: removeCheck({ checks, id: check.id }) })
                       }

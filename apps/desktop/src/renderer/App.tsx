@@ -46,9 +46,10 @@ import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
 import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
-import { formatShortcut, isMacPlatform, type ShortcutCommand } from './shortcuts';
+import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
 import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
+import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
 import { useTheme } from './useTheme';
@@ -969,6 +970,7 @@ export function App() {
 
   return (
     <div className="app">
+      <TooltipLayer isMac={IS_MAC} />
       {warning && (
         <div className="warning" role="alert" onClick={dismiss}>
           <span className="warning-icon" aria-hidden="true">
@@ -984,7 +986,6 @@ export function App() {
       )}
       <Header
         runningCount={Object.values(chats).filter((chat) => chat.running).length}
-        settingsShortcut={formatShortcut({ id: 'open-settings', isMac: IS_MAC })}
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
       />
       <div className="app-body">
@@ -1380,6 +1381,8 @@ export function App() {
                 type="button"
                 className="icon-btn"
                 aria-label="Fechar diff do worktree"
+                data-tooltip="Fechar diff do worktree"
+                data-shortcut="dismiss"
                 onClick={() => setWorktreeModal(null)}
               >
                 <CloseIcon size={15} />

@@ -15,7 +15,7 @@ import {
   StrikethroughIcon,
   UnderlineIcon,
 } from './icons';
-import { formatShortcut, type ShortcutId } from './shortcuts';
+import type { ShortcutId } from './shortcuts';
 
 interface ToolbarAction {
   format: ComposerFormat;
@@ -67,7 +67,6 @@ const PARAGRAPH_OPTIONS: readonly { format: ComposerFormat; label: string }[] = 
 ];
 
 export interface ComposerToolbarProps {
-  isMac: boolean;
   active: ReadonlySet<ComposerFormat>;
   onFormat: (format: ComposerFormat) => void;
 }
@@ -76,31 +75,26 @@ const keepSelection = (event: MouseEvent) => event.preventDefault();
 
 function ToolbarGroup({
   actions,
-  isMac,
   active,
   onFormat,
 }: ComposerToolbarProps & { actions: readonly ToolbarAction[] }) {
   return (
     <>
-      {actions.map((action) => {
-        const shortcut =
-          action.shortcutId === undefined ? '' : formatShortcut({ id: action.shortcutId, isMac });
-        const title = shortcut === '' ? action.label : `${action.label} (${shortcut})`;
-        return (
-          <button
-            key={action.format}
-            type="button"
-            className="chat-format-btn"
-            aria-label={title}
-            aria-pressed={active.has(action.format)}
-            title={title}
-            onMouseDown={keepSelection}
-            onClick={() => onFormat(action.format)}
-          >
-            {action.icon}
-          </button>
-        );
-      })}
+      {actions.map((action) => (
+        <button
+          key={action.format}
+          type="button"
+          className="chat-format-btn"
+          aria-label={action.label}
+          aria-pressed={active.has(action.format)}
+          data-tooltip={action.label}
+          data-shortcut={action.shortcutId}
+          onMouseDown={keepSelection}
+          onClick={() => onFormat(action.format)}
+        >
+          {action.icon}
+        </button>
+      ))}
     </>
   );
 }
@@ -135,7 +129,7 @@ function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active'
         className="chat-format-btn chat-format-btn-wide"
         aria-pressed={PARAGRAPH_OPTIONS.some((option) => active.has(option.format))}
         aria-label="Estilo do parágrafo"
-        title="Estilo do parágrafo"
+        data-tooltip="Estilo do parágrafo"
         aria-haspopup="menu"
         aria-expanded={open}
         onMouseDown={keepSelection}
@@ -168,15 +162,15 @@ function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active'
   );
 }
 
-export function ComposerToolbar({ isMac, active, onFormat }: ComposerToolbarProps) {
+export function ComposerToolbar({ active, onFormat }: ComposerToolbarProps) {
   return (
     <div className="chat-format-toolbar" role="toolbar" aria-label="Formatação da mensagem">
-      <ToolbarGroup actions={INLINE_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
+      <ToolbarGroup actions={INLINE_ACTIONS} active={active} onFormat={onFormat} />
       <ParagraphMenu active={active} onFormat={onFormat} />
       <span className="chat-format-sep" aria-hidden="true" />
-      <ToolbarGroup actions={LIST_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
+      <ToolbarGroup actions={LIST_ACTIONS} active={active} onFormat={onFormat} />
       <span className="chat-format-sep" aria-hidden="true" />
-      <ToolbarGroup actions={BLOCK_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
+      <ToolbarGroup actions={BLOCK_ACTIONS} active={active} onFormat={onFormat} />
     </div>
   );
 }

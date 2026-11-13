@@ -141,6 +141,8 @@ export function ImportSessionModal({
             type="button"
             className="icon-btn"
             aria-label="Fechar importação"
+            data-tooltip="Fechar importação"
+            data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={15} />

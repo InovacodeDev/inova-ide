@@ -82,7 +82,8 @@ export function DictationControl({ dictation }: { dictation: Dictation }) {
         type="button"
         className={recording ? 'chat-mic chat-mic-recording' : 'chat-mic'}
         aria-label={label}
-        title={label}
+        data-tooltip={label}
+        data-shortcut="toggle-dictation"
         aria-pressed={recording}
         disabled={dictation.phase !== 'idle' && !recording}
         onClick={dictation.toggle}

@@ -101,6 +101,8 @@ export function SettingsModal(props: SettingsModalProps) {
             type="button"
             className="icon-btn"
             aria-label="Fechar configurações"
+            data-tooltip="Fechar configurações"
+            data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={15} />
