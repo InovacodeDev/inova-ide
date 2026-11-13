@@ -29,4 +29,19 @@ describe('turn-queue', () => {
     expect(removed).toBe(1);
     expect(queue.list('acc-1').map((item) => item.sessionId)).toEqual(['s2']);
   });
+
+  test('requeueFront preserves FIFO order and reassignSessionAccount moves pending turns', () => {
+    const queue = createTurnQueue();
+    const first = queue.enqueue({ sessionId: 's1', accountId: 'acc-1', prompt: 'Primeiro' });
+    const second = queue.enqueue({ sessionId: 's2', accountId: 'acc-1', prompt: 'Segundo' });
+
+    const popped = queue.dequeueNext('acc-1');
+    expect(popped?.turnId).toBe(first.turnId);
+    queue.requeueFront(popped!);
+    expect(queue.list('acc-1').map((item) => item.turnId)).toEqual([first.turnId, second.turnId]);
+
+    expect(queue.reassignSessionAccount({ sessionId: 's1', accountId: 'acc-2' })).toBe(true);
+    expect(queue.list('acc-2').map((item) => item.turnId)).toEqual([first.turnId]);
+    expect(queue.list('acc-1').map((item) => item.turnId)).toEqual([second.turnId]);
+  });
 });

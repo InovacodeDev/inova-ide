@@ -32,7 +32,7 @@ import { Footer, type UsageState } from './Footer';
 import { ForkModal } from './ForkModal';
 import { HandoffModal } from './HandoffModal';
 import { Header } from './Header';
-import { AlertIcon } from './icons';
+import { AlertIcon, CloseIcon, GitBranchIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
@@ -101,6 +101,8 @@ export function App() {
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
+  const [applyingWorktree, setApplyingWorktree] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [compareMetrics, setCompareMetrics] = useState<
     Record<string, { costUsd: number | null; durationMs: number | null }>
   >({});
@@ -473,11 +475,29 @@ export function App() {
     await openChatTab(created);
   };
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
+    if (!worktreeModal) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setWorktreeModal(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [worktreeModal]);
+
   const confirmHandoffSession = async (input: {
     session: Session;
     targetAccountId: string;
     createWorktree: boolean;
   }) => {
+    const pendingPrompt = busyConflicts[input.session.id]?.prompt;
     const result = await call(() =>
       window.inova.handoffSession({
         sessionId: input.session.id,
@@ -490,6 +510,9 @@ export function App() {
     const created = result.value.session;
     await reloadSessions(created.projectId);
     await openChatTab(created);
+    if (pendingPrompt) {
+      await sendMessage(created.id, pendingPrompt);
+    }
   };
 
   const startAccountLogin = async (account: AccountView) => {
@@ -571,9 +594,17 @@ export function App() {
   };
 
   const applyWorktree = async (session: Session) => {
-    const result = await call(() => window.inova.applyWorktree({ sessionId: session.id }));
-    if (!result) return;
-    setWorktreeModal(null);
+    setApplyingWorktree(true);
+    try {
+      const result = await call(() => window.inova.applyWorktree({ sessionId: session.id }));
+      if (!result) return;
+      setWorktreeModal(null);
+      setNotice(
+        `Alterações aplicadas no projeto principal (${result.value.appliedFiles.length} arquivo(s)).`,
+      );
+    } finally {
+      setApplyingWorktree(false);
+    }
   };
 
   const confirmRestoreCheckpoint = async (target: {
@@ -589,6 +620,7 @@ export function App() {
       }),
     );
     if (!result) return;
+    setNotice('Checkpoint restaurado no repositório.');
   };
 
   const updateProjectVerification = async (
@@ -751,6 +783,7 @@ export function App() {
       projectId: string;
       accountIds?: string[];
       rulesSource?: RulesFile | null;
+      sourceAccountId?: string | null;
     }): Promise<ProfileSyncPreview | null> => {
       const result = await call(() => window.inova.previewProfileSync(input));
       return result?.value ?? null;
@@ -763,6 +796,7 @@ export function App() {
       projectId: string;
       accountIds?: string[];
       rulesSource?: RulesFile | null;
+      sourceAccountId?: string | null;
       approvedIds: string[];
       rulesStrategy: RulesStrategy;
     }): Promise<ProfileSyncApplyResult | null> => {
@@ -770,6 +804,13 @@ export function App() {
       return result?.value ?? null;
     },
     [call],
+  );
+
+  const ensureSessionLoaded = useCallback(
+    (sessionId: string) => {
+      if (!latest.current.chats[sessionId]) void loadChat(sessionId);
+    },
+    [loadChat],
   );
 
   const accountDisplayOf = (
@@ -830,6 +871,11 @@ export function App() {
             <AlertIcon size={16} />
           </span>
           <span>{warning}</span>
+        </div>
+      )}
+      {notice && !warning && (
+        <div className="warning" role="status" onClick={() => setNotice(null)}>
+          <span>{notice}</span>
         </div>
       )}
       <Header runningCount={Object.values(chats).filter((chat) => chat.running).length} />
@@ -906,6 +952,7 @@ export function App() {
               onGetDiff={getComparisonDiff}
               onResolveComparison={resolveComparison}
               onOpenSession={(session) => void openChatTab(session)}
+              onEnsureSessionLoaded={ensureSessionLoaded}
             />
           )}
           {view === 'accounts' && (
@@ -955,7 +1002,8 @@ export function App() {
                 path={activeProject?.path ?? null}
                 worktreeBranch={activeSession?.worktree?.branch ?? null}
                 worktreeBusy={
-                  activeTab.kind === 'chat' ? Boolean(chats[activeTab.sessionId]?.running) : false
+                  applyingWorktree ||
+                  (activeTab.kind === 'chat' ? Boolean(chats[activeTab.sessionId]?.running) : false)
                 }
                 status={
                   activeTab.kind === 'chat' ? sessionStatus(chats[activeTab.sessionId]) : null
@@ -1173,21 +1221,38 @@ export function App() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="worktree-diff-title"
-          onClick={() => setWorktreeModal(null)}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setWorktreeModal(null);
+          }}
         >
-          <div className="modal modal-wide" onClick={(event) => event.stopPropagation()}>
-            <h2 id="worktree-diff-title" className="modal-title">
-              Alterações do worktree ({worktreeModal.status.branch})
-            </h2>
-            {worktreeModal.status.changedFiles.length === 0 ? (
-              <p className="modal-body">Nenhuma alteração pendente em relação à base.</p>
-            ) : (
-              <>
-                <p className="modal-body mono">{worktreeModal.status.diffStat}</p>
-                <pre className="worktree-diff-pre">{worktreeModal.status.diff}</pre>
-              </>
-            )}
-            <div className="modal-actions">
+          <div className="modal-card sync-modal-card">
+            <div className="modal-header">
+              <GitBranchIcon size={17} />
+              <div className="modal-title-group">
+                <h2 id="worktree-diff-title" className="modal-title">
+                  Alterações do worktree ({worktreeModal.status.branch})
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Fechar diff do worktree"
+                onClick={() => setWorktreeModal(null)}
+              >
+                <CloseIcon size={15} />
+              </button>
+            </div>
+            <div className="modal-body">
+              {worktreeModal.status.changedFiles.length === 0 ? (
+                <p className="modal-description">Nenhuma alteração pendente em relação à base.</p>
+              ) : (
+                <>
+                  <p className="modal-description mono">{worktreeModal.status.diffStat}</p>
+                  <pre className="worktree-diff-pre">{worktreeModal.status.diff}</pre>
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
               <button type="button" className="btn" onClick={() => setWorktreeModal(null)}>
                 Fechar
               </button>
@@ -1195,10 +1260,10 @@ export function App() {
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={Boolean(chats[worktreeModal.session.id]?.running)}
+                  disabled={applyingWorktree || Boolean(chats[worktreeModal.session.id]?.running)}
                   onClick={() => void applyWorktree(worktreeModal.session)}
                 >
-                  Aplicar no projeto principal
+                  {applyingWorktree ? 'Aplicando…' : 'Aplicar no projeto principal'}
                 </button>
               ) : null}
             </div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { EFFORT_LABEL, PROVIDER_MODELS } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session } from '@inova/core/types';
@@ -51,6 +51,7 @@ interface CompareViewProps {
     cleanupWorktrees: boolean;
   }) => Promise<boolean>;
   onOpenSession: (session: Session) => void;
+  onEnsureSessionLoaded?: (sessionId: string) => void;
 }
 
 interface ComparisonGroupEntry {
@@ -111,8 +112,12 @@ function SideConfigCard({
     ...catalog.efforts.map((level) => ({ value: level, label: EFFORT_LABEL[level] })),
   ];
 
+  const defaultOption = modeCatalog.options.find((opt) => opt.id === modeCatalog.defaultMode);
   const modeOptions: PlatformSelectOption[] = [
-    { value: '', label: `Padrão (${modeCatalog.defaultMode})` },
+    {
+      value: '',
+      label: defaultOption ? `Padrão (${defaultOption.label})` : 'Padrão',
+    },
     ...modeCatalog.options.map((opt) => ({
       value: opt.id,
       label: opt.label,
@@ -246,7 +251,9 @@ function ComparisonColumn({
                   ? 'aprovada'
                   : lastVerification.status === 'failed'
                     ? 'falhou'
-                    : 'executando'
+                    : lastVerification.status === 'skipped'
+                      ? 'cancelada'
+                      : 'executando'
               }`
             : 'Sem verificação'}
         </span>
@@ -271,6 +278,7 @@ export function CompareView(props: CompareViewProps) {
     onGetDiff,
     onResolveComparison,
     onOpenSession,
+    onEnsureSessionLoaded,
   } = props;
 
   const groups = useMemo<ComparisonGroupEntry[]>(() => {
@@ -294,6 +302,12 @@ export function CompareView(props: CompareViewProps) {
   }, [sessions]);
 
   const activeGroup = groups.find((item) => item.groupId === selectedGroupId) ?? null;
+
+  useEffect(() => {
+    if (!activeGroup || !onEnsureSessionLoaded) return;
+    onEnsureSessionLoaded(activeGroup.left.id);
+    onEnsureSessionLoaded(activeGroup.right.id);
+  }, [activeGroup, onEnsureSessionLoaded]);
 
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
   const [prompt, setPrompt] = useState('');
@@ -504,13 +518,15 @@ export function CompareView(props: CompareViewProps) {
                 className={tab === 'diff' ? 'btn btn-sm btn-primary' : 'btn btn-sm'}
                 onClick={() => {
                   setTab('diff');
-                  if (!diffView) void refreshDiff(activeGroup.groupId);
+                  if (!diffView && activeGroup.left.worktree && activeGroup.right.worktree) {
+                    void refreshDiff(activeGroup.groupId);
+                  }
                 }}
               >
                 Diff lado a lado
               </button>
             </div>
-            {tab === 'diff' ? (
+            {tab === 'diff' && activeGroup.left.worktree && activeGroup.right.worktree ? (
               <button
                 type="button"
                 className="btn btn-sm"
@@ -536,7 +552,7 @@ export function CompareView(props: CompareViewProps) {
               <ComparisonColumn
                 label="Lado B"
                 session={activeGroup.right}
-                account={accounts.find((item) => item.id === activeGroup.right.id)}
+                account={accounts.find((item) => item.id === activeGroup.right.accountIdOverride)}
                 chat={chats[activeGroup.right.id]}
                 metrics={compareMetrics[activeGroup.right.id]}
                 onOpenSession={() => onOpenSession(activeGroup.right)}
@@ -546,6 +562,10 @@ export function CompareView(props: CompareViewProps) {
             <div className="compare-diff-list">
               {loadingDiff && !diffView ? (
                 <p className="hint">Calculando diffs nos worktrees…</p>
+              ) : !diffView && (!activeGroup.left.worktree || !activeGroup.right.worktree) ? (
+                <p className="hint">
+                  Os worktrees desta comparação já foram limpos após a aplicação do vencedor.
+                </p>
               ) : !diffView || diffView.files.length === 0 ? (
                 <p className="hint">Nenhuma alteração registrada ainda em nenhum dos lados.</p>
               ) : (

@@ -22,11 +22,13 @@ interface ProfileSyncModalProps {
     projectId: string;
     accountIds?: string[];
     rulesSource?: RulesFile | null;
+    sourceAccountId?: string | null;
   }) => Promise<ProfileSyncPreview | null>;
   onApply: (input: {
     projectId: string;
     accountIds?: string[];
     rulesSource?: RulesFile | null;
+    sourceAccountId?: string | null;
     approvedIds: string[];
     rulesStrategy: RulesStrategy;
   }) => Promise<ProfileSyncApplyResult | null>;
@@ -62,9 +64,11 @@ export function ProfileSyncModal({
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>(() =>
     accounts.map((account) => account.id),
   );
-  const [rulesSource, setRulesSource] = useState<RulesFile>('AGENTS.md');
+  const [rulesSource, setRulesSource] = useState<RulesFile | null>(null);
+  const [sourceAccountId, setSourceAccountId] = useState<string | null>(null);
   const [rulesStrategy, setRulesStrategy] = useState<RulesStrategy>('copy');
   const [preview, setPreview] = useState<ProfileSyncPreview | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [approvedIds, setApprovedIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -83,16 +87,26 @@ export function ProfileSyncModal({
   useEffect(() => {
     let alive = true;
     queueMicrotask(() => {
-      if (alive) setLoading(true);
+      if (alive) {
+        setLoading(true);
+        setPreviewFailed(false);
+      }
     });
     void onPreview({
       projectId: project.id,
       accountIds: selectedAccounts,
-      rulesSource,
+      ...(rulesSource ? { rulesSource } : {}),
+      ...(sourceAccountId ? { sourceAccountId } : {}),
     })
       .then((next) => {
-        if (!alive || !next) return;
+        if (!alive) return;
+        if (!next) {
+          setPreview(null);
+          setPreviewFailed(true);
+          return;
+        }
         setPreview(next);
+        setPreviewFailed(false);
         setApprovedIds(
           next.items.filter((item) => item.status === 'create').map((item) => item.id),
         );
@@ -103,7 +117,7 @@ export function ProfileSyncModal({
     return () => {
       alive = false;
     };
-  }, [project.id, selectedAccounts, rulesSource, onPreview]);
+  }, [project.id, selectedAccounts, rulesSource, sourceAccountId, onPreview]);
 
   const toggleAccount = (id: string) => {
     setResult(null);
@@ -129,10 +143,12 @@ export function ProfileSyncModal({
     if (!preview || applyableCount === 0) return;
     setApplying(true);
     try {
+      const effectiveRules = preview.rulesSource ?? rulesSource;
       const applied = await onApply({
         projectId: project.id,
         accountIds: selectedAccounts,
-        rulesSource: preview.rulesSource ?? rulesSource,
+        rulesSource: effectiveRules,
+        ...(sourceAccountId ? { sourceAccountId } : {}),
         approvedIds,
         rulesStrategy,
       });
@@ -141,7 +157,8 @@ export function ProfileSyncModal({
         const refreshed = await onPreview({
           projectId: project.id,
           accountIds: selectedAccounts,
-          rulesSource,
+          ...(effectiveRules ? { rulesSource: effectiveRules } : {}),
+          ...(sourceAccountId ? { sourceAccountId } : {}),
         });
         if (refreshed) setPreview(refreshed);
       }
@@ -149,6 +166,16 @@ export function ProfileSyncModal({
       setApplying(false);
     }
   };
+
+  const activeRulesValue = rulesSource ?? preview?.rulesSource ?? 'AGENTS.md';
+  const importOptions: PlatformSelectOption[] = [
+    { value: '', label: 'Nenhum (.mcp.json do projeto)' },
+    ...accounts.map((account) => ({
+      value: account.id,
+      label: accountDisplayName(account),
+      leading: <ProviderBadge provider={account.provider} size={16} />,
+    })),
+  ];
 
   return (
     <div
@@ -160,7 +187,7 @@ export function ProfileSyncModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card sync-modal-card">
+      <div className="modal-card modal-card-overflow sync-modal-card">
         <div className="modal-header">
           <SlidersIcon size={17} />
           <div className="modal-title-group">
@@ -184,7 +211,7 @@ export function ProfileSyncModal({
               <span className="modal-field-label">Arquivo-fonte de regras</span>
               <PlatformSelect
                 ariaLabel="Arquivo-fonte de regras"
-                value={rulesSource}
+                value={activeRulesValue}
                 options={RULES_OPTIONS}
                 onChange={(value) => setRulesSource(value as RulesFile)}
               />
@@ -198,6 +225,17 @@ export function ProfileSyncModal({
                 onChange={(value) => setRulesStrategy(value as RulesStrategy)}
               />
             </div>
+            {preview && !preview.mcpSourceExists ? (
+              <div className="modal-field">
+                <span className="modal-field-label">Importar MCPs de conta</span>
+                <PlatformSelect
+                  ariaLabel="Importar MCPs de conta"
+                  value={sourceAccountId ?? ''}
+                  options={importOptions}
+                  onChange={(value) => setSourceAccountId(value === '' ? null : value)}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="modal-field">
@@ -219,6 +257,11 @@ export function ProfileSyncModal({
 
           {loading ? (
             <p className="hint">Analisando configurações e segredos mascarados…</p>
+          ) : previewFailed ? (
+            <p className="modal-description">
+              Não foi possível carregar a pré-visualização. Verifique se os arquivos JSON/TOML de
+              configuração são válidos.
+            </p>
           ) : preview ? (
             <>
               <p className="modal-description">

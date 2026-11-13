@@ -193,11 +193,13 @@ export interface InovaApi {
     projectId: string;
     accountIds?: string[];
     rulesSource?: RulesFile | null;
+    sourceAccountId?: string | null;
   }): Promise<Result<ProfileSyncPreview>>;
   applyProfileSync(input: {
     projectId: string;
     accountIds?: string[];
     rulesSource?: RulesFile | null;
+    sourceAccountId?: string | null;
     approvedIds: string[];
     rulesStrategy?: RulesStrategy;
   }): Promise<Result<ProfileSyncApplyResult>>;

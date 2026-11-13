@@ -153,6 +153,62 @@ export async function readCanonicalMcpConfig(input: {
   }
 }
 
+async function readAccountMcpConfig(input: {
+  account: ProfileSyncAccountInput;
+  projectPath: string;
+}): Promise<CanonicalMcpMap> {
+  const { account, projectPath } = input;
+  if (account.provider === 'claude') {
+    const raw = await readOptionalFile(join(account.homeDir, '.claude.json'));
+    if (!raw) return {};
+    return extractMcpServersMap(parseJsonRecord(raw, '.claude.json'));
+  }
+  if (account.provider === 'qwen') {
+    const raw = await readOptionalFile(join(account.homeDir, '.qwen', 'settings.json'));
+    if (!raw) return {};
+    return extractMcpServersMap(parseJsonRecord(raw, '.qwen/settings.json'));
+  }
+  if (account.provider === 'gemini') {
+    const antigravity = await readOptionalFile(
+      join(account.homeDir, '.gemini', 'antigravity', 'mcp_config.json'),
+    );
+    if (antigravity) return extractMcpServersMap(parseJsonRecord(antigravity, 'mcp_config.json'));
+    const settings = await readOptionalFile(join(account.homeDir, '.gemini', 'settings.json'));
+    return settings ? extractMcpServersMap(parseJsonRecord(settings, '.gemini/settings.json')) : {};
+  }
+  if (account.provider === 'opencode') {
+    const raw = await readOptionalFile(join(projectPath, 'opencode.json'));
+    if (!raw) return {};
+    const parsed = parseJsonRecord(raw, 'opencode.json');
+    const mcp = parsed['mcp'];
+    if (typeof mcp !== 'object' || mcp === null || Array.isArray(mcp)) return {};
+    const result: CanonicalMcpMap = {};
+    for (const [name, entry] of Object.entries(mcp as Record<string, unknown>)) {
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+      const item = entry as Record<string, unknown>;
+      if (item['type'] === 'remote' && typeof item['url'] === 'string') {
+        const headers = isStringRecord(item['headers']) ? item['headers'] : undefined;
+        result[name] = { type: 'http', url: item['url'], ...(headers ? { headers } : {}) };
+      } else if (
+        item['type'] === 'local' &&
+        Array.isArray(item['command']) &&
+        item['command'].length > 0 &&
+        item['command'].every((part) => typeof part === 'string')
+      ) {
+        const [command, ...args] = item['command'] as string[];
+        const env = isStringRecord(item['environment']) ? item['environment'] : undefined;
+        result[name] = {
+          command: command!,
+          ...(args.length > 0 ? { args } : {}),
+          ...(env ? { env } : {}),
+        };
+      }
+    }
+    return result;
+  }
+  return {};
+}
+
 function maskRecordValues(record: Record<string, string>): Record<string, string> {
   const masked: Record<string, string> = {};
   for (const key of Object.keys(record)) {
@@ -182,15 +238,45 @@ export function maskMcpConfig(servers: CanonicalMcpMap): CanonicalMcpMap {
   return result;
 }
 
+function maskSensitiveTomlSections(text: string): string {
+  const lines = text.split('\n');
+  let insideSensitive = false;
+  return lines
+    .map((line) => {
+      const trimmed = line.trim();
+      const headerMatch = /^\[(.+)\]$/.exec(trimmed);
+      if (headerMatch) {
+        const section = headerMatch[1]?.trim() ?? '';
+        insideSensitive =
+          section.endsWith('.env') ||
+          section.endsWith('.headers') ||
+          section.endsWith('.http_headers');
+        return line;
+      }
+      if (!insideSensitive) return line;
+      return line.replace(
+        /^(\s*(?:"(?:[^"\\]|\\.)+"|[A-Za-z0-9_.-]+)\s*=\s*)"(?:[^"\\]|\\.)*"/,
+        '$1"***"',
+      );
+    })
+    .join('\n');
+}
+
 export function maskSecretsInText(text: string): string {
-  return text
+  const step1 = text
     .replace(
       /("(?:env|environment|headers|http_headers)"\s*:\s*\{)([^}]*)(\})/g,
       (_match, prefix: string, body: string, suffix: string) =>
         `${prefix}${body.replace(/("(?:[^"\\]|\\.)*"\s*:\s*)"(?:[^"\\]|\\.)*"/g, '$1"***"')}${suffix}`,
     )
+    .replace(
+      /(^\s*(?:http_headers|headers|env)\s*=\s*\{)([^}]*)(\})/gm,
+      (_match, prefix: string, body: string, suffix: string) =>
+        `${prefix}${body.replace(/(=\s*)"(?:[^"\\]|\\.)*"/g, '$1"***"')}${suffix}`,
+    )
     .replace(/(Bearer\s+)[^\s"',}]+/gi, '$1***')
     .replace(/(^\s*[A-Z0-9_]+\s*=\s*)"(?:[^"\\]|\\.)*"/gm, '$1"***"');
+  return maskSensitiveTomlSections(step1);
 }
 
 function stripTomlMcpSections(toml: string): string {
@@ -263,17 +349,26 @@ export function formatCodexMcpToml(
   };
 }
 
+function parseJsonRecord(raw: string, label: string): Record<string, unknown> {
+  if (raw.trim() === '') return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`JSON inválido em ${label}: ${detail}`);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Objeto JSON esperado na raiz de ${label}.`);
+  }
+  return { ...(parsed as Record<string, unknown>) };
+}
+
 export function mergeOpencodeMcpJson(
   existingJson: string,
   servers: CanonicalMcpMap,
 ): { content: string; incompatible: { name: string; reason: string }[] } {
-  let rootObj: Record<string, unknown> = {};
-  if (existingJson.trim() !== '') {
-    const parsed: unknown = JSON.parse(existingJson);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      rootObj = { ...(parsed as Record<string, unknown>) };
-    }
-  }
+  const rootObj = parseJsonRecord(existingJson, 'opencode.json');
   const existingMcp =
     typeof rootObj['mcp'] === 'object' && rootObj['mcp'] !== null && !Array.isArray(rootObj['mcp'])
       ? { ...(rootObj['mcp'] as Record<string, unknown>) }
@@ -307,14 +402,12 @@ export function mergeOpencodeMcpJson(
   return { content: `${JSON.stringify(rootObj, null, 2)}\n`, incompatible };
 }
 
-export function mergeMcpServersJson(existingJson: string, servers: CanonicalMcpMap): string {
-  let rootObj: Record<string, unknown> = {};
-  if (existingJson.trim() !== '') {
-    const parsed: unknown = JSON.parse(existingJson);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      rootObj = { ...(parsed as Record<string, unknown>) };
-    }
-  }
+export function mergeMcpServersJson(
+  existingJson: string,
+  servers: CanonicalMcpMap,
+  label = 'config.json',
+): string {
+  const rootObj = parseJsonRecord(existingJson, label);
   const existing =
     typeof rootObj['mcpServers'] === 'object' &&
     rootObj['mcpServers'] !== null &&
@@ -361,6 +454,10 @@ export function buildAgyMcpAddArgs(
   };
 }
 
+export function buildAgyMcpRemoveArgs(name: string): string[] {
+  return ['mcp', 'remove', name];
+}
+
 export function buildClaudeMcpAddJsonArgs(name: string, server: McpServerConfig): string[] {
   return ['mcp', 'add-json', '--scope', 'user', name, JSON.stringify(server)];
 }
@@ -390,7 +487,7 @@ async function planAccountMcpTarget(input: {
   if (account.provider === 'claude') {
     const targetPath = join(account.homeDir, '.claude.json');
     const before = (await readOptionalFile(targetPath)) ?? '';
-    const after = mergeMcpServersJson(before, servers);
+    const after = mergeMcpServersJson(before, servers, '.claude.json');
     const status: ProfileSyncStatus =
       Object.keys(servers).length === 0
         ? 'unchanged'
@@ -516,7 +613,7 @@ async function planAccountMcpTarget(input: {
   if (account.provider === 'qwen') {
     const targetPath = join(account.homeDir, '.qwen', 'settings.json');
     const before = (await readOptionalFile(targetPath)) ?? '';
-    const after = mergeMcpServersJson(before, servers);
+    const after = mergeMcpServersJson(before, servers, '.qwen/settings.json');
     const status: ProfileSyncStatus =
       Object.keys(servers).length === 0
         ? 'unchanged'
@@ -563,8 +660,19 @@ async function planProfileTargets(input: {
   projectPath: string;
   accounts: readonly ProfileSyncAccountInput[];
   rulesSource?: RulesFile | null;
+  sourceAccountId?: string | null;
 }): Promise<{ preview: ProfileSyncPreview; targets: PlannedTarget[]; servers: CanonicalMcpMap }> {
   const mcp = await readCanonicalMcpConfig({ projectPath: input.projectPath });
+  let servers = mcp.servers;
+  if (!mcp.exists && input.sourceAccountId) {
+    const sourceAccount = input.accounts.find((account) => account.id === input.sourceAccountId);
+    if (sourceAccount) {
+      servers = await readAccountMcpConfig({
+        account: sourceAccount,
+        projectPath: input.projectPath,
+      });
+    }
+  }
   const availableRulesFiles = await detectAvailableRules(input.projectPath);
   const resolvedSource =
     input.rulesSource && availableRulesFiles.includes(input.rulesSource)
@@ -577,7 +685,7 @@ async function planProfileTargets(input: {
       await planAccountMcpTarget({
         account,
         projectPath: input.projectPath,
-        servers: mcp.servers,
+        servers,
       }),
     );
   }
@@ -616,13 +724,13 @@ async function planProfileTargets(input: {
   return {
     preview: {
       mcpSourceExists: mcp.exists,
-      mcpServerCount: Object.keys(mcp.servers).length,
+      mcpServerCount: Object.keys(servers).length,
       rulesSource: resolvedSource,
       availableRulesFiles,
       items: targets.map((entry) => entry.item),
     },
     targets,
-    servers: mcp.servers,
+    servers,
   };
 }
 
@@ -630,6 +738,7 @@ export async function previewProfileSync(input: {
   projectPath: string;
   accounts: readonly ProfileSyncAccountInput[];
   rulesSource?: RulesFile | null;
+  sourceAccountId?: string | null;
 }): Promise<ProfileSyncPreview> {
   const { preview } = await planProfileTargets(input);
   return preview;
@@ -665,6 +774,7 @@ export async function applyProfileSync(input: {
   projectPath: string;
   accounts: readonly ProfileSyncAccountInput[];
   rulesSource?: RulesFile | null;
+  sourceAccountId?: string | null;
   approvedIds: readonly string[];
   rulesStrategy?: RulesStrategy;
   runner?: CommandRunner;
@@ -679,6 +789,7 @@ export async function applyProfileSync(input: {
     projectPath: input.projectPath,
     accounts: input.accounts,
     ...(input.rulesSource !== undefined ? { rulesSource: input.rulesSource } : {}),
+    ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
   });
 
   const appliedIds: string[] = [];
@@ -709,6 +820,7 @@ export async function applyProfileSync(input: {
       for (const [name, server] of Object.entries(servers)) {
         const built = buildAgyMcpAddArgs(name, server);
         if ('incompatibleReason' in built) continue;
+        await input.runner.run({ command: 'agy', args: buildAgyMcpRemoveArgs(name), env });
         const result = await input.runner.run({ command: 'agy', args: built.args, env });
         if ('notFound' in result || result.exitCode !== 0) {
           okAll = false;

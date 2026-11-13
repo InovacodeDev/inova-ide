@@ -42,7 +42,7 @@ export type ChatEvent =
   | {
       kind: 'verification';
       turnId: string;
-      status: 'running' | 'passed' | 'failed';
+      status: 'running' | 'passed' | 'failed' | 'skipped';
       checks: VerificationCheckResult[];
     }
   | { kind: 'error'; message: string }

@@ -79,6 +79,7 @@ export function ModePicker({
         setOpen(false);
         return;
       }
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       const chosen = optionByShortcutKey(provider, event.key);
       if (chosen) {
         event.preventDefault();
@@ -116,9 +117,7 @@ export function ModePicker({
         }
         onClick={() => setOpen((current) => !current)}
       >
-        <span className="chat-picker-chevron">
-          <ModeOptionIcon mode={effectiveMode} risky={riskyBypass} />
-        </span>
+        <ModeOptionIcon mode={effectiveMode} risky={riskyBypass} />
         <span className="chat-picker-trigger-label">{activeOption.label}</span>
         <span className="chat-picker-chevron">
           <ChevronDownIcon size={12} />

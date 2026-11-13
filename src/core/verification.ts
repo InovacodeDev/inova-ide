@@ -18,15 +18,24 @@ function detectPackageManagerPrefix(projectPath: string): string {
   return 'npm run';
 }
 
+async function readPackageScripts(pkgPath: string): Promise<Record<string, unknown> | null> {
+  try {
+    const parsed = JSON.parse(await readFile(pkgPath, 'utf8')) as {
+      scripts?: Record<string, unknown>;
+    };
+    return parsed.scripts ?? {};
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
 export async function detectProjectChecks(projectPath: string): Promise<VerificationCheck[]> {
   const checks: VerificationCheck[] = [];
   const pkgPath = join(projectPath, 'package.json');
   if (existsSync(pkgPath)) {
-    try {
-      const parsed = JSON.parse(await readFile(pkgPath, 'utf8')) as {
-        scripts?: Record<string, unknown>;
-      };
-      const scripts = parsed.scripts ?? {};
+    const scripts = await readPackageScripts(pkgPath);
+    if (scripts) {
       const runner = detectPackageManagerPrefix(projectPath);
       const candidates: Array<{ key: string; label: string }> = [
         { key: 'typecheck', label: 'Typecheck' },
@@ -43,8 +52,6 @@ export async function detectProjectChecks(projectPath: string): Promise<Verifica
           });
         }
       }
-    } catch {
-      // ignore invalid package.json
     }
   }
 
@@ -102,13 +109,21 @@ function decodeTail(chunks: Buffer[]): string {
 
 function killGroup(pid: number | undefined, sig: NodeJS.Signals): void {
   if (pid === undefined) return;
+  if (process.platform === 'win32') {
+    try {
+      process.kill(pid, sig);
+    } catch {
+      return;
+    }
+    return;
+  }
   try {
     process.kill(-pid, sig);
   } catch {
     try {
       process.kill(pid, sig);
     } catch {
-      // process already exited
+      return;
     }
   }
 }
@@ -122,11 +137,17 @@ async function runSingleCheck(input: {
 }): Promise<VerificationCheckResult> {
   const startedAt = Date.now();
   return new Promise((resolve) => {
-    const shell = process.env['SHELL'] || '/bin/sh';
-    const child = spawn(shell, ['-c', input.check.command], {
+    const isWindows = process.platform === 'win32';
+    const shell = isWindows
+      ? process.env['ComSpec'] || 'cmd.exe'
+      : process.env['SHELL'] || '/bin/sh';
+    const shellArgs = isWindows
+      ? ['/d', '/s', '/c', input.check.command]
+      : ['-c', input.check.command];
+    const child = spawn(shell, shellArgs, {
       cwd: input.cwd,
       env: input.env,
-      detached: true,
+      detached: !isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks: Buffer[] = [];

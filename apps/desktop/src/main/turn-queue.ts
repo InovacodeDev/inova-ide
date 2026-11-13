@@ -3,6 +3,8 @@ import type { QueuedTurn } from '@inova/core/types';
 
 export interface TurnQueue {
   enqueue(input: { sessionId: string; accountId: string; prompt: string }): QueuedTurn;
+  requeueFront(entry: QueuedTurn): void;
+  reassignSessionAccount(input: { sessionId: string; accountId: string }): boolean;
   cancelByTurnId(turnId: string): boolean;
   cancelBySession(sessionId: string): number;
   dequeueNext(accountId: string): QueuedTurn | undefined;
@@ -24,6 +26,21 @@ export function createTurnQueue(now: () => Date = () => new Date()): TurnQueue {
       };
       entries.push(entry);
       return entry;
+    },
+
+    requeueFront(entry) {
+      entries.unshift(entry);
+    },
+
+    reassignSessionAccount(input) {
+      let changed = false;
+      for (const entry of entries) {
+        if (entry.sessionId === input.sessionId && entry.accountId !== input.accountId) {
+          entry.accountId = input.accountId;
+          changed = true;
+        }
+      }
+      return changed;
     },
 
     cancelByTurnId(turnId) {

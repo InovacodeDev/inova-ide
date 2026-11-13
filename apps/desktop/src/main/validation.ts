@@ -407,10 +407,11 @@ export function parsePreviewProfileSync(input: unknown):
       projectId: string;
       accountIds?: string[];
       rulesSource?: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md' | null;
+      sourceAccountId?: string | null;
     }
   | undefined {
   if (!isRecord(input) || !isSafeId(input['projectId'])) return undefined;
-  const { accountIds, rulesSource } = input;
+  const { accountIds, rulesSource, sourceAccountId } = input;
   if (
     accountIds !== undefined &&
     (!Array.isArray(accountIds) || accountIds.length > 50 || !accountIds.every(isSafeId))
@@ -420,10 +421,14 @@ export function parsePreviewProfileSync(input: unknown):
   if (rulesSource !== undefined && rulesSource !== null && !isRulesFile(rulesSource)) {
     return undefined;
   }
+  if (sourceAccountId !== undefined && sourceAccountId !== null && !isSafeId(sourceAccountId)) {
+    return undefined;
+  }
   return {
     projectId: input['projectId'],
     ...(accountIds === undefined ? {} : { accountIds }),
     ...(rulesSource === undefined ? {} : { rulesSource }),
+    ...(sourceAccountId === undefined ? {} : { sourceAccountId }),
   };
 }
 
@@ -432,6 +437,7 @@ export function parseApplyProfileSync(input: unknown):
       projectId: string;
       accountIds?: string[];
       rulesSource?: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md' | null;
+      sourceAccountId?: string | null;
       approvedIds: string[];
       rulesStrategy?: 'copy' | 'symlink';
     }

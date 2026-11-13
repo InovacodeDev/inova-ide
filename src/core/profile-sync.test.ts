@@ -156,6 +156,68 @@ describe('profile-sync helpers', () => {
     expect(masked).not.toContain('super-secret-value');
     expect(masked).not.toContain('real-jwt-token');
     expect(masked).toContain('API_TOKEN');
+
+    const toml = [
+      'cli_auth_credentials_store = "file"',
+      '[mcp_servers.remote]',
+      'url = "https://mcp.example.com/v1"',
+      'http_headers = { X-Api-Key = "header-secret-123", "Authorization" = "Custom abc" }',
+      '[mcp_servers.remote.env]',
+      'api_key = "lower-secret-456"',
+      '"custom-secret" = "quoted-secret-789"',
+    ].join('\n');
+    const maskedToml = maskSecretsInText(toml);
+    expect(maskedToml).not.toContain('header-secret-123');
+    expect(maskedToml).not.toContain('Custom abc');
+    expect(maskedToml).not.toContain('lower-secret-456');
+    expect(maskedToml).not.toContain('quoted-secret-789');
+    expect(maskedToml).toContain('url = "https://mcp.example.com/v1"');
+  });
+
+  test('throws descriptive error on malformed target JSON instead of raw SyntaxError', () => {
+    expect(() => mergeOpencodeMcpJson('{ broken json', {})).toThrow(
+      /opencode\.json|JSON inválido/i,
+    );
+  });
+
+  test('imports MCP servers from a configured account when .mcp.json does not exist', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const claudeHome = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(claudeHome, '.claude.json'),
+      JSON.stringify({
+        mcpServers: {
+          github: { command: 'npx', args: ['-y', 'mcp-github'], env: { GH_TOKEN: 'secret-gh' } },
+        },
+      }),
+    );
+    await writeFile(join(codexHome, 'config.toml'), 'model = "gpt-5"\n');
+    const accounts = [
+      { id: 'acc-claude', provider: 'claude' as const, label: 'claude-1', homeDir: claudeHome },
+      { id: 'acc-codex', provider: 'codex' as const, label: 'codex-1', homeDir: codexHome },
+    ];
+
+    const preview = await previewProfileSync({
+      projectPath: project,
+      accounts,
+      sourceAccountId: 'acc-claude',
+    });
+    expect(preview.mcpSourceExists).toBe(false);
+    expect(preview.mcpServerCount).toBe(1);
+    expect(preview.items.find((item) => item.id === 'mcp:acc-codex')?.status).toBe('update');
+
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      sourceAccountId: 'acc-claude',
+      approvedIds: preview.items.map((item) => item.id),
+    });
+    expect(await readFile(join(codexHome, 'config.toml'), 'utf8')).toContain(
+      '[mcp_servers.github]',
+    );
   });
 
   test('preview detects conflicts & masks secrets; apply saves timestamped backup, copies/symlinks rules, and runs agy CLI', async () => {

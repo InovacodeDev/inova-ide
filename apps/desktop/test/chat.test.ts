@@ -306,3 +306,22 @@ test('parseTranscriptLine accepts checkpoint and verification events', () => {
   };
   expect(parseTranscriptLine(JSON.stringify(verification))).toEqual(verification);
 });
+
+test('onAccountIdle fires after child close removes turn from accountsInUse', () => {
+  const { child, runner } = setup();
+  const idleAccounts: string[] = [];
+  let inUseDuringIdle = true;
+  runner.onAccountIdle?.((accountId) => {
+    idleAccounts.push(accountId);
+    inUseDuringIdle = runner.accountsInUse().has(accountId);
+  });
+
+  runner.send(input());
+  child.stdout.write(
+    `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false })}\n`,
+  );
+  expect(idleAccounts).toEqual([]);
+  child.emit('close', 0);
+  expect(idleAccounts).toEqual(['acc']);
+  expect(inUseDuringIdle).toBe(false);
+});

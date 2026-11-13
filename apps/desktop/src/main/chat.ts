@@ -33,6 +33,7 @@ export interface ChatRunner {
   cancel(sessionId: string): void;
   isRunning(sessionId: string): boolean;
   accountsInUse(): ReadonlySet<string>;
+  onAccountIdle?(listener: (accountId: string) => void): () => void;
   closeAll(): Promise<void>;
 }
 
@@ -172,7 +173,7 @@ function eventOf(record: Json): ChatEvent | undefined {
       const { turnId, status, checks } = record;
       if (
         typeof turnId !== 'string' ||
-        (status !== 'running' && status !== 'passed' && status !== 'failed')
+        (status !== 'running' && status !== 'passed' && status !== 'failed' && status !== 'skipped')
       ) {
         return undefined;
       }
@@ -213,6 +214,7 @@ export function createChatRunner(deps: {
   emit: (sessionId: string, event: ChatEvent) => void;
 }): ChatRunner {
   const turns = new Map<string, Turn>();
+  const idleListeners = new Set<(accountId: string) => void>();
 
   function signal(turn: Turn, name: NodeJS.Signals): void {
     if (turn.pid === undefined) return;
@@ -245,6 +247,12 @@ export function createChatRunner(deps: {
     if (!turn.doneSeen) {
       deps.emit(sessionId, { kind: 'error', message });
       deps.emit(sessionId, { kind: 'done', isError: true, costUsd: null, durationMs: null });
+    }
+    const stillBusy = [...turns.values()].some((active) => active.accountId === turn.accountId);
+    if (!stillBusy) {
+      for (const listener of idleListeners) {
+        listener(turn.accountId);
+      }
     }
     turn.settle();
   }
@@ -348,6 +356,10 @@ export function createChatRunner(deps: {
     cancel,
     isRunning: (sessionId) => turns.has(sessionId),
     accountsInUse: () => new Set([...turns.values()].map((turn) => turn.accountId)),
+    onAccountIdle: (listener) => {
+      idleListeners.add(listener);
+      return () => idleListeners.delete(listener);
+    },
     async closeAll() {
       const running = [...turns.entries()];
       for (const [sessionId] of running) cancel(sessionId);

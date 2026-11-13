@@ -23,7 +23,7 @@ export type ChatItem =
       type: 'verification';
       id: string;
       turnId: string;
-      status: 'running' | 'passed' | 'failed';
+      status: 'running' | 'passed' | 'failed' | 'skipped';
       checks: VerificationCheckResult[];
     }
   | { type: 'error'; id: string; message: string };

@@ -17,6 +17,7 @@ import {
 } from '@inova/core/git-compare';
 import { tryRunGit } from '@inova/core/git-exec';
 import {
+  WorktreeError,
   applyWorktreeToProject,
   createSessionWorktree,
   getWorktreeStatus,
@@ -217,6 +218,7 @@ export function createHandlers(deps: HandlerDeps) {
   const modelsCache = new Map<string, ProviderModels>();
   const fileListCache = new Map<string, { list: ProjectFileList; expiresAt: number }>();
   const fileListInflight = new Map<string, Promise<ProjectFileList>>();
+  const fileListGen = new Map<string, number>();
   const sessionProjects = new Map<string, string>();
   const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
   const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
@@ -345,7 +347,33 @@ export function createHandlers(deps: HandlerDeps) {
         deps.notify?.({ title: session.title, body: input.summary });
       }
     });
-    inboxChain = work.catch(() => undefined);
+    inboxChain = work.catch((error: unknown) => {
+      console.error(`inova: failed to update inbox for ${input.sessionId}`, error);
+    });
+  }
+
+  function removeSessionsRuntimeState(sessionIds: readonly string[]): void {
+    const idSet = new Set(sessionIds);
+    for (const id of sessionIds) {
+      verificationControllers.get(id)?.abort();
+      verificationControllers.delete(id);
+      sessionTurnIds.delete(id);
+      cancelledTurns.delete(id);
+      lastErrorBySession.delete(id);
+      sessionProjects.delete(id);
+      turnQueue.cancelBySession(id);
+    }
+    emitQueueSnapshot();
+    const deleteWork = inboxChain.then(() => {
+      let changed = false;
+      for (const id of idSet) {
+        if (inboxMap.delete(id)) changed = true;
+      }
+      if (changed) emitInboxSnapshot();
+    });
+    inboxChain = deleteWork.catch((error: unknown) => {
+      console.error('inova: failed to clear inbox items', error);
+    });
   }
 
   async function drainAccountQueue(accountId: string): Promise<void> {
@@ -377,7 +405,7 @@ export function createHandlers(deps: HandlerDeps) {
     await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
     await serialized(async () => {
       if (deps.chat.isRunning(session.id) || deps.chat.accountsInUse().has(account.id)) {
-        turnQueue.enqueue({ sessionId: session.id, accountId: account.id, prompt: next.prompt });
+        turnQueue.requeueFront(next);
         emitQueueSnapshot();
         return;
       }
@@ -391,6 +419,12 @@ export function createHandlers(deps: HandlerDeps) {
       });
     });
   }
+
+  deps.chat.onAccountIdle?.((accountId) => {
+    void drainAccountQueue(accountId).catch((error: unknown) => {
+      console.error(`inova: failed to drain turn queue for ${accountId}`, error);
+    });
+  });
 
   async function removeTranscripts(sessionIds: readonly string[]): Promise<void> {
     await Promise.all(
@@ -442,14 +476,25 @@ export function createHandlers(deps: HandlerDeps) {
   function invalidateProjectFiles(sessionId: string): void {
     const projectId = sessionProjects.get(sessionId);
     if (projectId !== undefined) {
-      fileListCache.delete(projectId);
-      const prefix = `${projectId}:`;
-      for (const key of fileListCache.keys()) {
-        if (key.startsWith(prefix)) fileListCache.delete(key);
-      }
+      invalidateFilesByProjectId(projectId);
       return;
     }
+    for (const key of new Set([...fileListCache.keys(), ...fileListInflight.keys()])) {
+      fileListGen.set(key, (fileListGen.get(key) ?? 0) + 1);
+    }
     fileListCache.clear();
+  }
+
+  function invalidateFilesByProjectId(projectId: string): void {
+    const prefix = `${projectId}:`;
+    fileListGen.set(projectId, (fileListGen.get(projectId) ?? 0) + 1);
+    fileListCache.delete(projectId);
+    for (const key of new Set([...fileListCache.keys(), ...fileListInflight.keys()])) {
+      if (key.startsWith(prefix)) {
+        fileListGen.set(key, (fileListGen.get(key) ?? 0) + 1);
+        fileListCache.delete(key);
+      }
+    }
   }
 
   async function runVerificationForSession(input: {
@@ -492,7 +537,15 @@ export function createHandlers(deps: HandlerDeps) {
         env: baseEnv,
         signal: controller.signal,
       });
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) {
+        handleChatEvent(session.id, {
+          kind: 'verification',
+          turnId,
+          status: 'skipped',
+          checks: result.checks,
+        });
+        return;
+      }
       handleChatEvent(session.id, {
         kind: 'verification',
         turnId,
@@ -526,9 +579,12 @@ export function createHandlers(deps: HandlerDeps) {
     if (cached && cached.expiresAt > now) return cached.list;
     const existing = fileListInflight.get(cacheKey);
     if (existing) return existing;
+    const genAtStart = fileListGen.get(cacheKey) ?? 0;
     const promise = listProjectFiles({ projectPath: targetPath })
       .then((list) => {
-        fileListCache.set(cacheKey, { list, expiresAt: Date.now() + FILE_CACHE_TTL_MS });
+        if ((fileListGen.get(cacheKey) ?? 0) === genAtStart) {
+          fileListCache.set(cacheKey, { list, expiresAt: Date.now() + FILE_CACHE_TTL_MS });
+        }
         return list;
       })
       .finally(() => {
@@ -609,7 +665,7 @@ export function createHandlers(deps: HandlerDeps) {
           console.error(`inova: failed to run verification of ${sessionId}`, error);
         });
       }
-      if (owner) {
+      if (owner && !deps.chat.accountsInUse().has(owner.accountId)) {
         void drainAccountQueue(owner.accountId).catch((error: unknown) => {
           console.error(`inova: failed to drain turn queue for ${owner.accountId}`, error);
         });
@@ -691,6 +747,7 @@ export function createHandlers(deps: HandlerDeps) {
     baseEnv: NodeJS.ProcessEnv;
   }): Promise<Result<null>> {
     const { sessionId, prompt, account, project } = input;
+    verificationControllers.get(sessionId)?.abort();
     const store = await loadStore(deps.root);
     const session = requireSession(store, sessionId);
     if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
@@ -787,6 +844,7 @@ export function createHandlers(deps: HandlerDeps) {
           );
           const orphaned = sessionIdsOfProjects(store, projectIds);
           await removeAccount({ root: deps.root, label, force });
+          removeSessionsRuntimeState(orphaned);
           await removeTranscripts(orphaned);
           return ok(null);
         }),
@@ -827,6 +885,7 @@ export function createHandlers(deps: HandlerDeps) {
             return fail('Pare os turnos deste projeto antes de desvinculá-lo.');
           }
           await unbindProject({ root: deps.root, path });
+          removeSessionsRuntimeState(orphaned);
           await removeTranscripts(orphaned);
           return ok(null);
         }),
@@ -843,6 +902,17 @@ export function createHandlers(deps: HandlerDeps) {
           const project = store.projects.find((item) => item.id === projectId);
           const shouldIsolate =
             isolatedWorktree ?? (parentId === null && project?.autoWorktree === true);
+          let parentBaseCommit: string | undefined;
+          if (parentId !== null && shouldIsolate) {
+            const parent = sessionsOf(store).find((item) => item.id === parentId);
+            if (parent?.worktree) {
+              const head = await tryRunGit({
+                cwd: parent.worktree.path,
+                args: ['rev-parse', '--verify', 'HEAD'],
+              });
+              if (head.ok) parentBaseCommit = head.stdout.trim();
+            }
+          }
           const created = await createSession({ root: deps.root, projectId, parentId });
           if (!shouldIsolate || !project) return ok(created);
           try {
@@ -851,6 +921,7 @@ export function createHandlers(deps: HandlerDeps) {
               projectId: project.id,
               sessionId: created.id,
               projectPath: project.path,
+              ...(parentBaseCommit ? { baseCommit: parentBaseCommit } : {}),
             });
             return ok(
               await updateSession({
@@ -942,6 +1013,20 @@ export function createHandlers(deps: HandlerDeps) {
             worktreesToRemove.set(item.worktree.path, item.worktree);
           }
           if (project) {
+            if (!force) {
+              for (const worktree of worktreesToRemove.values()) {
+                const status = await getWorktreeStatus({
+                  worktreePath: worktree.path,
+                  baseCommit: worktree.baseCommit,
+                }).catch(() => null);
+                if (status?.dirty) {
+                  throw new WorktreeError(
+                    'dirty-worktree',
+                    'O worktree possui alterações não aplicadas. Confirme o descarte para removê-lo.',
+                  );
+                }
+              }
+            }
             for (const worktree of worktreesToRemove.values()) {
               await removeSessionWorktree({ projectPath: project.path, worktree, force });
             }
@@ -949,16 +1034,7 @@ export function createHandlers(deps: HandlerDeps) {
               await removeSessionCheckpoints({ repoPath: project.path, sessionId: id });
             }
           }
-          for (const id of affected) {
-            verificationControllers.get(id)?.abort();
-            verificationControllers.delete(id);
-            sessionTurnIds.delete(id);
-            cancelledTurns.delete(id);
-            turnQueue.cancelBySession(id);
-            inboxMap.delete(id);
-          }
-          emitInboxSnapshot();
-          emitQueueSnapshot();
+          removeSessionsRuntimeState([...affected]);
           const removed = await deleteSession({ root: deps.root, sessionId });
           await removeTranscripts(removed);
           return ok(null);
@@ -1041,6 +1117,7 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     runVerification: (input: unknown): Promise<Result<null>> =>
       validated(input, parseSessionRef, async ({ sessionId }) => {
+        if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
         const project = store.projects.find((item) => item.id === session.projectId);
@@ -1114,6 +1191,11 @@ export function createHandlers(deps: HandlerDeps) {
         if (!project || !account) return fail('Projeto não encontrado.');
         const queued = turnQueue.enqueue({ sessionId, accountId: account.id, prompt });
         emitQueueSnapshot();
+        if (!deps.chat.accountsInUse().has(account.id) && !isAccountExhausted(account.id)) {
+          void drainAccountQueue(account.id).catch((error: unknown) => {
+            console.error(`inova: failed to drain turn queue for ${account.id}`, error);
+          });
+        }
         return ok(queued);
       }),
     cancelQueuedTurn: (input: unknown): Promise<Result<null>> =>
@@ -1163,6 +1245,12 @@ export function createHandlers(deps: HandlerDeps) {
               ...(handoffContext === undefined ? {} : { handoffContext }),
             },
           });
+          if (turnQueue.reassignSessionAccount({ sessionId, accountId })) {
+            emitQueueSnapshot();
+            void drainAccountQueue(accountId).catch((error: unknown) => {
+              console.error(`inova: failed to drain turn queue for ${accountId}`, error);
+            });
+          }
           return ok({ session: updated, hadHistory });
         }),
       ),
@@ -1276,24 +1364,49 @@ export function createHandlers(deps: HandlerDeps) {
             });
             let resultSession = created;
             if (copyWorktreeFiles) {
+              let createdWorktree: Session['worktree'] = null;
               try {
-                const worktree = await createSessionWorktree({
+                const sourceCwd = effectiveCwd(session, project);
+                const latestSnapshot = sliced.isLatestTurn
+                  ? await createCheckpoint({
+                      repoPath: sourceCwd,
+                      sessionId: created.id,
+                      turnId: 'fork-latest',
+                    })
+                  : null;
+                createdWorktree = await createSessionWorktree({
                   root: deps.root,
                   projectId: project.id,
                   sessionId: created.id,
                   projectPath: project.path,
                 });
                 const checkpointToApply =
-                  sliced.postTurnCheckpointRef ?? sliced.preTurnCheckpointRef;
+                  latestSnapshot?.ref ??
+                  sliced.postTurnCheckpointRef ??
+                  sliced.preTurnCheckpointRef;
                 if (checkpointToApply) {
-                  await restoreCheckpoint({ repoPath: worktree.path, ref: checkpointToApply });
+                  await restoreCheckpoint({
+                    repoPath: createdWorktree.path,
+                    ref: checkpointToApply,
+                  });
                 }
                 resultSession = await updateSession({
                   root: deps.root,
                   sessionId: created.id,
-                  patch: { worktree },
+                  patch: { worktree: createdWorktree },
                 });
               } catch (error: unknown) {
+                if (createdWorktree) {
+                  await removeSessionWorktree({
+                    projectPath: project.path,
+                    worktree: createdWorktree,
+                    force: true,
+                  }).catch(() => undefined);
+                }
+                await removeSessionCheckpoints({
+                  repoPath: project.path,
+                  sessionId: created.id,
+                }).catch(() => undefined);
                 await deleteSession({ root: deps.root, sessionId: created.id });
                 throw error;
               }
@@ -1425,6 +1538,14 @@ export function createHandlers(deps: HandlerDeps) {
           const baseEnv = await deps.baseEnv();
           const leftAdapter = providers[leftAccount.provider];
           const rightAdapter = providers[rightAccount.provider];
+          if (parsed.leftEffort && !isEffortSupported(leftAccount.provider, parsed.leftEffort)) {
+            return fail(`Esforço não suportado para ${leftAccount.provider}: ${parsed.leftEffort}`);
+          }
+          if (parsed.rightEffort && !isEffortSupported(rightAccount.provider, parsed.rightEffort)) {
+            return fail(
+              `Esforço não suportado para ${rightAccount.provider}: ${parsed.rightEffort}`,
+            );
+          }
           const [leftFile, rightFile] = await Promise.all([
             findBinary(leftAdapter.binary, baseEnv['PATH'] ?? ''),
             findBinary(rightAdapter.binary, baseEnv['PATH'] ?? ''),
@@ -1439,6 +1560,10 @@ export function createHandlers(deps: HandlerDeps) {
               `${rightAdapter.binary} não encontrado. Instale: ${rightAdapter.installHint}`,
             );
           }
+          await Promise.all([
+            leftAdapter.prepareLaunch(leftAccount.homeDir, baseEnv['HOME']),
+            rightAdapter.prepareLaunch(rightAccount.homeDir, baseEnv['HOME']),
+          ]);
 
           const groupId = randomUUID();
           const pair = await createComparisonWorktrees({
@@ -1522,8 +1647,31 @@ export function createHandlers(deps: HandlerDeps) {
               baseEnv,
             }),
           ]);
-          if (!leftRun.ok) return leftRun;
-          if (!rightRun.ok) return rightRun;
+          if (!leftRun.ok || !rightRun.ok) {
+            deps.chat.cancel(leftSession.id);
+            deps.chat.cancel(rightSession.id);
+            removeSessionsRuntimeState([leftSession.id, rightSession.id]);
+            await Promise.all([
+              deleteSession({ root: deps.root, sessionId: leftSession.id }).catch(() => undefined),
+              deleteSession({ root: deps.root, sessionId: rightSession.id }).catch(() => undefined),
+              removeTranscripts([leftSession.id, rightSession.id]).catch(() => undefined),
+              removeSessionCheckpoints({ repoPath: project.path, sessionId: leftSession.id }).catch(
+                () => undefined,
+              ),
+              removeSessionCheckpoints({
+                repoPath: project.path,
+                sessionId: rightSession.id,
+              }).catch(() => undefined),
+            ]);
+            await cleanupPairOnError();
+            return fail(
+              !leftRun.ok
+                ? leftRun.message
+                : !rightRun.ok
+                  ? rightRun.message
+                  : 'Falha ao iniciar comparação.',
+            );
+          }
 
           return ok({ groupId, left: leftSession, right: rightSession });
         }),
@@ -1590,30 +1738,45 @@ export function createHandlers(deps: HandlerDeps) {
               patch: { worktree: null },
             });
           }
+          invalidateFilesByProjectId(project.id);
           return ok({ appliedFiles: applied.appliedFiles, winnerSessionId: winnerSession.id });
         }),
       ),
     previewProfileSync: (input: unknown) =>
-      validated(input, parsePreviewProfileSync, async ({ projectId, accountIds, rulesSource }) => {
-        const store = await loadStore(deps.root);
-        const project = store.projects.find((item) => item.id === projectId);
-        if (!project) return fail('Projeto não encontrado.');
-        const selected = accountIds
-          ? store.accounts.filter((account) => accountIds.includes(account.id))
-          : store.accounts;
-        return ok(
-          await previewProfileSync({
+      validated(
+        input,
+        parsePreviewProfileSync,
+        async ({ projectId, accountIds, rulesSource, sourceAccountId }) => {
+          const store = await loadStore(deps.root);
+          const project = store.projects.find((item) => item.id === projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const selected = accountIds
+            ? store.accounts.filter((account) => accountIds.includes(account.id))
+            : store.accounts;
+          const previewAccounts =
+            sourceAccountId && !selected.some((account) => account.id === sourceAccountId)
+              ? [...selected, ...store.accounts.filter((account) => account.id === sourceAccountId)]
+              : selected;
+          const fullPreview = await previewProfileSync({
             projectPath: project.path,
-            accounts: selected,
+            accounts: previewAccounts,
             ...(rulesSource === undefined ? {} : { rulesSource }),
-          }),
-        );
-      }),
+            ...(sourceAccountId === undefined ? {} : { sourceAccountId }),
+          });
+          if (!accountIds) return ok(fullPreview);
+          return ok({
+            ...fullPreview,
+            items: fullPreview.items.filter(
+              (item) => item.scope === 'rules' || accountIds.includes(item.accountId ?? ''),
+            ),
+          });
+        },
+      ),
     applyProfileSync: (input: unknown) =>
       validated(
         input,
         parseApplyProfileSync,
-        ({ projectId, accountIds, rulesSource, approvedIds, rulesStrategy }) =>
+        ({ projectId, accountIds, rulesSource, sourceAccountId, approvedIds, rulesStrategy }) =>
           serialized(async () => {
             const store = await loadStore(deps.root);
             const project = store.projects.find((item) => item.id === projectId);
@@ -1621,16 +1784,24 @@ export function createHandlers(deps: HandlerDeps) {
             const selected = accountIds
               ? store.accounts.filter((account) => accountIds.includes(account.id))
               : store.accounts;
+            const sourceExtra =
+              sourceAccountId && !selected.some((account) => account.id === sourceAccountId)
+                ? store.accounts.filter((account) => account.id === sourceAccountId)
+                : [];
             const baseEnv = await deps.baseEnv();
             return ok(
               await applyProfileSync({
                 root: deps.root,
                 projectPath: project.path,
-                accounts: selected,
-                approvedIds,
+                accounts: [...selected, ...sourceExtra],
+                approvedIds:
+                  sourceExtra.length > 0
+                    ? approvedIds.filter((id) => !sourceExtra.some((s) => `mcp:${s.id}` === id))
+                    : approvedIds,
                 runner: deps.runner,
                 baseEnv,
                 ...(rulesSource === undefined ? {} : { rulesSource }),
+                ...(sourceAccountId === undefined ? {} : { sourceAccountId }),
                 ...(rulesStrategy === undefined ? {} : { rulesStrategy }),
               }),
             );

@@ -1266,3 +1266,23 @@ test('previewProfileSync and applyProfileSync synchronize .mcp.json and project 
     '[mcp_servers.linear]',
   );
 });
+
+test('startComparison rejects unsupported effort without leaving orphan sessions or worktrees', async () => {
+  const { root, handlers } = await setup();
+  const repoDir = await tmp();
+  const claudeAcc = await addAccount({ root, provider: 'claude', label: 'cmp-c' });
+  const qwenAcc = await addAccount({ root, provider: 'qwen', label: 'cmp-q' });
+  const project = unwrap(
+    await handlers.bindProject({ path: repoDir, accountLabel: claudeAcc.label }),
+  );
+
+  const res = await handlers.startComparison({
+    projectId: project.id,
+    prompt: 'Implementar algo',
+    leftAccountId: claudeAcc.id,
+    rightAccountId: qwenAcc.id,
+    rightEffort: 'high',
+  });
+  expect(res.ok).toBe(false);
+  expect(unwrap(await handlers.listSessions({ projectId: project.id }))).toHaveLength(0);
+});

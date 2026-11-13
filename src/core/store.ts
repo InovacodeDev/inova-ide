@@ -192,3 +192,19 @@ export async function saveStore(root: string, store: Store): Promise<void> {
     throw error;
   }
 }
+
+const storeLocks = new Map<string, Promise<unknown>>();
+
+export async function withStoreLock<T>(root: string, task: () => Promise<T>): Promise<T> {
+  const key = resolve(root);
+  const previous = storeLocks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  storeLocks.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (storeLocks.get(key) === next) {
+      storeLocks.delete(key);
+    }
+  }
+}

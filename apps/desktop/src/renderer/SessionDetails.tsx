@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Session, VerificationCheck } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
+import { CloseIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { relativeTime } from './relative-time';
@@ -185,7 +186,7 @@ export function SessionDetails({
                     aria-label={`Remover ${check.label}`}
                     onClick={() => removeCheck(check.id)}
                   >
-                    ×
+                    <CloseIcon size={12} />
                   </button>
                 </li>
               ))}

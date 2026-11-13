@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { buildFilteredSnapshotTree, gitRunWithStdin, runGit, tryRunGit } from './git-exec.js';
 
@@ -98,14 +100,27 @@ export async function restoreCheckpoint(input: {
 }): Promise<void> {
   await runGit({ cwd: input.repoPath, args: ['rev-parse', '--verify', input.ref] });
 
-  const [{ stdout: treeBuf }, { stdout: untrackedBuf }] = await Promise.all([
+  const [
+    { stdout: treeBuf },
+    { stdout: trackedBuf },
+    { stdout: untrackedBuf },
+    { stdout: gitDirRaw },
+  ] = await Promise.all([
     execFileAsync('git', ['ls-tree', '-r', '-z', '--name-only', input.ref], {
+      cwd: input.repoPath,
+      encoding: 'buffer',
+    }),
+    execFileAsync('git', ['ls-files', '-z'], {
       cwd: input.repoPath,
       encoding: 'buffer',
     }),
     execFileAsync('git', ['ls-files', '-z', '--others', '--exclude-standard'], {
       cwd: input.repoPath,
       encoding: 'buffer',
+    }),
+    execFileAsync('git', ['rev-parse', '--git-dir'], {
+      cwd: input.repoPath,
+      encoding: 'utf8',
     }),
   ]);
 
@@ -117,16 +132,42 @@ export async function restoreCheckpoint(input: {
   );
   const preserve = new Set(input.preserveFiles ?? []);
 
-  const currentUntracked = untrackedBuf
-    .toString('utf8')
-    .split('\0')
-    .filter((entry) => entry !== '');
+  const existingFiles = new Set([
+    ...trackedBuf
+      .toString('utf8')
+      .split('\0')
+      .filter((entry) => entry !== ''),
+    ...untrackedBuf
+      .toString('utf8')
+      .split('\0')
+      .filter((entry) => entry !== ''),
+  ]);
 
-  await runGit({ cwd: input.repoPath, args: ['checkout', input.ref, '--', '.'] });
-
-  for (const relPath of currentUntracked) {
+  for (const relPath of existingFiles) {
     if (targetFiles.has(relPath) || preserve.has(relPath)) continue;
     await rm(join(input.repoPath, relPath), { force: true });
+  }
+
+  const gitDir = resolve(input.repoPath, gitDirRaw.trim());
+  const tempIndex = join(tmpdir(), `inova-cp-index-${randomUUID()}`);
+  const env = { ...process.env, GIT_INDEX_FILE: tempIndex };
+  try {
+    await execFileAsync('git', ['--git-dir', gitDir, 'read-tree', input.ref], {
+      cwd: input.repoPath,
+      env,
+    });
+    if (targetFiles.size > 0) {
+      await execFileAsync(
+        'git',
+        ['--git-dir', gitDir, '--work-tree', input.repoPath, 'checkout-index', '-a', '-f'],
+        {
+          cwd: input.repoPath,
+          env,
+        },
+      );
+    }
+  } finally {
+    await rm(tempIndex, { force: true });
   }
 }
 

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
-import { loadStore, saveStore } from './store.js';
+import { loadStore, saveStore, withStoreLock } from './store.js';
 import type {
   Account,
   EffortLevel,
@@ -118,9 +118,11 @@ export async function saveWorkspace(ctx: { root: string; workspace: Workspace })
   ) {
     throw new SessionError('invalid-workspace', 'Invalid workspace');
   }
-  const store = await loadStore(ctx.root);
-  store.workspace = sanitizeWorkspace(store, ctx.workspace);
-  await saveStore(ctx.root, store);
+  await withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    store.workspace = sanitizeWorkspace(store, ctx.workspace);
+    await saveStore(ctx.root, store);
+  });
 }
 
 function normalizeTitle(title: string): string {
@@ -190,60 +192,66 @@ export async function createSession(ctx: {
   worktree?: SessionWorktree | null;
   now?: () => Date;
 }): Promise<Session> {
-  const store = await loadStore(ctx.root);
-  const project = store.projects.find((item) => item.id === ctx.projectId);
-  if (!project) {
-    throw new SessionError('project-not-found', `Project not found: ${ctx.projectId}`);
-  }
-  const parentId = ctx.parentId ?? null;
-  let parentWorktree: SessionWorktree | null = null;
-  let parentAccountOverride: string | null = null;
-  if (parentId !== null) {
-    const parent = sessionsOf(store).find((item) => item.id === parentId);
-    if (parent?.projectId !== ctx.projectId) {
-      throw new SessionError('parent-not-found', `Parent session not found: ${parentId}`);
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const project = store.projects.find((item) => item.id === ctx.projectId);
+    if (!project) {
+      throw new SessionError('project-not-found', `Project not found: ${ctx.projectId}`);
     }
-    parentWorktree = parent.worktree ?? null;
-    parentAccountOverride = parent.accountIdOverride ?? null;
-  }
-  const resolvedAccountOverride =
-    ctx.accountIdOverride !== undefined ? ctx.accountIdOverride : parentAccountOverride;
-  const provider = providerForSession(store, ctx.projectId, resolvedAccountOverride);
-  const resolvedModel = normalizeModel(ctx.model ?? null);
-  const resolvedEffort = ctx.effort ?? null;
-  if (resolvedEffort !== null && !isEffortLevel(resolvedEffort)) {
-    throw new SessionError('invalid-effort', `Invalid effort level: ${String(resolvedEffort)}`);
-  }
-  const inheritedMode =
-    ctx.mode !== undefined ? ctx.mode : provider ? (store.defaultModes?.[provider] ?? null) : null;
-  if (
-    inheritedMode !== null &&
-    (!isExecutionMode(inheritedMode) || (provider && !isModeSupported(provider, inheritedMode)))
-  ) {
-    throw new SessionError('invalid-mode', `Invalid mode: ${String(inheritedMode)}`);
-  }
-  const timestamp = (ctx.now?.() ?? new Date()).toISOString();
-  const session: Session = {
-    id: randomUUID(),
-    projectId: ctx.projectId,
-    parentId,
-    title: ctx.title ?? (parentId === null ? 'Nova sessão' : 'Subsessão'),
-    providerSessionId: null,
-    ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
-    ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
-    ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
-    ...(ctx.comparisonRole ? { comparisonRole: ctx.comparisonRole } : {}),
-    model: resolvedModel,
-    effort: resolvedEffort,
-    mode: inheritedMode,
-    worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    archivedAt: null,
-  };
-  sessionsOf(store).push(session);
-  await saveStore(ctx.root, store);
-  return session;
+    const parentId = ctx.parentId ?? null;
+    let parentWorktree: SessionWorktree | null = null;
+    let parentAccountOverride: string | null = null;
+    if (parentId !== null) {
+      const parent = sessionsOf(store).find((item) => item.id === parentId);
+      if (parent?.projectId !== ctx.projectId) {
+        throw new SessionError('parent-not-found', `Parent session not found: ${parentId}`);
+      }
+      parentWorktree = parent.worktree ?? null;
+      parentAccountOverride = parent.accountIdOverride ?? null;
+    }
+    const resolvedAccountOverride =
+      ctx.accountIdOverride !== undefined ? ctx.accountIdOverride : parentAccountOverride;
+    const provider = providerForSession(store, ctx.projectId, resolvedAccountOverride);
+    const resolvedModel = normalizeModel(ctx.model ?? null);
+    const resolvedEffort = ctx.effort ?? null;
+    if (resolvedEffort !== null && !isEffortLevel(resolvedEffort)) {
+      throw new SessionError('invalid-effort', `Invalid effort level: ${String(resolvedEffort)}`);
+    }
+    const inheritedMode =
+      ctx.mode !== undefined
+        ? ctx.mode
+        : provider
+          ? (store.defaultModes?.[provider] ?? null)
+          : null;
+    if (
+      inheritedMode !== null &&
+      (!isExecutionMode(inheritedMode) || (provider && !isModeSupported(provider, inheritedMode)))
+    ) {
+      throw new SessionError('invalid-mode', `Invalid mode: ${String(inheritedMode)}`);
+    }
+    const timestamp = (ctx.now?.() ?? new Date()).toISOString();
+    const session: Session = {
+      id: randomUUID(),
+      projectId: ctx.projectId,
+      parentId,
+      title: ctx.title ?? (parentId === null ? 'Nova sessão' : 'Subsessão'),
+      providerSessionId: null,
+      ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
+      ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
+      ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
+      ...(ctx.comparisonRole ? { comparisonRole: ctx.comparisonRole } : {}),
+      model: resolvedModel,
+      effort: resolvedEffort,
+      mode: inheritedMode,
+      worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      archivedAt: null,
+    };
+    sessionsOf(store).push(session);
+    await saveStore(ctx.root, store);
+    return session;
+  });
 }
 
 export async function listSessions(ctx: { root: string; projectId: string }): Promise<Session[]> {
@@ -275,71 +283,80 @@ export async function updateSession(ctx: {
   };
   now?: () => Date;
 }): Promise<Session> {
-  const store = await loadStore(ctx.root);
-  const session = requireSession(store, ctx.sessionId);
-  const {
-    title,
-    providerSessionId,
-    accountIdOverride,
-    handoffContext,
-    model,
-    effort,
-    mode,
-    worktree,
-    archived,
-  } = ctx.patch;
-  const timestamp = (ctx.now?.() ?? new Date()).toISOString();
-  if (title !== undefined) session.title = normalizeTitle(title);
-  if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
-  if (accountIdOverride !== undefined) {
-    session.accountIdOverride = accountIdOverride;
-    const newProvider = providerForSession(store, session.projectId, accountIdOverride);
-    if (session.mode && newProvider && !isModeSupported(newProvider, session.mode)) {
-      session.mode = store.defaultModes?.[newProvider] ?? null;
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const session = requireSession(store, ctx.sessionId);
+    const {
+      title,
+      providerSessionId,
+      accountIdOverride,
+      handoffContext,
+      model,
+      effort,
+      mode,
+      worktree,
+      archived,
+    } = ctx.patch;
+    const timestamp = (ctx.now?.() ?? new Date()).toISOString();
+    if (title !== undefined) session.title = normalizeTitle(title);
+    if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
+    if (accountIdOverride !== undefined) {
+      const prevProvider = providerForSession(store, session.projectId, session.accountIdOverride);
+      session.accountIdOverride = accountIdOverride;
+      const newProvider = providerForSession(store, session.projectId, accountIdOverride);
+      if (prevProvider !== newProvider) {
+        session.model = null;
+        session.effort = null;
+      }
+      if (session.mode && newProvider && !isModeSupported(newProvider, session.mode)) {
+        session.mode = store.defaultModes?.[newProvider] ?? null;
+      }
     }
-  }
-  if (handoffContext !== undefined) session.handoffContext = handoffContext;
-  if (model !== undefined) session.model = normalizeModel(model);
-  if (worktree !== undefined) session.worktree = worktree;
-  if (effort !== undefined) {
-    if (effort !== null && !isEffortLevel(effort)) {
-      throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);
+    if (handoffContext !== undefined) session.handoffContext = handoffContext;
+    if (model !== undefined) session.model = normalizeModel(model);
+    if (worktree !== undefined) session.worktree = worktree;
+    if (effort !== undefined) {
+      if (effort !== null && !isEffortLevel(effort)) {
+        throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);
+      }
+      session.effort = effort;
     }
-    session.effort = effort;
-  }
-  if (mode !== undefined) {
-    const provider = providerForSession(store, session.projectId, session.accountIdOverride);
-    if (
-      mode !== null &&
-      (!isExecutionMode(mode) || (provider && !isModeSupported(provider, mode)))
-    ) {
-      throw new SessionError(
-        'invalid-mode',
-        `Modo não suportado por este provedor: ${String(mode)}`,
-      );
+    if (mode !== undefined) {
+      const provider = providerForSession(store, session.projectId, session.accountIdOverride);
+      if (
+        mode !== null &&
+        (!isExecutionMode(mode) || (provider && !isModeSupported(provider, mode)))
+      ) {
+        throw new SessionError(
+          'invalid-mode',
+          `Modo não suportado por este provedor: ${String(mode)}`,
+        );
+      }
+      session.mode = mode;
     }
-    session.mode = mode;
-  }
-  if (archived !== undefined) {
-    const affected = descendantIds(store, session.id);
-    for (const item of sessionsOf(store)) {
-      if (affected.has(item.id)) item.archivedAt = archived ? timestamp : null;
+    if (archived !== undefined) {
+      const affected = descendantIds(store, session.id);
+      for (const item of sessionsOf(store)) {
+        if (affected.has(item.id)) item.archivedAt = archived ? timestamp : null;
+      }
+      if (archived) dropFromWorkspace(store, affected);
     }
-    if (archived) dropFromWorkspace(store, affected);
-  }
-  session.updatedAt = timestamp;
-  await saveStore(ctx.root, store);
-  return session;
+    session.updatedAt = timestamp;
+    await saveStore(ctx.root, store);
+    return session;
+  });
 }
 
 export async function deleteSession(ctx: { root: string; sessionId: string }): Promise<string[]> {
-  const store = await loadStore(ctx.root);
-  requireSession(store, ctx.sessionId);
-  const removed = descendantIds(store, ctx.sessionId);
-  store.sessions = sessionsOf(store).filter((session) => !removed.has(session.id));
-  dropFromWorkspace(store, removed);
-  await saveStore(ctx.root, store);
-  return [...removed];
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    requireSession(store, ctx.sessionId);
+    const removed = descendantIds(store, ctx.sessionId);
+    store.sessions = sessionsOf(store).filter((session) => !removed.has(session.id));
+    dropFromWorkspace(store, removed);
+    await saveStore(ctx.root, store);
+    return [...removed];
+  });
 }
 
 export function removeSessionsOfProjects(store: Store, projectIds: ReadonlySet<string>): void {
@@ -366,8 +383,10 @@ export async function setDefaultProviderMode(ctx: {
   if (!isExecutionMode(ctx.mode) || !isModeSupported(ctx.provider, ctx.mode)) {
     throw new SessionError('invalid-mode', 'Modo não suportado por este provedor.');
   }
-  const store = await loadStore(ctx.root);
-  store.defaultModes = { ...(store.defaultModes ?? {}), [ctx.provider]: ctx.mode };
-  await saveStore(ctx.root, store);
-  return { ...store.defaultModes };
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    store.defaultModes = { ...(store.defaultModes ?? {}), [ctx.provider]: ctx.mode };
+    await saveStore(ctx.root, store);
+    return { ...store.defaultModes };
+  });
 }

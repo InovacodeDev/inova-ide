@@ -138,7 +138,9 @@ function VerificationCard({
       ? 'Executando verificações'
       : item.status === 'passed'
         ? 'Verificação aprovada'
-        : 'Verificação falhou';
+        : item.status === 'skipped'
+          ? 'Verificação cancelada'
+          : 'Verificação falhou';
   return (
     <details
       className={`chat-verification chat-verification-${item.status}`}
@@ -152,7 +154,8 @@ function VerificationCard({
         <span className="chat-tool-preview">
           {item.checks
             .map(
-              (c) => `${c.passed ? 'OK' : item.status === 'running' ? '...' : 'ERRO'} ${c.label}`,
+              (c) =>
+                `${c.passed ? 'OK' : item.status === 'running' ? '...' : item.status === 'skipped' ? '-' : 'ERRO'} ${c.label}`,
             )
             .join(' · ')}
         </span>
@@ -167,16 +170,18 @@ function VerificationCard({
                 className={
                   check.passed
                     ? 'chat-verification-badge chat-verification-ok'
-                    : item.status === 'running'
+                    : item.status === 'running' || item.status === 'skipped'
                       ? 'chat-verification-badge'
                       : 'chat-verification-badge chat-verification-fail'
                 }
               >
                 {item.status === 'running'
                   ? 'executando'
-                  : check.passed
-                    ? `ok (${check.durationMs}ms)`
-                    : `falhou (${check.exitCode ?? 'erro'})`}
+                  : item.status === 'skipped'
+                    ? 'cancelada'
+                    : check.passed
+                      ? `ok (${check.durationMs}ms)`
+                      : `falhou (${check.exitCode ?? 'erro'})`}
               </span>
             </div>
             {check.output.trim() !== '' ? (
@@ -685,7 +690,14 @@ export function ChatView({
                 </button>
               ) : null}
               {onDismissBusyConflict ? (
-                <button type="button" className="btn btn-sm" onClick={onDismissBusyConflict}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    setDraft((current) => (current.trim() === '' ? busyConflict.prompt : current));
+                    onDismissBusyConflict();
+                  }}
+                >
                   Fechar
                 </button>
               ) : null}
@@ -707,6 +719,14 @@ export function ChatView({
               syncTrigger(nextValue, event.target.selectionStart ?? nextValue.length);
             }}
             onClick={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
+            onSelect={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
+            onKeyUp={(event) => {
               const target = event.currentTarget;
               syncTrigger(target.value, target.selectionStart ?? target.value.length);
             }}

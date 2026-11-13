@@ -140,11 +140,12 @@ function StatusLine({ status }: { status: SessionStatus }) {
 interface SessionRowProps extends SessionActions {
   node: SessionNode;
   project: ProjectView;
+  accounts: AccountView[];
   activeSessionId: string | null;
 }
 
 function SessionRow(props: SessionRowProps) {
-  const { node, project, activeSessionId, ...actions } = props;
+  const { node, project, accounts, activeSessionId, ...actions } = props;
   const {
     onOpenSession,
     onNewSession,
@@ -157,6 +158,10 @@ function SessionRow(props: SessionRowProps) {
   const [editing, setEditing] = useState(false);
   const archived = session.archivedAt !== null;
   const isSubsession = session.parentId !== null;
+  const sessionProvider =
+    (session.accountIdOverride
+      ? accounts.find((candidate) => candidate.id === session.accountIdOverride)?.provider
+      : undefined) ?? project.provider;
   const rowClasses = ['session-row', isSubsession ? 'session-row-sub' : 'session-row-root'];
   if (session.id === activeSessionId) rowClasses.push('active');
 
@@ -169,7 +174,7 @@ function SessionRow(props: SessionRowProps) {
       <div className={rowClasses.join(' ')}>
         {editing ? (
           <div className="session-main">
-            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
+            <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
             <TitleEditor
               initial={session.title}
               onSave={(title) => {
@@ -187,7 +192,7 @@ function SessionRow(props: SessionRowProps) {
             onClick={() => onOpenSession(session)}
             onDoubleClick={() => setEditing(true)}
           >
-            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
+            <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
             <span className="session-text">
               {isSubsession ? <span className="session-kind-sub">Subsessão</span> : null}
               <span className="session-title">{session.title}</span>
@@ -260,6 +265,7 @@ function SessionRow(props: SessionRowProps) {
               key={child.session.id}
               node={child}
               project={project}
+              accounts={accounts}
               activeSessionId={activeSessionId}
               {...actions}
             />
@@ -272,6 +278,7 @@ function SessionRow(props: SessionRowProps) {
 
 interface ProjectSectionProps extends SessionActions {
   project: ProjectView;
+  accounts: AccountView[];
   accountLabelText: string;
   sessions: Session[];
   activeSessionId: string | null;
@@ -282,6 +289,7 @@ interface ProjectSectionProps extends SessionActions {
 function ProjectSection(props: ProjectSectionProps) {
   const {
     project,
+    accounts,
     accountLabelText,
     sessions,
     activeSessionId,
@@ -369,6 +377,7 @@ function ProjectSection(props: ProjectSectionProps) {
                   key={node.session.id}
                   node={node}
                   project={project}
+                  accounts={accounts}
                   activeSessionId={activeSessionId}
                   {...actions}
                 />
@@ -402,6 +411,7 @@ function ProjectSection(props: ProjectSectionProps) {
                   key={node.session.id}
                   node={node}
                   project={project}
+                  accounts={accounts}
                   activeSessionId={activeSessionId}
                   {...actions}
                 />
@@ -468,6 +478,7 @@ export function Sidebar(props: SidebarProps) {
             <ProjectSection
               key={project.id}
               project={project}
+              accounts={accounts}
               accountLabelText={accountDisplayName({
                 label: project.accountLabel,
                 email: emailByLabel.get(project.accountLabel) ?? project.accountEmail,

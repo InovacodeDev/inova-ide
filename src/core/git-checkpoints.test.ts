@@ -86,4 +86,30 @@ describe('git-checkpoints', () => {
     });
     expect(refs.trim()).toBe('');
   });
+
+  test('removes post-checkpoint staged and committed files and leaves .git/index untouched', async () => {
+    const repo = await initRepo();
+    const cp = await createCheckpoint({
+      repoPath: repo,
+      sessionId: 'sess-idx',
+      turnId: 'turn-1',
+    });
+    expect(cp).not.toBeNull();
+
+    await writeFile(join(repo, 'committed-later.txt'), 'committed\n');
+    await exec('git', ['add', 'committed-later.txt'], { cwd: repo });
+    await exec('git', ['commit', '-m', 'post-checkpoint'], { cwd: repo });
+
+    await writeFile(join(repo, 'staged-later.txt'), 'staged\n');
+    await exec('git', ['add', 'staged-later.txt'], { cwd: repo });
+
+    await restoreCheckpoint({ repoPath: repo, ref: cp!.ref });
+
+    expect(existsSync(join(repo, 'committed-later.txt'))).toBe(false);
+    expect(existsSync(join(repo, 'staged-later.txt'))).toBe(false);
+    const { stdout: cached } = await exec('git', ['diff', '--cached', '--name-only'], {
+      cwd: repo,
+    });
+    expect(cached.trim()).toBe('staged-later.txt');
+  });
 });
