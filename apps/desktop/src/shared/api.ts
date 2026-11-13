@@ -30,6 +30,8 @@ import type {
   ProviderId,
   QueuedTurn,
   Session,
+  Settings,
+  SettingsPatch,
   VerificationCheck,
   Workspace,
 } from '@inova/core/types';
@@ -129,6 +131,10 @@ export interface InovaApi {
     provider: ProviderId;
     mode: ExecutionMode;
   }): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
+  getSettings(): Promise<Result<Settings>>;
+  updateSettings(input: SettingsPatch): Promise<Result<Settings>>;
+  sendTestNotification(): Promise<Result<null>>;
+  openDataFolder(): Promise<Result<null>>;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
   getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
   applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
@@ -250,6 +256,10 @@ export const CHANNELS = {
   updateSession: 'inova:updateSession',
   getDefaultModes: 'inova:getDefaultModes',
   setDefaultMode: 'inova:setDefaultMode',
+  getSettings: 'inova:getSettings',
+  updateSettings: 'inova:updateSettings',
+  sendTestNotification: 'inova:sendTestNotification',
+  openDataFolder: 'inova:openDataFolder',
   deleteSession: 'inova:deleteSession',
   getWorktreeStatus: 'inova:getWorktreeStatus',
   applyWorktree: 'inova:applyWorktree',

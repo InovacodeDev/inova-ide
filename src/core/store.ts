@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
+import { isSettings } from './settings.js';
 import type { Store } from './types.js';
 
 export class StoreCorruptError extends Error {
@@ -133,7 +134,7 @@ function isDefaultModes(value: unknown): boolean {
 
 function isStore(value: unknown): value is Store {
   if (!isRecord(value)) return false;
-  const { version, accounts, projects, sessions, workspace, defaultModes } = value;
+  const { version, accounts, projects, sessions, workspace, defaultModes, settings } = value;
   return (
     version === 1 &&
     Array.isArray(accounts) &&
@@ -142,7 +143,8 @@ function isStore(value: unknown): value is Store {
     projects.every(isProject) &&
     (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession))) &&
     (workspace === undefined || isWorkspace(workspace)) &&
-    (defaultModes === undefined || isDefaultModes(defaultModes))
+    (defaultModes === undefined || isDefaultModes(defaultModes)) &&
+    (settings === undefined || isSettings(settings))
   );
 }
 

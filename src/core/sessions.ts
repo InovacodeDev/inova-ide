@@ -64,6 +64,44 @@ export function descendantIds(store: Store, sessionId: string): Set<string> {
   return ids;
 }
 
+const MS_PER_DAY = 86_400_000;
+
+function rootIdOf(sessionsById: ReadonlyMap<string, Session>, sessionId: string): string {
+  const visited = new Set<string>();
+  let id = sessionId;
+  for (;;) {
+    visited.add(id);
+    const parentId = sessionsById.get(id)?.parentId;
+    if (!parentId || visited.has(parentId) || !sessionsById.has(parentId)) return id;
+    id = parentId;
+  }
+}
+
+export function sessionsToAutoArchive(input: {
+  sessions: readonly Session[];
+  now: Date;
+  days: number;
+  busyIds: ReadonlySet<string>;
+}): string[] {
+  const { sessions, now, days, busyIds } = input;
+  if (days <= 0) return [];
+  const cutoff = now.getTime() - days * MS_PER_DAY;
+  const sessionsById = new Map(sessions.map((session) => [session.id, session]));
+  const recentIds = sessions
+    .filter((session) => Date.parse(session.updatedAt) >= cutoff)
+    .map((session) => session.id);
+  const busyRoots = new Set([...busyIds, ...recentIds].map((id) => rootIdOf(sessionsById, id)));
+  return sessions
+    .filter(
+      (session) =>
+        session.parentId === null &&
+        session.archivedAt === null &&
+        Date.parse(session.updatedAt) < cutoff &&
+        !busyRoots.has(session.id),
+    )
+    .map((session) => session.id);
+}
+
 function dropFromWorkspace(store: Store, ids: ReadonlySet<string>): void {
   const { workspace } = store;
   if (!workspace) return;

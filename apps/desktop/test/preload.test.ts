@@ -132,6 +132,16 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     provider: 'claude',
     mode: 'plan',
   });
+  void api.getSettings();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getSettings');
+  void api.updateSettings({ notifications: { completed: true } });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:updateSettings', {
+    notifications: { completed: true },
+  });
+  void api.sendTestNotification();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:sendTestNotification');
+  void api.openDataFolder();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:openDataFolder');
   void api.getWorktreeStatus({ sessionId: 's' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:getWorktreeStatus', { sessionId: 's' });
   void api.applyWorktree({ sessionId: 's' });

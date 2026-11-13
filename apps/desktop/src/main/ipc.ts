@@ -44,6 +44,10 @@ export function registerIpc(deps: {
   handle(CHANNELS.updateSession, (input) => handlers.updateSession(input));
   handle(CHANNELS.getDefaultModes, () => handlers.getDefaultModes());
   handle(CHANNELS.setDefaultMode, (input) => handlers.setDefaultMode(input));
+  handle(CHANNELS.getSettings, () => handlers.getSettings());
+  handle(CHANNELS.updateSettings, (input) => handlers.updateSettings(input));
+  handle(CHANNELS.sendTestNotification, () => handlers.sendTestNotification());
+  handle(CHANNELS.openDataFolder, () => handlers.openDataFolder());
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
   handle(CHANNELS.applyWorktree, (input) => handlers.applyWorktree(input));

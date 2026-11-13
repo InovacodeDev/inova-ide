@@ -6,12 +6,14 @@ import { WorktreeError } from '@inova/core/git-worktree';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
 import { SessionError } from '@inova/core/sessions';
+import { SettingsError, isSettingsPatch } from '@inova/core/settings';
 import { StoreCorruptError } from '@inova/core/store';
 import type {
   Account,
   EffortLevel,
   ExecutionMode,
   ProviderId,
+  SettingsPatch,
   Store,
   VerificationCheck,
 } from '@inova/core/types';
@@ -223,6 +225,10 @@ export function parseDefaultMode(
   if (typeof provider !== 'string' || !isProviderId(provider)) return undefined;
   if (!isExecutionMode(mode)) return undefined;
   return { provider, mode };
+}
+
+export function parseSettingsPatch(input: unknown): SettingsPatch | undefined {
+  return isSettingsPatch(input) ? input : undefined;
 }
 
 export function parseWorkspace(
@@ -565,6 +571,7 @@ export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Pr
   } catch (error: unknown) {
     if (error instanceof AccountError) return fail(accountMessage(error, label));
     if (error instanceof SessionError) return fail(sessionMessage(error));
+    if (error instanceof SettingsError) return fail('Configurações inválidas.');
     if (error instanceof WorktreeError) return fail(error.message);
     if (error instanceof UsageError) return fail(usageMessage(error));
     if (error instanceof StoreCorruptError)

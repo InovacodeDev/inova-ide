@@ -31,6 +31,10 @@ function setup() {
       'updateSession',
       'getDefaultModes',
       'setDefaultMode',
+      'getSettings',
+      'updateSettings',
+      'sendTestNotification',
+      'openDataFolder',
       'deleteSession',
       'getWorktreeStatus',
       'applyWorktree',
@@ -178,6 +182,10 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:listModels', trusted, input);
   await invoke('inova:getDefaultModes', trusted);
   await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
+  await invoke('inova:getSettings', trusted);
+  await invoke('inova:updateSettings', trusted, { voice: { language: 'pt' } });
+  await invoke('inova:sendTestNotification', trusted);
+  await invoke('inova:openDataFolder', trusted);
   await invoke('inova:getWorktreeStatus', trusted, { sessionId: 's' });
   await invoke('inova:applyWorktree', trusted, { sessionId: 's' });
   await invoke('inova:restoreCheckpoint', trusted, {
@@ -211,6 +219,10 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
   expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
   expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });
+  expect(handlers['getSettings']).toHaveBeenCalledWith();
+  expect(handlers['updateSettings']).toHaveBeenCalledWith({ voice: { language: 'pt' } });
+  expect(handlers['sendTestNotification']).toHaveBeenCalledWith();
+  expect(handlers['openDataFolder']).toHaveBeenCalledWith();
   expect(handlers['getWorktreeStatus']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(handlers['applyWorktree']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(handlers['restoreCheckpoint']).toHaveBeenCalledWith({

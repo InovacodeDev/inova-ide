@@ -22,6 +22,7 @@ const execFileAsync = promisify(execFile);
 const SHELL_TIMEOUT_MS = 5000;
 const WHISPER_TIMEOUT_MS = 120_000;
 const WHISPER_MAX_OUTPUT_BYTES = 1024 * 1024;
+const AUTO_ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
 const appUrl =
   process.env['ELECTRON_RENDERER_URL'] ??
   pathToFileURL(join(__dirname, '../renderer/index.html')).href;
@@ -175,10 +176,21 @@ void app.whenReady().then(async () => {
       notify: ({ title, body }) => {
         if (Notification.isSupported()) new Notification({ title, body }).show();
       },
+      openPath: async (path) => {
+        const failure = await shell.openPath(path);
+        if (failure !== '') throw new Error(failure);
+      },
       baseEnv,
       pickFolder,
     });
     handlers = created;
+    const autoArchive = (): void => {
+      created.runAutoArchive().catch((error: unknown) => {
+        console.error('inova: auto-archive failed', error);
+      });
+    };
+    autoArchive();
+    setInterval(autoArchive, AUTO_ARCHIVE_INTERVAL_MS);
     const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
     const voice = createVoiceService({
       modelDir: join(dataRoot(process.env), 'models'),

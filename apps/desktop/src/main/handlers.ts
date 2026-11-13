@@ -58,9 +58,11 @@ import {
   getWorkspace,
   resolveSessionAccount,
   saveWorkspace,
+  sessionsToAutoArchive,
   setDefaultProviderMode,
   updateSession,
 } from '@inova/core/sessions';
+import { getSettings, updateSettings } from '@inova/core/settings';
 import { loadStore } from '@inova/core/store';
 import type {
   Account,
@@ -71,6 +73,7 @@ import type {
   ProviderId,
   QueuedTurn,
   Session,
+  Settings,
   Store,
   VerificationCheck,
   Workspace,
@@ -115,6 +118,7 @@ import {
   parseResolveComparison,
   parseRestoreCheckpoint,
   parseSessionDelete,
+  parseSettingsPatch,
   parseSessionRef,
   parseSessionUpdate,
   parseStartComparison,
@@ -138,6 +142,7 @@ export interface HandlerDeps {
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
   notify?: (input: { title: string; body: string }) => void;
+  openPath?: (path: string) => Promise<void>;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
   pickFolder: () => Promise<string | null>;
 }
@@ -147,6 +152,11 @@ const TITLE_CHARS = 60;
 const FILE_CACHE_TTL_MS = 5_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
+const NOTIFICATION_TOGGLES = {
+  'waiting-input': 'waitingInput',
+  failed: 'failed',
+  completed: 'completed',
+} as const satisfies Record<InboxAttentionKind, keyof Settings['notifications']>;
 
 export function isExternalWebUrl(url: string): boolean {
   try {
@@ -343,7 +353,11 @@ export function createHandlers(deps: HandlerDeps) {
         unread: true,
       });
       emitInboxSnapshot();
-      if (!uiFocus.windowFocused && (input.kind === 'failed' || input.kind === 'waiting-input')) {
+      const { notifications } = await getSettings(deps.root);
+      if (
+        notifications[NOTIFICATION_TOGGLES[input.kind]] &&
+        (!notifications.onlyWhenUnfocused || !uiFocus.windowFocused)
+      ) {
         deps.notify?.({ title: session.title, body: input.summary });
       }
     });
@@ -818,8 +832,36 @@ export function createHandlers(deps: HandlerDeps) {
     return ok(null);
   }
 
+  function runAutoArchive(): Promise<string[]> {
+    return serialized(async () => {
+      const { autoArchiveDays } = (await getSettings(deps.root)).sessions;
+      if (autoArchiveDays === 0) return [];
+      await inboxChain;
+      const store = await loadStore(deps.root);
+      const sessions = sessionsOf(store);
+      const busyIds = new Set([
+        ...sessions.filter((session) => deps.chat.isRunning(session.id)).map(({ id }) => id),
+        ...(store.workspace?.openSessionIds ?? []),
+        ...(uiFocus.activeSessionId === null ? [] : [uiFocus.activeSessionId]),
+        ...[...inboxMap.values()].filter((item) => item.unread).map(({ sessionId }) => sessionId),
+        ...turnQueue.list().map(({ sessionId }) => sessionId),
+      ]);
+      const expired = sessionsToAutoArchive({
+        sessions,
+        now: deps.usageDeps.now(),
+        days: autoArchiveDays,
+        busyIds,
+      });
+      for (const sessionId of expired) {
+        await updateSession({ root: deps.root, sessionId, patch: { archived: true } });
+      }
+      return expired;
+    });
+  }
+
   return {
     handleChatEvent,
+    runAutoArchive,
     listAccounts: (): Promise<Result<AccountView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
@@ -984,6 +1026,29 @@ export function createHandlers(deps: HandlerDeps) {
           ok(await setDefaultProviderMode({ root: deps.root, provider, mode })),
         ),
       ),
+    getSettings: (): Promise<Result<Settings>> =>
+      guarded(async () => ok(await getSettings(deps.root))),
+    updateSettings: (input: unknown): Promise<Result<Settings>> =>
+      validated(input, parseSettingsPatch, (patch) =>
+        serialized(async () => ok(await updateSettings({ root: deps.root, patch }))),
+      ),
+    sendTestNotification: (): Promise<Result<null>> =>
+      guarded(async () => {
+        deps.notify?.({ title: 'Inova', body: 'Notificação de teste' });
+        return ok(null);
+      }),
+    openDataFolder: (): Promise<Result<null>> =>
+      guarded(async () => {
+        if (!deps.openPath) return fail('Abrir a pasta de dados não está disponível.');
+        await mkdir(deps.root, { recursive: true, mode: 0o700 });
+        try {
+          await deps.openPath(deps.root);
+        } catch (error: unknown) {
+          if (error instanceof Error) return fail('Não foi possível abrir a pasta de dados.');
+          throw error;
+        }
+        return ok(null);
+      }),
     getWorkspace: (): Promise<Result<Workspace>> =>
       guarded(async () => ok(await getWorkspace(deps.root))),
     saveWorkspace: (input: unknown): Promise<Result<null>> =>
