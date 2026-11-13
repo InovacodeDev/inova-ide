@@ -1,4 +1,5 @@
-import type { ChatEvent, UsageWindow } from './chat-types.js';
+import type { ChatEvent, SubagentSnapshot, SubagentStatus, UsageWindow } from './chat-types.js';
+import { contextWindowFor } from './context-window.js';
 import type { ProviderId } from './types.js';
 
 export interface ChatParser {
@@ -69,6 +70,111 @@ function claudeUsage(info: unknown): ChatEvent[] {
   return windows.length > 0 ? [{ kind: 'usage-limits', windows }] : [];
 }
 
+interface TokenCounts {
+  input: number;
+  output: number;
+}
+
+function usageCounts(usage: unknown): TokenCounts | null {
+  if (!isRecord(usage)) return null;
+  const output = num(usage['output_tokens']);
+  const input = num(usage['input_tokens']);
+  if (output === null && input === null) return null;
+  return {
+    input:
+      (input ?? 0) +
+      (num(usage['cache_read_input_tokens']) ?? 0) +
+      (num(usage['cache_creation_input_tokens']) ?? 0),
+    output: output ?? 0,
+  };
+}
+
+function isSubagentTool(name: string): boolean {
+  return name === 'Task' || name === 'Agent';
+}
+
+function createSubagentTracker(): {
+  start(input: { toolId: string; input: unknown }): ChatEvent[];
+  observeMessage(input: { toolId: string; message: Json }): ChatEvent[];
+  finish(input: {
+    toolId: string;
+    status: SubagentStatus;
+    totalTokens: number | null;
+    result: Json | null;
+  }): ChatEvent[];
+  has(toolId: string): boolean;
+  isRunning(toolId: string): boolean;
+} {
+  const snapshots = new Map<string, SubagentSnapshot>();
+  const outputByMessage = new Map<string, Map<string, number>>();
+
+  function update(toolId: string, patch: Partial<SubagentSnapshot>): ChatEvent[] {
+    const current = snapshots.get(toolId);
+    if (current === undefined) return [];
+    const next = { ...current, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(current)) return [];
+    snapshots.set(toolId, next);
+    return [{ kind: 'subagent', ...next }];
+  }
+
+  return {
+    has: (toolId) => snapshots.has(toolId),
+    isRunning: (toolId) => snapshots.get(toolId)?.status === 'running',
+    start({ toolId, input }) {
+      const fields = isRecord(input) ? input : {};
+      const snapshot: SubagentSnapshot = {
+        toolId,
+        description: str(fields['description']) ?? str(fields['subagent_type']) ?? 'Subagente',
+        agentType: str(fields['subagent_type']),
+        model: str(fields['model']),
+        status: 'running',
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      };
+      snapshots.set(toolId, snapshot);
+      return [{ kind: 'subagent', ...snapshot }];
+    },
+    observeMessage({ toolId, message }) {
+      const current = snapshots.get(toolId);
+      if (current === undefined || current.status !== 'running') return [];
+      const counts = usageCounts(message['usage']);
+      if (counts === null) return [];
+      const outputs = outputByMessage.get(toolId) ?? new Map<string, number>();
+      outputs.set(str(message['id']) ?? `m${outputs.size}`, counts.output);
+      outputByMessage.set(toolId, outputs);
+      const outputTokens = [...outputs.values()].reduce((sum, value) => sum + value, 0);
+      return update(toolId, {
+        model: str(message['model']) ?? current.model,
+        inputTokens: counts.input,
+        outputTokens,
+        totalTokens: counts.input + outputTokens,
+      });
+    },
+    finish({ toolId, status, totalTokens, result }) {
+      const current = snapshots.get(toolId);
+      if (current === undefined) return [];
+      const usage = result === null ? null : usageCounts(result['usage']);
+      const outputTokens = usage?.output ?? current.outputTokens;
+      const total = totalTokens ?? current.totalTokens;
+      const agentType = result === null ? null : str(result['agentType']);
+      const model = result === null ? null : str(result['resolvedModel']);
+      return update(toolId, {
+        status,
+        agentType: agentType ?? current.agentType,
+        model: model ?? current.model,
+        outputTokens,
+        inputTokens: Math.max(0, total - outputTokens),
+        totalTokens: total,
+      });
+    },
+  };
+}
+
+function taskStatus(status: unknown): SubagentStatus {
+  return status === 'completed' ? 'done' : 'error';
+}
+
 function extractToolResults(message: unknown): ChatEvent[] {
   if (!isRecord(message) || !Array.isArray(message['content'])) return [];
   const events: ChatEvent[] = [];
@@ -88,6 +194,66 @@ function extractToolResults(message: unknown): ChatEvent[] {
 
 function createClaudeParser(): ChatParser {
   let messageId = '';
+  let lastContext = '';
+  const subagents = createSubagentTracker();
+
+  function contextEvents(message: Json): ChatEvent[] {
+    const counts = usageCounts(message['usage']);
+    if (counts === null) return [];
+    const model = str(message['model']);
+    const event: ChatEvent = {
+      kind: 'context',
+      usedTokens: counts.input + counts.output,
+      windowTokens: contextWindowFor(model),
+      model,
+    };
+    const key = JSON.stringify(event);
+    if (key === lastContext) return [];
+    lastContext = key;
+    return [event];
+  }
+
+  function fromUser(data: Json): ChatEvent[] {
+    const message = data['message'];
+    const result = isRecord(data['tool_use_result']) ? data['tool_use_result'] : null;
+    const events: ChatEvent[] = [];
+    if (isRecord(message) && Array.isArray(message['content'])) {
+      for (const block of message['content']) {
+        if (!isRecord(block) || block['type'] !== 'tool_result') continue;
+        const toolId = str(block['tool_use_id']);
+        if (toolId === null || !subagents.has(toolId)) continue;
+        if (result === null && !subagents.isRunning(toolId)) continue;
+        if (result !== null && result['status'] === 'async_launched') continue;
+        const failed =
+          block['is_error'] === true || (result !== null && result['status'] === 'failed');
+        events.push(
+          ...subagents.finish({
+            toolId,
+            status: failed ? 'error' : 'done',
+            totalTokens: result === null ? null : num(result['totalTokens']),
+            result,
+          }),
+        );
+      }
+    }
+    return [...events, ...extractToolResults(message)];
+  }
+
+  function fromSystem(data: Json): ChatEvent[] {
+    const sessionId = str(data['session_id']);
+    if (data['subtype'] === 'init' && sessionId !== null) {
+      return [{ kind: 'session', providerSessionId: sessionId }];
+    }
+    const toolId = str(data['tool_use_id']);
+    if (data['subtype'] !== 'task_notification' || toolId === null) return [];
+    const usage = isRecord(data['usage']) ? data['usage'] : null;
+    return subagents.finish({
+      toolId,
+      status: taskStatus(data['status']),
+      totalTokens: usage === null ? null : num(usage['total_tokens']),
+      result: null,
+    });
+  }
 
   function fromStreamEvent(event: unknown): ChatEvent[] {
     if (!isRecord(event)) return [];
@@ -115,31 +281,35 @@ function createClaudeParser(): ChatParser {
         const name = str(block['name']);
         if (toolId !== null && name !== null) {
           events.push({ kind: 'tool-use', toolId, name, input: prettyJson(block['input']) });
+          if (isSubagentTool(name))
+            events.push(...subagents.start({ toolId, input: block['input'] }));
         }
       }
     }
-    return events;
+    return [...events, ...contextEvents(message)];
   }
 
   return {
     parse(line) {
       const data = decodeLine(line);
       if (data === null) return [];
+      const parentToolId = str(data['parent_tool_use_id']);
       switch (data['type']) {
-        case 'system': {
-          const sessionId = str(data['session_id']);
-          return data['subtype'] === 'init' && sessionId !== null
-            ? [{ kind: 'session', providerSessionId: sessionId }]
-            : [];
-        }
+        case 'system':
+          return fromSystem(data);
         case 'rate_limit_event':
           return claudeUsage(data['rate_limit_info']);
         case 'stream_event':
-          return fromStreamEvent(data['event']);
-        case 'assistant':
-          return fromAssistant(data['message']);
+          return parentToolId === null ? fromStreamEvent(data['event']) : [];
+        case 'assistant': {
+          if (parentToolId === null) return fromAssistant(data['message']);
+          const message = data['message'];
+          return isRecord(message)
+            ? subagents.observeMessage({ toolId: parentToolId, message })
+            : [];
+        }
         case 'user':
-          return extractToolResults(data['message']);
+          return parentToolId === null ? fromUser(data) : [];
         case 'result': {
           const isError = data['is_error'] === true;
           const done: ChatEvent = {
@@ -296,6 +466,14 @@ function createGeminiParser(prefix: string): ChatParser {
   };
 }
 
+function codexContext(usage: unknown): ChatEvent[] {
+  if (!isRecord(usage)) return [];
+  const input = num(usage['input_tokens']);
+  if (input === null) return [];
+  const usedTokens = input + (num(usage['output_tokens']) ?? 0);
+  return [{ kind: 'context', usedTokens, windowTokens: null, model: null }];
+}
+
 function createCodexParser(prefix: string): ChatParser {
   const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
 
@@ -342,7 +520,10 @@ function createCodexParser(prefix: string): ChatParser {
         case 'item.completed':
           return fromItem(false, data['item']);
         case 'turn.completed':
-          return [{ kind: 'done', isError: false, costUsd: null, durationMs: null }];
+          return [
+            ...codexContext(data['usage']),
+            { kind: 'done', isError: false, costUsd: null, durationMs: null },
+          ];
         case 'turn.failed': {
           const error = isRecord(data['error']) ? data['error'] : {};
           return [

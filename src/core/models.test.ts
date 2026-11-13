@@ -5,7 +5,9 @@ import {
   isEffortSupported,
   parseAgyModelsOutput,
   parseOpenCodeModelsOutput,
+  resolveModelConfig,
 } from './models.js';
+import { DEFAULT_SETTINGS } from './settings.js';
 
 describe('models', () => {
   it('validates effort levels and provider support', () => {
@@ -20,6 +22,45 @@ describe('models', () => {
     expect(isEffortSupported('codex', 'max')).toBe(false);
     expect(isEffortSupported('gemini', 'high')).toBe(true);
     expect(isEffortSupported('gemini', 'minimal')).toBe(false);
+  });
+
+  it('resolves the effective model and effort from the session and the settings defaults', () => {
+    const models = {
+      ...DEFAULT_SETTINGS.models,
+      claude: { model: 'opus', effort: 'high' as const },
+    };
+    const settings = { models };
+    expect(resolveModelConfig({ provider: 'claude', model: null, effort: null, settings })).toEqual(
+      {
+        model: 'opus',
+        effort: 'high',
+      },
+    );
+    expect(
+      resolveModelConfig({ provider: 'claude', model: 'haiku', effort: 'low', settings }),
+    ).toEqual({ model: 'haiku', effort: 'low' });
+    expect(resolveModelConfig({ provider: 'codex', model: null, effort: null, settings })).toEqual({
+      model: null,
+      effort: 'medium',
+    });
+  });
+
+  it('falls back to the settings effort, then to null, for an unsupported effort', () => {
+    const settings = { models: DEFAULT_SETTINGS.models };
+    expect(
+      resolveModelConfig({ provider: 'claude', model: null, effort: 'minimal', settings }),
+    ).toEqual({ model: null, effort: 'medium' });
+    const unsupportedDefault = {
+      models: { ...DEFAULT_SETTINGS.models, claude: { model: null, effort: 'minimal' as const } },
+    };
+    expect(
+      resolveModelConfig({
+        provider: 'claude',
+        model: null,
+        effort: 'minimal',
+        settings: unsupportedDefault,
+      }),
+    ).toEqual({ model: null, effort: null });
   });
 
   it('parses agy models output with spinner noise and deduplicates ids', () => {

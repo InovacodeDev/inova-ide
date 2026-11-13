@@ -66,6 +66,8 @@ export function HandoffModal({
             type="button"
             className="icon-btn"
             aria-label="Fechar transferência"
+            data-tooltip="Fechar transferência"
+            data-shortcut="dismiss"
             onClick={onCancel}
           >
             <CloseIcon size={15} />

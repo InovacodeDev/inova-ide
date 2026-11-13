@@ -16,6 +16,7 @@ export function applySettingsPatch(settings: Settings, patch: SettingsPatch): Se
     voice: { ...settings.voice, ...patch.voice },
     sessions: { ...settings.sessions, ...patch.sessions },
     notifications: { ...settings.notifications, ...patch.notifications },
+    models: { ...settings.models, ...patch.models },
   };
 }
 
@@ -25,5 +26,6 @@ export function inverseSettingsPatch(settings: Settings, patch: SettingsPatch): 
     voice: pickPatchedKeys(settings.voice, patch.voice),
     sessions: pickPatchedKeys(settings.sessions, patch.sessions),
     notifications: pickPatchedKeys(settings.notifications, patch.notifications),
+    models: pickPatchedKeys(settings.models, patch.models),
   };
 }

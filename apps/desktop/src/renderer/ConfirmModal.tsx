@@ -50,6 +50,8 @@ export function ConfirmModal({
             type="button"
             className="icon-btn"
             aria-label="Fechar confirmação"
+            data-tooltip="Fechar confirmação"
+            data-shortcut="dismiss"
             onClick={onCancel}
           >
             <CloseIcon size={15} />

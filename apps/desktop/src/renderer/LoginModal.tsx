@@ -148,6 +148,8 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
             type="button"
             className="icon-btn"
             aria-label="Fechar janela de login"
+            data-tooltip="Fechar janela de login"
+            data-shortcut="dismiss"
             onClick={handleDismiss}
           >
             <CloseIcon size={15} />

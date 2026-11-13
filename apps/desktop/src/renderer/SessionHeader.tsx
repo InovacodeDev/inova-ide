@@ -107,7 +107,7 @@ export function SessionHeader(props: SessionHeaderProps) {
                 type="button"
                 className="session-header-edit"
                 aria-label={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
-                title="Renomear"
+                data-tooltip={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
                 onClick={startEdit}
               >
                 <PencilIcon size={14} />
@@ -136,7 +136,12 @@ export function SessionHeader(props: SessionHeaderProps) {
                 <span className="mono">{worktreeBranch}</span>
               </span>
               {onInspectWorktree ? (
-                <button type="button" className="btn btn-sm" onClick={onInspectWorktree}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  data-tooltip="Ver as alterações do worktree desta sessão"
+                  onClick={onInspectWorktree}
+                >
                   Ver diff
                 </button>
               ) : null}
@@ -144,6 +149,7 @@ export function SessionHeader(props: SessionHeaderProps) {
                 <button
                   type="button"
                   className="btn btn-sm"
+                  data-tooltip="Aplicar as alterações do worktree ao projeto"
                   disabled={worktreeBusy}
                   onClick={onApplyWorktree}
                 >
@@ -167,7 +173,7 @@ export function SessionHeader(props: SessionHeaderProps) {
             <button
               type="button"
               className="btn btn-sm"
-              title="Transferir sessão para outra conta ou provedor"
+              data-tooltip="Transferir sessão para outra conta ou provedor"
               onClick={onHandoff}
             >
               <SwitchIcon size={13} />
@@ -180,7 +186,8 @@ export function SessionHeader(props: SessionHeaderProps) {
         type="button"
         className="icon-btn"
         aria-label={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
-        title={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+        data-tooltip={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+        data-shortcut="close-tab"
         onClick={onClose}
       >
         <CloseIcon />

@@ -17,6 +17,7 @@ export interface Dictation {
   error: string | null;
   modelBytes: number;
   downloadPercent: number;
+  getLevels: (target: Uint8Array<ArrayBuffer>) => boolean;
   toggle: () => void;
   confirmDownload: () => void;
   cancel: () => void;
@@ -26,6 +27,7 @@ export interface Dictation {
 interface Capture {
   stream: MediaStream;
   context: AudioContext;
+  analyser: AnalyserNode;
   chunks: Float32Array[];
   interimTimer: ReturnType<typeof setInterval>;
   maxTimer: ReturnType<typeof setTimeout>;
@@ -34,6 +36,7 @@ interface Capture {
 const MIC_DENIED = 'Acesso ao microfone negado. Libere o microfone nas configurações do sistema.';
 const MIC_FAILED = 'Não foi possível abrir o microfone.';
 const BUFFER_SIZE = 4096;
+export const ANALYSER_FFT_SIZE = 512;
 
 export function useDictation(input: {
   hints: readonly string[];
@@ -76,6 +79,7 @@ export function useDictation(input: {
     captureRef.current = null;
     clearInterval(capture.interimTimer);
     clearTimeout(capture.maxTimer);
+    capture.analyser.disconnect();
     capture.stream.getTracks().forEach((track) => track.stop());
     void capture.context.close();
     return capture.chunks;
@@ -113,7 +117,11 @@ export function useDictation(input: {
     processor.onaudioprocess = (event) => {
       chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
     };
-    context.createMediaStreamSource(stream).connect(processor);
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = ANALYSER_FFT_SIZE;
+    source.connect(analyser);
+    source.connect(processor);
     processor.connect(context.destination);
 
     const interimTimer = setInterval(() => {
@@ -128,7 +136,7 @@ export function useDictation(input: {
         });
     }, DICTATION_INTERIM_MS);
     const maxTimer = setTimeout(() => void finish(), DICTATION_MAX_MS);
-    captureRef.current = { stream, context, chunks, interimTimer, maxTimer };
+    captureRef.current = { stream, context, analyser, chunks, interimTimer, maxTimer };
     setInterim('');
     setPhase('recording');
   }, [finish, setPhase, transcribe]);
@@ -185,6 +193,13 @@ export function useDictation(input: {
     setPhase('idle');
   }, [release, setPhase]);
 
+  const getLevels = useCallback((target: Uint8Array<ArrayBuffer>): boolean => {
+    const capture = captureRef.current;
+    if (capture === null) return false;
+    capture.analyser.getByteTimeDomainData(target);
+    return true;
+  }, []);
+
   const toggle = useCallback(() => {
     if (phaseRef.current === 'recording') void finish();
     else if (phaseRef.current === 'idle') void begin();
@@ -198,6 +213,7 @@ export function useDictation(input: {
     error,
     modelBytes,
     downloadPercent,
+    getLevels,
     toggle,
     confirmDownload,
     cancel,

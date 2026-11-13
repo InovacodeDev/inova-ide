@@ -110,7 +110,7 @@ export function ModePicker({
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         aria-label="Selecionar modo de execução"
-        title={
+        data-tooltip={
           riskyBypass
             ? `${activeOption.label}: executando sem restrições fora de worktree isolado`
             : activeOption.description

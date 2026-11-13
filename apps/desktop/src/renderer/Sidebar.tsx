@@ -17,6 +17,7 @@ import {
   KeyIcon,
   PencilIcon,
   PlusIcon,
+  SettingsIcon,
   SlidersIcon,
   TrashIcon,
 } from './icons';
@@ -46,6 +47,7 @@ export interface SidebarProps {
   onOpenInboxItem?: (sessionId: string) => void;
   onClearReadInbox?: () => void;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onOpenProjectSettings?: (project: ProjectView) => void;
   onImportSessions?: (project: ProjectView) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
@@ -209,7 +211,7 @@ function SessionRow(props: SessionRowProps) {
               type="button"
               className="session-action"
               aria-label={isSubsession ? 'Renomear subsessão' : 'Renomear sessão'}
-              title="Renomear"
+              data-tooltip={isSubsession ? 'Renomear subsessão' : 'Renomear sessão'}
               onClick={() => setEditing(true)}
             >
               <PencilIcon size={14} />
@@ -219,7 +221,7 @@ function SessionRow(props: SessionRowProps) {
                 type="button"
                 className="session-action"
                 aria-label={isSubsession ? 'Desarquivar subsessão' : 'Desarquivar sessão'}
-                title="Desarquivar"
+                data-tooltip={isSubsession ? 'Desarquivar subsessão' : 'Desarquivar sessão'}
                 onClick={() => actions.onUnarchiveSession(session)}
               >
                 <ArchiveIcon size={14} />
@@ -230,7 +232,7 @@ function SessionRow(props: SessionRowProps) {
                   type="button"
                   className="session-action"
                   aria-label="Nova subsessão"
-                  title="Nova subsessão"
+                  data-tooltip="Criar subsessão a partir desta sessão"
                   onClick={() => onNewSession({ project, parent: session })}
                 >
                   <PlusIcon size={14} />
@@ -239,7 +241,7 @@ function SessionRow(props: SessionRowProps) {
                   type="button"
                   className="session-action"
                   aria-label={isSubsession ? 'Arquivar subsessão' : 'Arquivar sessão'}
-                  title="Arquivar"
+                  data-tooltip={isSubsession ? 'Arquivar subsessão' : 'Arquivar sessão'}
                   onClick={() => onRequestArchive(session)}
                 >
                   <ArchiveIcon size={14} />
@@ -250,7 +252,7 @@ function SessionRow(props: SessionRowProps) {
               type="button"
               className="session-action session-action-danger"
               aria-label={isSubsession ? 'Excluir subsessão' : 'Excluir sessão'}
-              title="Excluir"
+              data-tooltip={isSubsession ? 'Excluir subsessão' : 'Excluir sessão'}
               onClick={remove}
             >
               <TrashIcon size={14} />
@@ -283,6 +285,7 @@ interface ProjectSectionProps extends SessionActions {
   sessions: Session[];
   activeSessionId: string | null;
   onOpenProfileSync?: (project: ProjectView) => void;
+  onOpenProjectSettings?: (project: ProjectView) => void;
   onImportSessions?: (project: ProjectView) => void;
   onRequestUnbind: (project: ProjectView) => void;
 }
@@ -295,6 +298,7 @@ function ProjectSection(props: ProjectSectionProps) {
     sessions,
     activeSessionId,
     onOpenProfileSync,
+    onOpenProjectSettings,
     onImportSessions,
     onRequestUnbind,
     ...actions
@@ -337,12 +341,23 @@ function ProjectSection(props: ProjectSectionProps) {
           </span>
         </button>
         <div className="project-actions">
+          {onOpenProjectSettings ? (
+            <button
+              type="button"
+              className="session-action"
+              aria-label="Configurações do projeto"
+              data-tooltip="Configurações do projeto"
+              onClick={() => onOpenProjectSettings(project)}
+            >
+              <SettingsIcon size={14} />
+            </button>
+          ) : null}
           {onOpenProfileSync ? (
             <button
               type="button"
               className="session-action"
               aria-label="Sincronizar MCPs e regras"
-              title="Sincronizar MCPs e regras"
+              data-tooltip="Sincronizar MCPs e regras"
               onClick={() => onOpenProfileSync(project)}
             >
               <SlidersIcon size={14} />
@@ -353,7 +368,7 @@ function ProjectSection(props: ProjectSectionProps) {
               type="button"
               className="session-action"
               aria-label="Importar sessões externas"
-              title="Importar sessões externas"
+              data-tooltip="Importar sessões externas"
               onClick={() => onImportSessions(project)}
             >
               <DownloadIcon size={14} />
@@ -363,7 +378,7 @@ function ProjectSection(props: ProjectSectionProps) {
             type="button"
             className="session-action"
             aria-label="Nova sessão na seção"
-            title="Nova sessão"
+            data-tooltip="Nova sessão neste projeto"
             onClick={() => onNewSession({ project, parent: null })}
           >
             <PlusIcon size={14} />
@@ -372,7 +387,7 @@ function ProjectSection(props: ProjectSectionProps) {
             type="button"
             className="session-action session-action-danger"
             aria-label="Excluir seção"
-            title="Excluir seção"
+            data-tooltip="Excluir seção do projeto"
             onClick={() => onRequestUnbind(project)}
           >
             <TrashIcon size={14} />
@@ -459,7 +474,12 @@ export function Sidebar(props: SidebarProps) {
   return (
     <>
       <nav className="sidebar" aria-label="Principal">
-        <button className="btn btn-primary sidebar-new" onClick={() => onNavigate('new-session')}>
+        <button
+          className="btn btn-primary sidebar-new"
+          data-tooltip="Criar uma nova sessão"
+          data-shortcut="new-session"
+          onClick={() => onNavigate('new-session')}
+        >
           <PlusIcon size={16} />
           Nova sessão
         </button>
@@ -502,6 +522,7 @@ export function Sidebar(props: SidebarProps) {
               activeSessionId={activeSessionId}
               statusOf={props.statusOf}
               onOpenProfileSync={props.onOpenProfileSync}
+              onOpenProjectSettings={props.onOpenProjectSettings}
               onImportSessions={props.onImportSessions}
               onOpenSession={props.onOpenSession}
               onNewSession={props.onNewSession}

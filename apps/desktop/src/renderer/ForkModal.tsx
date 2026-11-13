@@ -75,6 +75,8 @@ export function ForkModal({
             type="button"
             className="icon-btn"
             aria-label="Fechar bifurcação"
+            data-tooltip="Fechar bifurcação"
+            data-shortcut="dismiss"
             onClick={onCancel}
           >
             <CloseIcon size={15} />

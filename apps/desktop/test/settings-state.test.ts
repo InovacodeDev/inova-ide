@@ -3,6 +3,16 @@ import { describe, expect, test } from 'vitest';
 import { applySettingsPatch, inverseSettingsPatch } from '../src/renderer/settings-state';
 
 const settings: Settings = {
+  models: {
+    claude: { model: null, effort: 'medium' },
+    codex: { model: null, effort: 'medium' },
+    gemini: { model: null, effort: 'medium' },
+    deepseek: { model: null, effort: 'medium' },
+    kimi: { model: null, effort: 'medium' },
+    grok: { model: null, effort: 'medium' },
+    qwen: { model: null, effort: 'medium' },
+    opencode: { model: null, effort: 'medium' },
+  },
   appearance: { theme: 'dark' },
   voice: { language: 'auto', modelId: 'small-q5_1' },
   sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },

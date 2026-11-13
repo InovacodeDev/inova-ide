@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   parseApplyProfileSync,
+  parseAttachmentPick,
   parseBinding,
   parseComparisonRef,
   parseDefaultMode,
@@ -402,4 +403,13 @@ test('comparison and profile sync validation', () => {
   expect(
     parseApplyProfileSync({ projectId: 'p1', approvedIds: [''], rulesStrategy: 'copy' }),
   ).toBeUndefined();
+});
+
+test('parseAttachmentPick accepts only known kinds', () => {
+  for (const kind of ['images', 'documents', 'any'] as const) {
+    expect(parseAttachmentPick({ kind })).toEqual({ kind });
+  }
+  for (const input of [{ kind: 'videos' }, { kind: '' }, { kind: 1 }, {}, [], 'images', null]) {
+    expect(parseAttachmentPick(input)).toBeUndefined();
+  }
 });

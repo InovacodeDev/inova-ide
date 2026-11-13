@@ -11,8 +11,7 @@ export function formatPickerLabel(input: {
   const { model, effort, catalog } = input;
   const matched = model === null ? undefined : catalog.models.find((item) => item.id === model);
   const modelLabel = model === null ? catalog.defaultModelLabel : (matched?.label ?? model);
-  const effortLabel = effort === null ? catalog.defaultEffortLabel : EFFORT_LABEL[effort];
-  return `${modelLabel} (${effortLabel})`;
+  return effort === null ? modelLabel : `${modelLabel} (${EFFORT_LABEL[effort]})`;
 }
 
 export function resolveModelOptions(input: {

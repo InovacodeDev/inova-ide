@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { EFFORT_LABEL, PROVIDER_MODELS } from '@inova/core/models';
+import { EFFORT_LABEL, PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
-import type { EffortLevel, ExecutionMode, Session } from '@inova/core/types';
+import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
 import type { AccountView, ComparisonDiffView, ProjectView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { CompareIcon, PlusIcon, RefreshIcon } from './icons';
@@ -30,6 +30,7 @@ interface CompareViewProps {
   sessions: Record<string, Session[]>;
   chats: Record<string, ChatState>;
   compareMetrics: Record<string, CompareMetrics>;
+  modelDefaults: Settings['models'] | null;
   selectedGroupId: string | null;
   onSelectGroup: (groupId: string | null) => void;
   onStartComparison: (input: {
@@ -79,11 +80,13 @@ function SideConfigCard({
   heading,
   draft,
   accounts,
+  modelDefaults,
   onChange,
 }: {
   heading: string;
   draft: CompareSideDraft;
   accounts: readonly AccountView[];
+  modelDefaults: Settings['models'] | null;
   onChange: (next: CompareSideDraft) => void;
 }) {
   const account = accounts.find((item) => item.id === draft.accountId) ?? accounts[0];
@@ -107,10 +110,19 @@ function SideConfigCard({
     })),
   ];
 
-  const effortOptions: PlatformSelectOption[] = [
-    { value: '', label: catalog.defaultEffortLabel },
-    ...catalog.efforts.map((level) => ({ value: level, label: EFFORT_LABEL[level] })),
-  ];
+  const effortOptions: PlatformSelectOption[] = catalog.efforts.map((level) => ({
+    value: level,
+    label: EFFORT_LABEL[level],
+  }));
+  const shownEffort =
+    modelDefaults === null
+      ? draft.effort
+      : resolveModelConfig({
+          provider,
+          model: draft.model,
+          effort: draft.effort,
+          settings: { models: modelDefaults },
+        }).effort;
 
   const defaultOption = modeCatalog.options.find((opt) => opt.id === modeCatalog.defaultMode);
   const modeOptions: PlatformSelectOption[] = [
@@ -153,11 +165,9 @@ function SideConfigCard({
           <span className="modal-field-label">Esforço</span>
           <PlatformSelect
             ariaLabel={`${heading} esforço`}
-            value={draft.effort ?? ''}
+            value={shownEffort ?? ''}
             options={effortOptions}
-            onChange={(value) =>
-              onChange({ ...draft, effort: value === '' ? null : (value as EffortLevel) })
-            }
+            onChange={(value) => onChange({ ...draft, effort: value as EffortLevel })}
           />
         </div>
       ) : null}
@@ -272,6 +282,7 @@ export function CompareView(props: CompareViewProps) {
     sessions,
     chats,
     compareMetrics,
+    modelDefaults,
     selectedGroupId,
     onSelectGroup,
     onStartComparison,
@@ -461,12 +472,14 @@ export function CompareView(props: CompareViewProps) {
                 heading="Lado A"
                 draft={leftDraft}
                 accounts={accounts}
+                modelDefaults={modelDefaults}
                 onChange={setLeftDraft}
               />
               <SideConfigCard
                 heading="Lado B"
                 draft={rightDraft}
                 accounts={accounts}
+                modelDefaults={modelDefaults}
                 onChange={setRightDraft}
               />
             </div>

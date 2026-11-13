@@ -6,6 +6,7 @@ import {
   detachFileTrigger,
   detectComposerTrigger,
   filterCommands,
+  formatFileMention,
   isSameComposerTrigger,
   parseMessageFileSegments,
   resolveDroppedPath,
@@ -146,4 +147,44 @@ test('parseMessageFileSegments extracts relative file tags while preserving emai
     { kind: 'file', path: 'src/app.ts' },
     { kind: 'text', value: '. E envie para tito@inovacode.dev' },
   ]);
+});
+
+const SHOT = '/Users/x/Desktop/Captura de Tela 2026-11-13 às 15.22.49.png';
+
+test('formatFileMention quotes only paths that break the token', () => {
+  expect(formatFileMention('src/a.ts')).toBe('@src/a.ts');
+  expect(formatFileMention(SHOT)).toBe(`@"${SHOT}"`);
+  expect(formatFileMention('docs/meu arquivo.md')).toBe('@"docs/meu arquivo.md"');
+  expect(formatFileMention('a (1).png')).toBe('@"a (1).png"');
+});
+
+test('buildPromptWithAttachedFiles quotes paths with spaces and dedups quoted mentions', () => {
+  expect(buildPromptWithAttachedFiles({ text: 'Veja', files: [SHOT] })).toBe(`@"${SHOT}"\nVeja`);
+  expect(buildPromptWithAttachedFiles({ text: `Veja @"${SHOT}"`, files: [SHOT] })).toBe(
+    `Veja @"${SHOT}"`,
+  );
+});
+
+test('parseMessageFileSegments reads quoted mentions with spaces and non-ASCII', () => {
+  expect(parseMessageFileSegments(`@"${SHOT}"\nVeja`)).toEqual([
+    { kind: 'file', path: SHOT },
+    { kind: 'text', value: '\nVeja' },
+  ]);
+  expect(parseMessageFileSegments('Abra @"docs/meu arquivo.md".')).toEqual([
+    { kind: 'text', value: 'Abra ' },
+    { kind: 'file', path: 'docs/meu arquivo.md' },
+    { kind: 'text', value: '.' },
+  ]);
+  expect(parseMessageFileSegments('Abra @"docs/meu arquivo.md, depois')).toEqual([
+    { kind: 'text', value: 'Abra @"docs/meu arquivo.md, depois' },
+  ]);
+});
+
+test('applyFileSuggestion quotes paths with spaces', () => {
+  const trigger = detectComposerTrigger('ver @cap', 8);
+  if (trigger === null) throw new Error('trigger expected');
+  expect(applyFileSuggestion({ text: 'ver @cap', trigger, filePath: 'img/a b.png' })).toEqual({
+    text: 'ver @"img/a b.png" ',
+    cursor: 'ver @"img/a b.png" '.length,
+  });
 });

@@ -63,6 +63,22 @@ export interface ExternalSessionView extends ExternalSession {
 
 export type WorkspaceView = Workspace;
 
+export const ATTACHMENT_KINDS = ['images', 'documents', 'any'] as const;
+
+export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+
+export interface PickedAttachment {
+  path: string;
+  isDirectory: boolean;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  releaseUrl: string | null;
+}
+
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
 export interface AccountView {
@@ -128,6 +144,7 @@ export interface InovaApi {
   removeAccount(input: { label: string; force: boolean }): Promise<Result<null>>;
   listProjects(): Promise<Result<ProjectView[]>>;
   pickFolder(): Promise<string | null>;
+  pickAttachments(input: { kind: AttachmentKind }): Promise<Result<PickedAttachment[]>>;
   bindProject(input: { path: string; accountLabel: string }): Promise<Result<ProjectView>>;
   unbindProject(input: { path: string }): Promise<Result<null>>;
   listSessions(input: { projectId: string }): Promise<Result<SessionView[]>>;
@@ -154,6 +171,10 @@ export interface InovaApi {
   sendTestNotification(): Promise<Result<null>>;
   openNotificationSettings(): Promise<Result<null>>;
   openDataFolder(): Promise<Result<null>>;
+  getAppInfo(): Promise<Result<{ version: string }>>;
+  checkForUpdate(): Promise<Result<UpdateInfo>>;
+  openExternalUrl(input: { url: string }): Promise<Result<null>>;
+  onUpdateAvailable(cb: (info: UpdateInfo) => void): () => void;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
   getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
   applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
@@ -276,6 +297,7 @@ export const CHANNELS = {
   removeAccount: 'inova:removeAccount',
   listProjects: 'inova:listProjects',
   pickFolder: 'inova:pickFolder',
+  pickAttachments: 'inova:pickAttachments',
   bindProject: 'inova:bindProject',
   unbindProject: 'inova:unbindProject',
   listSessions: 'inova:listSessions',
@@ -288,6 +310,10 @@ export const CHANNELS = {
   sendTestNotification: 'inova:sendTestNotification',
   openNotificationSettings: 'inova:openNotificationSettings',
   openDataFolder: 'inova:openDataFolder',
+  getAppInfo: 'inova:getAppInfo',
+  checkForUpdate: 'inova:checkForUpdate',
+  openExternalUrl: 'inova:openExternalUrl',
+  updateAvailable: 'inova:update:available',
   deleteSession: 'inova:deleteSession',
   getWorktreeStatus: 'inova:getWorktreeStatus',
   applyWorktree: 'inova:applyWorktree',

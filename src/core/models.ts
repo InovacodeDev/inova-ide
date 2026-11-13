@@ -1,4 +1,4 @@
-import type { EffortLevel, ProviderId } from './types.js';
+import type { EffortLevel, ProviderId, Settings } from './types.js';
 
 export interface ModelOption {
   id: string;
@@ -8,7 +8,6 @@ export interface ModelOption {
 
 export interface ProviderModels {
   defaultModelLabel: string;
-  defaultEffortLabel: string;
   models: readonly ModelOption[];
   efforts: readonly EffortLevel[];
 }
@@ -40,7 +39,6 @@ export function isEffortLevel(value: unknown): value is EffortLevel {
 export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   claude: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       { id: 'sonnet', label: 'Sonnet 5.5', description: 'Equilibrado para uso diário' },
       { id: 'opus', label: 'Opus 5.5', description: 'Raciocínio profundo e tarefas complexas' },
@@ -56,7 +54,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   codex: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       {
         id: 'gpt-6-astra',
@@ -89,7 +86,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   gemini: {
     defaultModelLabel: 'Auto',
-    defaultEffortLabel: 'Padrão',
     models: [
       { id: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen (XHigh)' },
       { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
@@ -108,7 +104,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   deepseek: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       { id: 'deepseek-chat', label: 'DeepSeek V3.2', description: 'Uso diário e código rápido' },
       {
@@ -122,7 +117,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   kimi: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       { id: 'kimi-k2.5', label: 'Kimi K2.5', description: 'Agente multimodal e código avançado' },
       { id: 'kimi-k2-thinking', label: 'Kimi K2 Thinking', description: 'Raciocínio estendido' },
@@ -132,7 +126,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   grok: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       { id: 'grok-4', label: 'Grok 4', description: 'Raciocínio e engenharia avançada' },
       {
@@ -146,7 +139,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   qwen: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       {
         id: 'qwen3-coder-plus',
@@ -164,7 +156,6 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   },
   opencode: {
     defaultModelLabel: 'Padrão',
-    defaultEffortLabel: 'Padrão',
     models: [
       {
         id: 'opencode/zen-pro',
@@ -184,6 +175,19 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
 
 export function isEffortSupported(provider: ProviderId, effort: EffortLevel): boolean {
   return PROVIDER_MODELS[provider].efforts.includes(effort);
+}
+
+export function resolveModelConfig(input: {
+  provider: ProviderId;
+  model: string | null;
+  effort: EffortLevel | null;
+  settings: Pick<Settings, 'models'>;
+}): { model: string | null; effort: EffortLevel | null } {
+  const { provider, model, effort, settings } = input;
+  const defaults = settings.models[provider];
+  const settingsEffort = isEffortSupported(provider, defaults.effort) ? defaults.effort : null;
+  const sessionEffort = effort !== null && isEffortSupported(provider, effort) ? effort : null;
+  return { model: model ?? defaults.model, effort: sessionEffort ?? settingsEffort };
 }
 
 // REGEX: strip ANSI CSI/OSC sequences emitted by CLI spinners

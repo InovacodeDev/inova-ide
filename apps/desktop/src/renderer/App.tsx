@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
+import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -37,14 +37,19 @@ import { AlertIcon, CloseIcon, GitBranchIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
+import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
 import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
-import { formatShortcut, isMacPlatform, type ShortcutCommand } from './shortcuts';
+import { ChangelogModal } from './ChangelogModal';
+import { UpdateToast } from './UpdateToast';
+import { useUpdates } from './useUpdates';
+import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
 import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
+import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
 import { useTheme } from './useTheme';
@@ -108,6 +113,7 @@ export function App() {
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
+  const [projectSettingsId, setProjectSettingsId] = useState<string | null>(null);
   const [importProject, setImportProject] = useState<ProjectView | null>(null);
   const [applyingWorktree, setApplyingWorktree] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -118,6 +124,7 @@ export function App() {
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
   const { warning, dismiss, guard, call } = useWarning();
+  const updates = useUpdates();
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
@@ -899,6 +906,7 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
   const activeAccountLabel = activeAccount?.label ?? activeProject?.accountLabel ?? null;
@@ -962,6 +970,7 @@ export function App() {
 
   return (
     <div className="app">
+      <TooltipLayer isMac={IS_MAC} />
       {warning && (
         <div className="warning" role="alert" onClick={dismiss}>
           <span className="warning-icon" aria-hidden="true">
@@ -977,7 +986,6 @@ export function App() {
       )}
       <Header
         runningCount={Object.values(chats).filter((chat) => chat.running).length}
-        settingsShortcut={formatShortcut({ id: 'open-settings', isMac: IS_MAC })}
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
       />
       <div className="app-body">
@@ -1004,6 +1012,7 @@ export function App() {
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
           onOpenProfileSync={(project) => setProfileSyncProject(project)}
+          onOpenProjectSettings={(project) => setProjectSettingsId(project.id)}
           onImportSessions={(project) => setImportProject(project)}
           onUnbind={async (project) => {
             const result = await call(() => window.inova.unbindProject({ path: project.path }));
@@ -1045,6 +1054,7 @@ export function App() {
               sessions={sessions}
               chats={chats}
               compareMetrics={compareMetrics}
+              modelDefaults={settings?.models ?? null}
               selectedGroupId={selectedComparisonGroupId}
               onSelectGroup={setSelectedComparisonGroupId}
               onStartComparison={startComparison}
@@ -1134,6 +1144,14 @@ export function App() {
               const tabCatalog =
                 (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
                 PROVIDER_MODELS[tabProvider ?? 'claude'];
+              const tabModelConfig = settings
+                ? resolveModelConfig({
+                    provider: tabProvider ?? 'claude',
+                    model: tabSession?.model ?? null,
+                    effort: tabSession?.effort ?? null,
+                    settings,
+                  })
+                : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
               const tabState = chats[tab.sessionId] ?? initialChatState;
               const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
               const alternativeAccounts = accounts.filter(
@@ -1149,8 +1167,8 @@ export function App() {
                   visible={inWorkspace && tab.sessionId === tabs.active}
                   provider={tabProvider}
                   accountDisplay={accountDisplayOf(tabAccount, tabProject)}
-                  model={tabSession?.model ?? null}
-                  effort={tabSession?.effort ?? null}
+                  model={tabModelConfig.model}
+                  effort={tabModelConfig.effort}
                   mode={tabSession?.mode ?? null}
                   defaultModes={defaultModes}
                   inWorktree={Boolean(tabSession?.worktree)}
@@ -1216,17 +1234,8 @@ export function App() {
         </main>
         {inWorkspace && activeSession && activeProject && (
           <SessionDetails
-            session={activeSession}
-            parentTitle={activeParentTitle}
-            project={activeProject}
-            account={activeAccount}
-            usage={activeAccountLabel ? usage[activeAccountLabel] : undefined}
-            running={Boolean(chats[activeSession.id]?.running)}
-            onDetectChecks={() => void detectChecks(activeProject)}
-            onRunVerification={() => void runVerification(activeSession.id)}
-            onUpdateProjectVerification={(patch) =>
-              void updateProjectVerification(activeProject.id, patch)
-            }
+            subagents={chats[activeSession.id]?.subagents}
+            context={chats[activeSession.id]?.context}
           />
         )}
       </div>
@@ -1236,7 +1245,20 @@ export function App() {
         usage={usage}
         onLoadUsage={(account) => void loadUsage(account.label)}
         onManageAccounts={() => setView('accounts')}
+        version={updates.version}
+        updateAvailable={updates.updateAvailable}
+        onOpenChangelog={updates.openChangelog}
       />
+      {updates.toastVisible && updates.info && (
+        <UpdateToast info={updates.info} onDismiss={updates.dismissToast} />
+      )}
+      {updates.changelog && (
+        <ChangelogModal
+          version={updates.version}
+          whatsNew={updates.changelog.whatsNew}
+          onClose={updates.closeChangelog}
+        />
+      )}
       {loginModal && (
         <LoginModal
           key={loginModal.sessionId ?? loginModal.accountLabel}
@@ -1359,6 +1381,8 @@ export function App() {
                 type="button"
                 className="icon-btn"
                 aria-label="Fechar diff do worktree"
+                data-tooltip="Fechar diff do worktree"
+                data-shortcut="dismiss"
                 onClick={() => setWorktreeModal(null)}
               >
                 <CloseIcon size={15} />
@@ -1427,6 +1451,19 @@ export function App() {
               createWorktree,
             });
           }}
+        />
+      )}
+      {projectSettingsTarget && (
+        <ProjectSettingsModal
+          project={projectSettingsTarget}
+          running={Boolean(activeSession && chats[activeSession.id]?.running)}
+          canRunVerification={activeSession?.projectId === projectSettingsTarget.id}
+          onUpdate={(patch) => void updateProjectVerification(projectSettingsTarget.id, patch)}
+          onDetectChecks={() => void detectChecks(projectSettingsTarget)}
+          onRunVerification={() => {
+            if (activeSession) void runVerification(activeSession.id);
+          }}
+          onClose={() => setProjectSettingsId(null)}
         />
       )}
       {profileSyncProject && (

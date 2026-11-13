@@ -10,6 +10,7 @@ import {
   SessionsSection,
   ShortcutsSection,
 } from './SettingsSections';
+import { ModelsSection } from './SettingsModels';
 import { VoiceSection } from './SettingsVoice';
 import type { WarningCall } from './useWarning';
 import './modal.css';
@@ -63,8 +64,14 @@ export function SettingsModal(props: SettingsModalProps) {
   };
 
   const panels: Record<SettingsSectionId, ReactNode> = {
-    general: (
-      <GeneralSection defaultModes={defaultModes} call={call} onSetDefaultMode={onSetDefaultMode} />
+    general: <GeneralSection call={call} />,
+    models: (
+      <ModelsSection
+        settings={settings}
+        defaultModes={defaultModes}
+        onUpdate={onUpdate}
+        onSetDefaultMode={onSetDefaultMode}
+      />
     ),
     appearance: <AppearanceSection settings={settings} onUpdate={onUpdate} />,
     sessions: <SessionsSection settings={settings} onUpdate={onUpdate} />,
@@ -94,6 +101,8 @@ export function SettingsModal(props: SettingsModalProps) {
             type="button"
             className="icon-btn"
             aria-label="Fechar configurações"
+            data-tooltip="Fechar configurações"
+            data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={15} />

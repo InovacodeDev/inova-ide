@@ -1,8 +1,9 @@
 export type SettingsSectionId =
-  'general' | 'appearance' | 'sessions' | 'notifications' | 'voice' | 'shortcuts';
+  'general' | 'models' | 'appearance' | 'sessions' | 'notifications' | 'voice' | 'shortcuts';
 
 export const SETTINGS_SECTIONS: readonly { id: SettingsSectionId; label: string }[] = [
   { id: 'general', label: 'Geral' },
+  { id: 'models', label: 'Modelos' },
   { id: 'appearance', label: 'Aparência' },
   { id: 'sessions', label: 'Sessões' },
   { id: 'notifications', label: 'Notificações' },

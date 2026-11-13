@@ -58,8 +58,15 @@ const KNOWN_EXTENSIONLESS_FILES = new Set([
   'Procfile',
 ]);
 
-// REGEX: match @path tokens at start, whitespace, or opening delimiter
-const MESSAGE_FILE_PATTERN = /(^|[\s([{"'])@([^\s()[\]{}<>"'`]+)/g;
+// REGEX: match @"quoted path" or @path after start, whitespace, or opening delimiter; an unterminated quote never matches
+const MESSAGE_FILE_PATTERN = /(^|[\s([{"'])@(?:"([^"\n]+)"|([^\s()[\]{}<>"'`]+))/g;
+// REGEX: characters that break an unquoted @path token
+const MENTION_BREAKING_CHARS = /[\s()[\]{}<>"'`]/;
+
+export function formatFileMention(path: string): string {
+  if (!MENTION_BREAKING_CHARS.test(path) || path.includes('"')) return `@${path}`;
+  return `@"${path}"`;
+}
 
 function isLikelyRelativeFilePath(candidate: string): boolean {
   return (
@@ -83,7 +90,6 @@ export interface DroppedPath {
   grantDir: string | null;
 }
 
-// NOTE: a path with spaces breaks the @mention token; quoting needs provider-specific syntax
 export function resolveDroppedPath(input: {
   path: string;
   cwd: string | null;
@@ -123,7 +129,7 @@ export function buildPromptWithAttachedFiles(input: {
   );
   const prefixTokens = uniqueFiles
     .filter((file) => !existingMentions.has(file))
-    .map((file) => `@${file}`);
+    .map(formatFileMention);
   if (prefixTokens.length === 0) return body;
   const prefix = prefixTokens.join(' ');
   return body === '' ? prefix : `${prefix}\n${body}`;
@@ -145,16 +151,20 @@ export function parseMessageFileSegments(text: string): MessageFileSegment[] {
   for (const match of text.matchAll(MESSAGE_FILE_PATTERN)) {
     const matchIndex = match.index ?? 0;
     const lead = match[1] ?? '';
-    const rawCandidate = match[2] ?? '';
-    const stripped = rawCandidate.replace(/[.,;:!?]+$/, '');
+    const quotedCandidate = match[2];
+    const rawCandidate = quotedCandidate ?? match[3] ?? '';
+    const stripped =
+      quotedCandidate === undefined ? rawCandidate.replace(/[.,;:!?]+$/, '') : rawCandidate;
     const trailingPunctuation = rawCandidate.slice(stripped.length);
     if (!isLikelyRelativeFilePath(stripped)) continue;
     const tokenStart = matchIndex + lead.length;
+    const tokenLength =
+      quotedCandidate === undefined ? 1 + stripped.length : match[0].length - lead.length;
     if (tokenStart > cursor) {
       appendTextSegment(segments, text.slice(cursor, tokenStart));
     }
     segments.push({ kind: 'file', path: stripped });
-    cursor = tokenStart + 1 + stripped.length;
+    cursor = tokenStart + tokenLength;
     if (trailingPunctuation !== '') {
       appendTextSegment(segments, trailingPunctuation);
       cursor += trailingPunctuation.length;
@@ -174,9 +184,10 @@ export function applyFileSuggestion(input: {
   const { text, trigger, filePath } = input;
   const before = text.slice(0, trigger.start);
   const after = text.slice(trigger.end);
-  const inserted = after.startsWith(' ') ? `@${filePath}` : `@${filePath} `;
+  const mention = formatFileMention(filePath);
+  const inserted = after.startsWith(' ') ? mention : `${mention} `;
   const nextText = `${before}${inserted}${after}`;
-  const nextCursor = before.length + `@${filePath} `.length;
+  const nextCursor = before.length + mention.length + 1;
   return { text: nextText, cursor: nextCursor };
 }
 

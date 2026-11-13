@@ -1,4 +1,4 @@
-import type { ChatEvent, VerificationCheckResult } from '@inova/core/chat-types';
+import type { ChatEvent, SubagentSnapshot, VerificationCheckResult } from '@inova/core/chat-types';
 
 export type ChatItem =
   | { type: 'user'; id: string; text: string }
@@ -28,9 +28,17 @@ export type ChatItem =
     }
   | { type: 'error'; id: string; message: string };
 
+export interface ContextInfo {
+  usedTokens: number;
+  windowTokens: number | null;
+  model: string | null;
+}
+
 export interface ChatState {
   items: ChatItem[];
   running: boolean;
+  subagents?: SubagentSnapshot[];
+  context?: ContextInfo;
 }
 
 const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
@@ -81,13 +89,38 @@ function upsertVerification(
   return next;
 }
 
+function upsertSubagent(
+  subagents: SubagentSnapshot[],
+  event: Extract<ChatEvent, { kind: 'subagent' }>,
+): SubagentSnapshot[] {
+  const { kind: _kind, ...snapshot } = event;
+  const index = subagents.findIndex((item) => item.toolId === snapshot.toolId);
+  if (index === -1) return [...subagents, snapshot];
+  const next = subagents.slice();
+  next[index] = snapshot;
+  return next;
+}
+
 function applyEvent(state: ChatState, event: ChatEvent): ChatState {
   const { items } = state;
   switch (event.kind) {
-    case 'user':
+    case 'user': {
+      const { subagents: _previous, ...rest } = state;
+      return {
+        ...rest,
+        items: [...items, { type: 'user', id: `user-${items.length}`, text: event.text }],
+      };
+    }
+    case 'subagent':
+      return { ...state, subagents: upsertSubagent(state.subagents ?? [], event) };
+    case 'context':
       return {
         ...state,
-        items: [...items, { type: 'user', id: `user-${items.length}`, text: event.text }],
+        context: {
+          usedTokens: event.usedTokens,
+          windowTokens: event.windowTokens,
+          model: event.model,
+        },
       };
     case 'text-delta':
       return {
@@ -148,13 +181,22 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
         ...state,
         items: [...items, { type: 'error', id: `error-${items.length}`, message: event.message }],
       };
-    case 'done':
-      return {
+    case 'done': {
+      const closed = {
+        ...state,
         items: items.map((item) =>
           item.type === 'assistant' && item.streaming ? { ...item, streaming: false } : item,
         ),
         running: false,
       };
+      if (state.subagents === undefined) return closed;
+      return {
+        ...closed,
+        subagents: state.subagents.map((item) =>
+          item.status === 'running' ? { ...item, status: 'done' } : item,
+        ),
+      };
+    }
     case 'session':
     case 'usage-limits':
       return state;

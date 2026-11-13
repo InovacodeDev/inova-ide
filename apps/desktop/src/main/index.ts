@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -9,12 +10,14 @@ import { nodeRunner } from '@inova/node-io';
 import { Notification, app, BrowserWindow, dialog, shell } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
+import type { AttachmentKind, PickedAttachment } from '../shared/api.js';
 import { createChatRunner } from './chat.js';
 import type { SpawnChild } from './chat.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { killProcessGroup } from './process-group.js';
+import { createUpdateService } from './updates.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { findBinary, loginShellPath } from './shell-env.js';
@@ -127,6 +130,54 @@ async function pickFolder(): Promise<string | null> {
   return result.canceled ? null : (result.filePaths[0] ?? null);
 }
 
+const ATTACHMENT_FILTERS: Readonly<Record<AttachmentKind, Electron.FileFilter[]>> = {
+  images: [
+    {
+      name: 'Fotos e imagens',
+      extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'heic'],
+    },
+  ],
+  documents: [
+    {
+      name: 'Documentos',
+      extensions: [
+        'pdf',
+        'md',
+        'txt',
+        'doc',
+        'docx',
+        'rtf',
+        'csv',
+        'json',
+        'xls',
+        'xlsx',
+        'ppt',
+        'pptx',
+      ],
+    },
+  ],
+  any: [],
+};
+
+async function pickAttachments(kind: AttachmentKind): Promise<PickedAttachment[]> {
+  const properties: Electron.OpenDialogOptions['properties'] =
+    kind === 'any'
+      ? ['openFile', 'openDirectory', 'multiSelections']
+      : ['openFile', 'multiSelections'];
+  const options: Electron.OpenDialogOptions = {
+    properties,
+    filters: [...ATTACHMENT_FILTERS[kind]],
+  };
+  const window = BrowserWindow.getFocusedWindow();
+  const result = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled) return [];
+  return Promise.all(
+    result.filePaths.map(async (path) => ({ path, isDirectory: (await stat(path)).isDirectory() })),
+  );
+}
+
 function collectPtyOutput(): Promise<string> {
   const file = process.platform === 'win32' ? 'cmd.exe' : '/bin/echo';
   const args = process.platform === 'win32' ? ['/c', 'echo', 'pty-ok'] : ['pty-ok'];
@@ -161,6 +212,31 @@ app.setName('InovaIDE');
 
 void app.whenReady().then(async () => {
   if (process.env['INOVA_SELFTEST'] !== '1') {
+    const notifier = createNotifier({
+      platform: process.platform,
+      isSupported: () => Notification.isSupported(),
+      showNative: ({ title, body }) =>
+        new Promise((resolve) => {
+          const notification = new Notification({ title, body });
+          notification.once('show', () => resolve(null));
+          notification.once('failed', (_event, error) => resolve(error));
+          notification.show();
+        }),
+      runOsascript: async (args) => {
+        await execFileAsync('/usr/bin/osascript', args, { timeout: SHELL_TIMEOUT_MS });
+      },
+    });
+    const updates = createUpdateService({
+      current: app.getVersion(),
+      fetch: (url, init) => globalThis.fetch(url, init),
+      onAvailable: (info) => {
+        sendToWindow(CHANNELS.updateAvailable, info);
+        void notifier({
+          title: 'Inova',
+          body: `Nova versão do Inova IDE: v${info.latest ?? ''} disponível`,
+        });
+      },
+    });
     const created = createHandlers({
       root: dataRoot(process.env),
       runner: nodeRunner,
@@ -176,20 +252,9 @@ void app.whenReady().then(async () => {
       emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
       emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
       emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
-      notify: createNotifier({
-        platform: process.platform,
-        isSupported: () => Notification.isSupported(),
-        showNative: ({ title, body }) =>
-          new Promise((resolve) => {
-            const notification = new Notification({ title, body });
-            notification.once('show', () => resolve(null));
-            notification.once('failed', (_event, error) => resolve(error));
-            notification.show();
-          }),
-        runOsascript: async (args) => {
-          await execFileAsync('/usr/bin/osascript', args, { timeout: SHELL_TIMEOUT_MS });
-        },
-      }),
+      notify: notifier,
+      updates,
+      openExternal: (url) => shell.openExternal(url),
       ...(notificationSettingsUrl === undefined
         ? {}
         : { openNotificationSettings: () => shell.openExternal(notificationSettingsUrl) }),
@@ -199,6 +264,7 @@ void app.whenReady().then(async () => {
       },
       baseEnv,
       pickFolder,
+      pickAttachments,
     });
     handlers = created;
     const autoArchive = (): void => {
@@ -234,6 +300,7 @@ void app.whenReady().then(async () => {
       allowedOrigin: appUrl,
     });
     createWindow();
+    updates.start();
     return;
   }
   try {

@@ -11,6 +11,7 @@ import {
   updateSettings,
   VOICE_MODEL_IDS,
 } from './settings.js';
+import { PROVIDER_MODELS } from './models.js';
 import { loadStore, saveStore } from './store.js';
 import type { SettingsPatch } from './types.js';
 
@@ -135,6 +136,59 @@ describe('settings', () => {
       SettingsError,
     );
     expect((await loadStore(root)).settings).toBeUndefined();
+  });
+
+  it('defaults every provider to the provider model and medium effort', () => {
+    expect(Object.keys(DEFAULT_SETTINGS.models).sort()).toEqual(
+      Object.keys(PROVIDER_MODELS).sort(),
+    );
+    for (const entry of Object.values(DEFAULT_SETTINGS.models)) {
+      expect(entry).toEqual({ model: null, effort: 'medium' });
+    }
+  });
+
+  it('getSettings fills the models section for a store saved before it existed', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        settings: { voice: { language: 'pt' } },
+      }),
+    );
+    expect((await getSettings(root)).models).toEqual(DEFAULT_SETTINGS.models);
+  });
+
+  it('updateSettings stores one provider default and keeps the others', async () => {
+    const result = await updateSettings({
+      root,
+      patch: { models: { codex: { model: 'gpt-6-sol', effort: 'high' } } },
+    });
+    expect(result.models).toEqual({
+      ...DEFAULT_SETTINGS.models,
+      codex: { model: 'gpt-6-sol', effort: 'high' },
+    });
+    expect((await getSettings(root)).models.codex).toEqual({ model: 'gpt-6-sol', effort: 'high' });
+  });
+
+  it.each<[string, unknown]>([
+    [
+      'an effort the provider does not support',
+      { models: { claude: { model: null, effort: 'minimal' } } },
+    ],
+    ['an unknown effort', { models: { claude: { model: null, effort: 'ultra' } } }],
+    ['an empty model id', { models: { claude: { model: '', effort: 'low' } } }],
+    ['an oversized model id', { models: { claude: { model: 'a'.repeat(201), effort: 'low' } } }],
+    ['a non-string model id', { models: { claude: { model: 3, effort: 'low' } } }],
+    ['a missing effort', { models: { claude: { model: null } } }],
+    ['an extra entry field', { models: { claude: { model: null, effort: 'low', x: 1 } } }],
+    ['an unknown provider', { models: { cobol: { model: null, effort: 'low' } } }],
+    ['a non-object entry', { models: { claude: 'sonnet' } }],
+  ])('updateSettings rejects %s', async (_name, patch) => {
+    await expect(updateSettings({ root, patch: patch as SettingsPatch })).rejects.toBeInstanceOf(
+      SettingsError,
+    );
   });
 
   it('isSettingsPatch rejects non-objects and prototype keys', () => {

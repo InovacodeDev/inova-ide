@@ -65,6 +65,64 @@ describe('chatReducer', () => {
     });
   });
 
+  const agent: ChatEvent = {
+    kind: 'subagent',
+    toolId: 'tu1',
+    description: 'Explorar',
+    agentType: 'Explore',
+    model: 'haiku',
+    status: 'running',
+    inputTokens: 10,
+    outputTokens: 2,
+    totalTokens: 12,
+  };
+
+  test('subagent events upsert by tool id without adding chat items', () => {
+    const state = run([
+      agent,
+      { ...agent, toolId: 'tu2', description: 'Outro' },
+      { ...agent, status: 'done', totalTokens: 99 },
+    ]);
+    expect(state.items).toEqual([]);
+    expect(state.subagents?.map((item) => [item.toolId, item.status, item.totalTokens])).toEqual([
+      ['tu1', 'done', 99],
+      ['tu2', 'running', 12],
+    ]);
+  });
+
+  test('context event keeps the latest value and survives done', () => {
+    const state = run([
+      { kind: 'context', usedTokens: 1, windowTokens: 200_000, model: 'm' },
+      { kind: 'context', usedTokens: 5, windowTokens: 200_000, model: 'm' },
+      { kind: 'done', isError: false, costUsd: null, durationMs: null },
+    ]);
+    expect(state.context).toEqual({ usedTokens: 5, windowTokens: 200_000, model: 'm' });
+  });
+
+  test('done closes running subagents and a new user turn clears them', () => {
+    const finished = run([
+      agent,
+      { kind: 'done', isError: false, costUsd: null, durationMs: null },
+    ]);
+    expect(finished.subagents?.[0]?.status).toBe('done');
+    const next = run([{ kind: 'user', text: 'oi', at: 'now' }], finished);
+    expect(next.subagents).toBeUndefined();
+  });
+
+  test('replaying a transcript rebuilds subagents and context', () => {
+    const state = chatReducer(initialChatState, {
+      type: 'load',
+      events: [
+        { kind: 'user', text: 'oi', at: 'now' },
+        agent,
+        { kind: 'context', usedTokens: 7, windowTokens: null, model: null },
+        { kind: 'done', isError: false, costUsd: null, durationMs: null },
+      ],
+    });
+    expect(state.subagents?.[0]?.toolId).toBe('tu1');
+    expect(state.context?.usedTokens).toBe(7);
+  });
+
   test('session and usage-limits do not change items', () => {
     const state = run([
       { kind: 'session', providerSessionId: 's' },

@@ -200,6 +200,8 @@ export function ProfileSyncModal({
             type="button"
             className="icon-btn"
             aria-label="Fechar sincronização"
+            data-tooltip="Fechar sincronização"
+            data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={15} />

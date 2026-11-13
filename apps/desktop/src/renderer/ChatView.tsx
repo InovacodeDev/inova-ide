@@ -19,9 +19,14 @@ import type {
   QueuedTurn,
   Settings,
 } from '@inova/core/types';
-import type { AccountView, ProjectCommandView } from '../shared/api';
+import type { AccountView, AttachmentKind, ProjectCommandView } from '../shared/api';
+import { AttachMenu } from './AttachMenu';
 import type { ChatItem, ChatState } from './chat-reducer';
+import type { ComposerFormat } from './composer-format';
+import { RichComposer, type RichComposerHandle } from './RichComposer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
+import { ComposerToolbar } from './ComposerToolbar';
+import { isMacPlatform } from './shortcuts';
 import {
   applyCommandSuggestion,
   buildPromptWithAttachedFiles,
@@ -35,6 +40,7 @@ import {
   type DroppedPath,
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
+import { DictationControl } from './DictationControl';
 import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
@@ -42,12 +48,11 @@ import {
   FileIcon,
   GitForkIcon,
   ListTodoIcon,
-  MicIcon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
   SendIcon,
-  StopIcon,
+  StopFilledIcon,
   TerminalIcon,
 } from './icons';
 import { Markdown } from './Markdown';
@@ -106,8 +111,9 @@ export interface ChatViewProps {
   onCancel: () => void;
 }
 
+const IS_MAC = isMacPlatform(navigator.platform);
 const NEAR_BOTTOM_PX = 80;
-const MAX_COMPOSER_PX = 200;
+const NO_ACTIVE_FORMATS: ReadonlySet<ComposerFormat> = new Set();
 const FILE_SEARCH_DEBOUNCE_MS = 80;
 
 function ToolIcon({ name }: { name: string }) {
@@ -287,7 +293,7 @@ function Message({
                 type="button"
                 className="chat-fork-btn"
                 disabled={busy}
-                title="Bifurcar sessão a partir deste turno"
+                data-tooltip="Bifurcar sessão a partir deste turno"
                 onClick={() => onForkTurn(turnIndex)}
               >
                 <GitForkIcon size={12} />
@@ -348,6 +354,7 @@ function Message({
                 type="button"
                 className="btn btn-sm"
                 disabled={busy}
+                data-tooltip="Restaurar os arquivos para este checkpoint"
                 onClick={() =>
                   onRestoreCheckpoint({
                     ref: item.ref,
@@ -378,7 +385,12 @@ function Message({
             <div>{item.message}</div>
             {onOpenHandoff && isRateLimitMessage(item.message) ? (
               <div className="chat-error-actions">
-                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  data-tooltip="Abrir um resumo desta sessão em outra conta"
+                  onClick={onOpenHandoff}
+                >
                   Continuar com resumo em outra conta
                 </button>
               </div>
@@ -439,6 +451,7 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
           type="button"
           className="chat-file-tag-remove"
           aria-label="Fechar aviso do ditado"
+          data-tooltip="Fechar aviso do ditado"
           onClick={dictation.dismissError}
         >
           <CloseIcon size={12} />
@@ -465,6 +478,7 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
         type="button"
         className="chat-file-tag-remove"
         aria-label="Cancelar ditado"
+        data-tooltip="Cancelar ditado e descartar o áudio"
         onClick={dictation.cancel}
       >
         <CloseIcon size={12} />
@@ -512,6 +526,7 @@ export function ChatView({
   onCancel,
 }: ChatViewProps) {
   const [draft, setDraft] = useState('');
+  const [activeFormats, setActiveFormats] = useState(NO_ACTIVE_FORMATS);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<DroppedPath[] | null>(null);
@@ -520,11 +535,12 @@ export function ChatView({
     hints: voiceHints,
     language: dictationLanguage,
     onText: (text) => {
-      setDraft((current) => appendDictation(current, text));
-      inputRef.current?.focus();
+      const editor = editorRef.current;
+      if (editor === null) return;
+      const current = editor.getText();
+      editor.insertText(appendDictation(current, text).slice(current.length));
     },
   });
-  const recording = dictation.phase === 'recording';
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -540,7 +556,7 @@ export function ChatView({
   const searchSeqRef = useRef(0);
   const triggerRef = useRef<ComposerTrigger | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<RichComposerHandle>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
   const userTurnIndices = useMemo(() => {
@@ -560,9 +576,9 @@ export function ChatView({
     ref,
     () => ({
       focusComposer: () => {
-        const input = inputRef.current;
-        if (readOnly || input === null) return false;
-        input.focus();
+        const editor = editorRef.current;
+        if (readOnly || editor === null) return false;
+        editor.focus();
         return true;
       },
       toggleDictation: () => {
@@ -651,33 +667,38 @@ export function ChatView({
     }
   };
 
+  const syncFromEditor = () => {
+    const editor = editorRef.current;
+    if (editor !== null) syncTrigger(editor.getText(), editor.getCaretOffset());
+  };
+
   const applySelectedFile = (filePath: string) => {
-    if (!activeTrigger || activeTrigger.kind !== 'file') return;
-    const applied = detachFileTrigger({ text: draft, trigger: activeTrigger });
-    setDraft(applied.text);
+    const editor = editorRef.current;
+    if (!activeTrigger || activeTrigger.kind !== 'file' || editor === null) return;
+    const text = editor.getText();
+    const applied = detachFileTrigger({ text, trigger: activeTrigger });
+    editor.replaceRange({
+      start: applied.cursor,
+      end: applied.cursor + text.length - applied.text.length,
+      text: '',
+    });
     setAttachedFiles((current) => (current.includes(filePath) ? current : [...current, filePath]));
     commitTrigger(null);
     setActiveIndex(0);
-    queueMicrotask(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(applied.cursor, applied.cursor);
-    });
   };
 
   const applySelectedCommand = (command: ProjectCommandView) => {
-    if (!activeTrigger || activeTrigger.kind !== 'command') return;
-    const applied = applyCommandSuggestion({ text: draft, trigger: activeTrigger, command });
-    setDraft(applied.text);
+    const editor = editorRef.current;
+    if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
+    const applied = applyCommandSuggestion({
+      text: editor.getText(),
+      trigger: activeTrigger,
+      command,
+    });
+    const expanded = applied.text.slice(activeTrigger.start, applied.cursor);
+    editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: expanded });
     commitTrigger(null);
     setActiveIndex(0);
-    queueMicrotask(() => {
-      const input = inputRef.current;
-      if (!input) return;
-      input.focus();
-      input.setSelectionRange(applied.cursor, applied.cursor);
-    });
   };
 
   const popupModel: ComposerPopupModel | null = useMemo(() => {
@@ -718,15 +739,8 @@ export function ChatView({
   }, [items, thinking, visible]);
 
   useEffect(() => {
-    if (visible) inputRef.current?.focus();
+    if (visible) editorRef.current?.focus();
   }, [visible]);
-
-  useLayoutEffect(() => {
-    const input = inputRef.current;
-    if (input === null) return;
-    input.style.height = 'auto';
-    input.style.height = `${Math.min(input.scrollHeight, MAX_COMPOSER_PX)}px`;
-  }, [draft, visible]);
 
   const onScroll = () => {
     const list = listRef.current;
@@ -736,7 +750,7 @@ export function ChatView({
 
   const attachMentions = (dropped: readonly DroppedPath[]) => {
     setAttachedFiles((current) => [...new Set([...current, ...dropped.map((d) => d.mention)])]);
-    inputRef.current?.focus();
+    editorRef.current?.focus();
   };
 
   const hasFiles = (event: DragEvent<HTMLElement>) => event.dataTransfer.types.includes('Files');
@@ -766,9 +780,27 @@ export function ChatView({
       const isDirectory = item.webkitGetAsEntry()?.isDirectory ?? false;
       return [resolveDroppedPath({ path, cwd: workingDir, isDirectory })];
     });
+    routeDropped(dropped);
+  };
+
+  const routeDropped = (dropped: readonly DroppedPath[]) => {
     const outside = dropped.filter((item) => item.grantDir !== null);
     attachMentions(dropped.filter((item) => item.grantDir === null));
     if (outside.length > 0) setPendingDrop(outside);
+  };
+
+  const pickAttachments = async (kind: AttachmentKind) => {
+    const result = await window.inova.pickAttachments({ kind });
+    if (!result.ok || result.value.length === 0) return;
+    routeDropped(
+      result.value.map(({ path, isDirectory }) =>
+        resolveDroppedPath({ path, cwd: workingDir, isDirectory }),
+      ),
+    );
+  };
+
+  const formatDraft = (format: ComposerFormat) => {
+    if (!readOnly) editorRef.current?.format(format);
   };
 
   const confirmPendingDrop = () => {
@@ -797,16 +829,19 @@ export function ChatView({
   );
 
   const submit = () => {
-    const prompt = buildPromptWithAttachedFiles({ text: draft, files: attachedFiles });
+    const editor = editorRef.current;
+    const markdown = editor === null ? draft : editor.getMarkdown();
+    const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });
     if (prompt === '' || running || readOnly) return;
     stickRef.current = true;
     onSend(prompt, grantedDirs);
+    editor?.clear();
     setDraft('');
     setAttachedFiles([]);
     commitTrigger(null);
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (popupModel) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -907,6 +942,7 @@ export function ChatView({
                     <button
                       type="button"
                       className="btn btn-sm"
+                      data-tooltip="Remover este turno da fila"
                       onClick={() => onCancelQueuedTurn(queued.turnId)}
                     >
                       Cancelar
@@ -942,6 +978,7 @@ export function ChatView({
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
+                  data-tooltip="Enviar este turno quando a conta ficar livre"
                   onClick={() => onEnqueuePrompt(busyConflict.prompt)}
                 >
                   Enfileirar turno
@@ -961,7 +998,12 @@ export function ChatView({
                   </button>
                 ))}
               {onOpenHandoff ? (
-                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  data-tooltip="Transferir a sessão para outra conta ou provedor"
+                  onClick={onOpenHandoff}
+                >
                   Handoff
                 </button>
               ) : null}
@@ -971,7 +1013,7 @@ export function ChatView({
                   className="btn btn-sm"
                   onClick={() => {
                     if (draft.trim() === '' && attachedFiles.length === 0) {
-                      setDraft(busyConflict.prompt);
+                      editorRef.current?.setMarkdown(busyConflict.prompt);
                     }
                     onDismissBusyConflict();
                   }}
@@ -984,6 +1026,7 @@ export function ChatView({
         ) : null}
         {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
+          {readOnly ? null : <ComposerToolbar active={activeFormats} onFormat={formatDraft} />}
           {attachedFiles.length > 0 ? (
             <div className="chat-composer-files" aria-label="Arquivos anexados">
               {attachedFiles.map((filePath) => (
@@ -994,6 +1037,7 @@ export function ChatView({
                     type="button"
                     className="chat-file-tag-remove"
                     aria-label={`Remover ${filePath}`}
+                    data-tooltip="Remover anexo"
                     onClick={() =>
                       setAttachedFiles((current) => current.filter((item) => item !== filePath))
                     }
@@ -1005,33 +1049,18 @@ export function ChatView({
             </div>
           ) : null}
           <DictationStatus dictation={dictation} />
-          <textarea
-            ref={inputRef}
-            className="chat-input"
-            rows={1}
-            value={draft}
+          <RichComposer
+            ref={editorRef}
+            isMac={IS_MAC}
+            readOnly={readOnly}
             placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente… (@arquivo, /comando)'}
-            disabled={readOnly}
-            onChange={(event) => {
-              const nextValue = event.target.value;
-              setDraft(nextValue);
-              syncTrigger(nextValue, event.target.selectionStart ?? nextValue.length);
-            }}
-            onClick={(event) => {
-              const target = event.currentTarget;
-              syncTrigger(target.value, target.selectionStart ?? target.value.length);
-            }}
-            onSelect={(event) => {
-              const target = event.currentTarget;
-              syncTrigger(target.value, target.selectionStart ?? target.value.length);
-            }}
-            onKeyUp={(event) => {
-              const target = event.currentTarget;
-              syncTrigger(target.value, target.selectionStart ?? target.value.length);
-            }}
+            onChange={setDraft}
+            onCaretChange={syncFromEditor}
+            onActiveFormatsChange={setActiveFormats}
             onKeyDown={onKeyDown}
           />
           <div className="chat-composer-bar">
+            {readOnly ? null : <AttachMenu onPick={(kind) => void pickAttachments(kind)} />}
             {provider ? (
               <>
                 <span
@@ -1066,33 +1095,24 @@ export function ChatView({
                 />
               </>
             ) : null}
-            {readOnly ? null : (
-              <button
-                type="button"
-                className={recording ? 'chat-mic chat-mic-recording' : 'chat-mic'}
-                aria-label={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
-                title={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
-                aria-pressed={recording}
-                disabled={dictation.phase !== 'idle' && !recording}
-                onClick={dictation.toggle}
-              >
-                {recording ? <StopIcon size={14} /> : <MicIcon size={16} />}
-              </button>
-            )}
+            {readOnly ? null : <DictationControl dictation={dictation} />}
             {running ? (
               <button
                 type="button"
                 className="chat-send chat-send-stop"
                 aria-label="Parar"
+                data-tooltip="Parar resposta"
                 onClick={onCancel}
               >
-                <StopIcon />
+                <StopFilledIcon size={12} />
               </button>
             ) : (
               <button
                 type="button"
                 className="chat-send"
                 aria-label="Enviar mensagem"
+                data-tooltip="Enviar mensagem"
+                data-shortcut-text="Enter"
                 disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}
               >

@@ -156,7 +156,7 @@ function CodeBlock({ lang, code, streaming }: CodeBlockProps) {
           type="button"
           className="md-code-copy"
           aria-label={copied ? 'Copiado' : 'Copiar'}
-          title={copied ? 'Copiado' : 'Copiar'}
+          data-tooltip={copied ? 'Copiado' : 'Copiar código'}
           onClick={copy}
         >
           {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}

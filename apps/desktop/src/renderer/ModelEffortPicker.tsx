@@ -78,6 +78,7 @@ export function ModelEffortPicker({
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         aria-label="Selecionar modelo e nível de esforço"
+        data-tooltip="Escolher modelo e nível de esforço"
         onClick={() => setOpen((current) => !current)}
       >
         <span className="chat-picker-chevron">
@@ -91,14 +92,6 @@ export function ModelEffortPicker({
           <div className="chat-picker-section">
             <div className="chat-picker-title">Nível de esforço</div>
             <div className="chat-effort-group" role="group" aria-label="Nível de esforço">
-              <button
-                type="button"
-                className={effort === null ? 'chat-effort-btn active' : 'chat-effort-btn'}
-                aria-pressed={effort === null}
-                onClick={() => onChange({ effort: null })}
-              >
-                {catalog.defaultEffortLabel}
-              </button>
               {catalog.efforts.map((level) => {
                 const active = effort === level;
                 return (

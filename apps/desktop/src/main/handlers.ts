@@ -33,6 +33,7 @@ import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import {
   PROVIDER_MODELS,
   isEffortSupported,
+  resolveModelConfig,
   parseAgyModelsOutput,
   parseOpenCodeModelsOutput,
 } from '@inova/core/models';
@@ -89,11 +90,14 @@ import type { UsageDeps } from '@inova/core/usage';
 import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
 import type {
   AccountView,
+  AttachmentKind,
   ExternalSessionView,
   LoginEvent,
+  PickedAttachment,
   ProjectView,
   Result,
   StartedLogin,
+  UpdateInfo,
   WorktreeStatusView,
 } from '../shared/api.js';
 import { parseTranscriptLine } from './chat.js';
@@ -102,11 +106,13 @@ import { createLoginFlowManager } from './login-flow.js';
 import type { SessionManager } from './sessions.js';
 import { findBinary } from './shell-env.js';
 import { createTurnQueue } from './turn-queue.js';
+import { parseExternalUrl } from './updates-core.js';
 import {
   fail,
   guarded,
   ok,
   parseApplyProfileSync,
+  parseAttachmentPick,
   parseBinding,
   parseComparisonRef,
   parseDefaultMode,
@@ -152,8 +158,11 @@ export interface HandlerDeps {
   notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
   openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
+  openExternal?: (url: string) => Promise<void>;
+  updates?: { current: string; check: () => Promise<Result<UpdateInfo>> };
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
   pickFolder: () => Promise<string | null>;
+  pickAttachments: (kind: AttachmentKind) => Promise<PickedAttachment[]>;
 }
 
 const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão']);
@@ -813,14 +822,20 @@ export function createHandlers(deps: HandlerDeps) {
       sessionMode: session.mode ?? null,
       defaultModes: store.defaultModes,
     });
+    const modelConfig = resolveModelConfig({
+      provider: account.provider,
+      model: session.model ?? null,
+      effort: session.effort ?? null,
+      settings: await getSettings(deps.root),
+    });
     const spec = buildChatTurn({
       account,
       cwd,
       prompt: promptForCli,
       turn,
       baseEnv: input.baseEnv,
-      model: session.model ?? null,
-      effort: session.effort ?? null,
+      model: modelConfig.model,
+      effort: modelConfig.effort,
       executionMode,
       extraDirs: input.extraDirs,
     });
@@ -922,6 +937,10 @@ export function createHandlers(deps: HandlerDeps) {
         return ok(views);
       }),
     pickFolder: (): Promise<string | null> => deps.pickFolder(),
+    pickAttachments: (input: unknown): Promise<Result<PickedAttachment[]>> =>
+      validated(input, parseAttachmentPick, async ({ kind }) =>
+        ok(await deps.pickAttachments(kind)),
+      ),
     bindProject: (input: unknown): Promise<Result<ProjectView>> =>
       validated(input, parseBinding, ({ path, accountLabel }) =>
         serialized(async () => {
@@ -1070,6 +1089,27 @@ export function createHandlers(deps: HandlerDeps) {
           await deps.openPath(deps.root);
         } catch (error: unknown) {
           if (error instanceof Error) return fail('Não foi possível abrir a pasta de dados.');
+          throw error;
+        }
+        return ok(null);
+      }),
+    getAppInfo: (): Promise<Result<{ version: string }>> =>
+      guarded(async () =>
+        deps.updates
+          ? ok({ version: deps.updates.current })
+          : fail('Versão do aplicativo indisponível.'),
+      ),
+    checkForUpdate: (): Promise<Result<UpdateInfo>> =>
+      guarded(async () =>
+        deps.updates ? deps.updates.check() : fail('Verificação de atualização indisponível.'),
+      ),
+    openExternalUrl: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseExternalUrl, async (url) => {
+        if (!deps.openExternal) return fail('Abrir links não está disponível.');
+        try {
+          await deps.openExternal(url);
+        } catch (error: unknown) {
+          if (error instanceof Error) return fail('Não foi possível abrir o link.');
           throw error;
         }
         return ok(null);

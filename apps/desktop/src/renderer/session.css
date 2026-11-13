@@ -146,93 +146,6 @@
   margin: 0;
 }
 
-.session-details-account {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.session-details-account-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.session-details-account-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-details-provider {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.session-details-status {
-  flex: none;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.session-details-grid {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 12px;
-  margin: 0;
-  font-size: 12px;
-}
-
-.session-details-grid dt {
-  color: var(--muted);
-}
-
-.session-details-grid dd {
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.usage-bars {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.usage-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.usage-row-head {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-}
-
-.usage-reset {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.usage-note {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.usage-error {
-  color: var(--error);
-}
-
 .session-header-worktree {
   display: inline-flex;
   align-items: center;
@@ -245,58 +158,6 @@
   gap: 5px;
   border-color: var(--accent-border);
   color: var(--accent);
-}
-
-.session-details-toggles,
-.session-details-checks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.session-details-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.session-details-check-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.session-details-actions {
-  display: flex;
-  gap: 6px;
-  margin: 10px 0 8px;
-}
-
-.session-details-add-check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.session-details-add-check .field {
-  flex: 1;
-  min-width: 0;
-  height: 32px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-}
-
-.session-details-add-check .btn {
-  flex: none;
-  height: 32px;
 }
 
 .new-session-check {
@@ -322,4 +183,90 @@
   font-size: 12px;
   line-height: 1.45;
   white-space: pre;
+}
+
+.session-details-context {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.session-details-context-model {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-details-meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.session-details-meter-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.session-details-meter-fill[data-high='true'] {
+  background: var(--error);
+}
+
+.session-details-subagents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-details-subagent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-details-subagent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-details-subagent-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-details-subagent-status {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.session-details-subagent-status[data-status='running'] {
+  color: var(--accent);
+}
+
+.session-details-subagent-status[data-status='done'] {
+  color: var(--ok);
+}
+
+.session-details-subagent-status[data-status='error'] {
+  color: var(--error);
+}
+
+.session-details-subagent-meta {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

@@ -1,4 +1,18 @@
 import { Archive } from 'pulsoicon-react/icons/archive';
+import { CodeXml } from 'pulsoicon-react/icons/code-xml';
+import { FileText } from 'pulsoicon-react/icons/file-text';
+import { Image } from 'pulsoicon-react/icons/image';
+import { Italic } from 'pulsoicon-react/icons/italic';
+import { Link } from 'pulsoicon-react/icons/link';
+import { List } from 'pulsoicon-react/icons/list';
+import { ListOrdered } from 'pulsoicon-react/icons/list-ordered';
+import { Minus } from 'pulsoicon-react/icons/minus';
+import { Paperclip } from 'pulsoicon-react/icons/paperclip';
+import { Pilcrow } from 'pulsoicon-react/icons/pilcrow';
+import { Quote } from 'pulsoicon-react/icons/quote';
+import { SquareCode } from 'pulsoicon-react/icons/square-code';
+import { Strikethrough } from 'pulsoicon-react/icons/strikethrough';
+import { Underline } from 'pulsoicon-react/icons/underline';
 import { ArrowLeftRight } from 'pulsoicon-react/icons/arrow-left-right';
 import { ArrowRight } from 'pulsoicon-react/icons/arrow-right';
 import { Check } from 'pulsoicon-react/icons/check';
@@ -92,6 +106,14 @@ export function AlertIcon({ size = 16 }: IconProps) {
 
 export function StopIcon({ size = 16 }: IconProps) {
   return <Square size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function StopFilledIcon({ size = 12 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+      <rect x="1" y="1" width="10" height="10" rx="2" />
+    </svg>
+  );
 }
 
 export function SendIcon({ size = 16 }: IconProps) {
@@ -216,4 +238,78 @@ export function SettingsIcon({ size = 16 }: IconProps) {
 
 export function SlidersIcon({ size = 16 }: IconProps) {
   return <SlidersHorizontal size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function PaperclipIcon({ size = 16 }: IconProps) {
+  return <Paperclip size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ImageIcon({ size = 16 }: IconProps) {
+  return <Image size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function FileTextIcon({ size = 16 }: IconProps) {
+  return <FileText size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function BoldIcon({ size = 16 }: IconProps) {
+  return (
+    <svg
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />
+    </svg>
+  );
+}
+
+export function ItalicIcon({ size = 16 }: IconProps) {
+  return <Italic size={size} strokeWidth={1.9} aria-hidden="true" />;
+}
+
+export function UnderlineIcon({ size = 16 }: IconProps) {
+  return <Underline size={size} strokeWidth={1.9} aria-hidden="true" />;
+}
+
+export function StrikethroughIcon({ size = 16 }: IconProps) {
+  return <Strikethrough size={size} strokeWidth={1.9} aria-hidden="true" />;
+}
+
+export function PilcrowIcon({ size = 16 }: IconProps) {
+  return <Pilcrow size={size} strokeWidth={1.9} aria-hidden="true" />;
+}
+
+export function LinkIcon({ size = 16 }: IconProps) {
+  return <Link size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function ListOrderedIcon({ size = 16 }: IconProps) {
+  return <ListOrdered size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function ListBulletIcon({ size = 16 }: IconProps) {
+  return <List size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function QuoteIcon({ size = 16 }: IconProps) {
+  return <Quote size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function InlineCodeIcon({ size = 16 }: IconProps) {
+  return <CodeXml size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function CodeBlockIcon({ size = 16 }: IconProps) {
+  return <SquareCode size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function DividerIcon({ size = 16 }: IconProps) {
+  return <Minus size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
