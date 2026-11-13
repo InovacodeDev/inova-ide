@@ -14,7 +14,7 @@ Verificado nesta máquina em 2026-11-13 (Claude Code 2.1.322, agy 1.5.8, arquivo
 
 | Provedor | Local | Formato | Fase |
 | --- | --- | --- | --- |
-| `claude` | `<CLAUDE_CONFIG_DIR ou ~/.claude>/projects/<cwd com todo caractere fora de [a-zA-Z0-9] trocado por ->/<uuid>.jsonl` | JSONL. Linhas `user`/`assistant` com `message` no formato da API, `cwd`, `timestamp`, `isMeta`, `isSidechain` | 1 (verificado de ponta a ponta até a retomada) |
+| `claude` | `<CLAUDE_CONFIG_DIR ou ~/.claude>/projects/<cwd com todo caractere fora de [a-zA-Z0-9] trocado por ->/<uuid>.jsonl` | JSONL. Linhas `user`/`assistant` com `message` no formato da API, `cwd`, `timestamp`, `isMeta`, `isSidechain` | 1 (listar, importar e histórico verificados no app; `claude --resume` acha a sessão copiada; turno continuado não verificado: conta de teste sem login) |
 | `codex` | `<CODEX_HOME ou ~/.codex>/sessions/AAAA/MM/DD/rollout-<data>-<uuid>.jsonl` | JSONL. Primeira linha `session_meta` com `payload.id` e `payload.cwd`; mensagens em `response_item` com `payload.role` | 1 (descoberta e cópia testadas; retomada não verificada: binário `codex` ausente na máquina) |
 | `gemini` (`agy`) | `~/.gemini/antigravity-cli/conversations/<uuid>.db` + índice `conversation_summaries.db` | SQLite por conversa, conteúdo em protobuf | 2 |
 | `qwen`, `kimi`, `grok`, `opencode`, `deepseek` | Não confirmado | Não confirmado | 2 |
