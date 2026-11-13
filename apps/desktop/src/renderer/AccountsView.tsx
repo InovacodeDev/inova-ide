@@ -10,6 +10,8 @@ import {
   orderedUsageWindows,
   providerHealth,
   usageLevel,
+  usageWindowKey,
+  usageWindowLabel,
 } from './footer-state';
 import { folderName } from './path-name';
 import { PlatformSelect } from './PlatformSelect';
@@ -147,7 +149,7 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
           const reset = formatResetIn({ resetsAt: w.resetsAt, now: new Date() });
           const exact = formatResetDateTime(w.resetsAt);
           return (
-            <div key={w.kind} className="account-usage-window">
+            <div key={usageWindowKey(w)} className="account-usage-window">
               <div className="usage-track">
                 <div
                   className={`usage-fill usage-${usageLevel(percent)}`}
@@ -155,7 +157,8 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
                 />
               </div>
               <div className="account-usage-text">
-                <span className="mono">{Math.round(percent)}%</span> {WINDOW_LABEL[w.kind]}
+                <span className="mono">{Math.round(percent)}%</span>{' '}
+                {usageWindowLabel({ window: w, labels: WINDOW_LABEL })}
                 {reset ? ` · renova ${reset === 'agora' ? 'agora' : `em ${reset}`}` : ''}
                 {exact ? <span className="account-wide-only"> ({exact})</span> : null}
               </div>

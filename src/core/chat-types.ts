@@ -4,6 +4,7 @@ export interface UsageWindow {
   kind: 'session' | 'weekly' | 'monthly';
   usedPercent: number;
   resetsAt: string | null;
+  scope?: string;
 }
 
 export interface UsageSnapshot {

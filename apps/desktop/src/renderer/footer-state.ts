@@ -22,7 +22,28 @@ export const PROVIDER_ORDER: readonly ProviderId[] = [
 export const USAGE_WINDOW_ORDER: readonly UsageWindow['kind'][] = ['session', 'weekly', 'monthly'];
 
 export function orderedUsageWindows(windows: readonly UsageWindow[]): UsageWindow[] {
-  return USAGE_WINDOW_ORDER.flatMap((kind) => windows.filter((w) => w.kind === kind));
+  const scopes = [...new Set([undefined, ...windows.map((w) => w.scope)])];
+  return scopes.flatMap((scope) =>
+    USAGE_WINDOW_ORDER.flatMap((kind) =>
+      windows.filter((w) => w.kind === kind && w.scope === scope),
+    ),
+  );
+}
+
+export function primaryUsageWindows(windows: readonly UsageWindow[]): UsageWindow[] {
+  return orderedUsageWindows(windows).filter((w) => w.scope === undefined);
+}
+
+export function usageWindowKey(usageWindow: UsageWindow): string {
+  return `${usageWindow.scope ?? ''}:${usageWindow.kind}`;
+}
+
+export function usageWindowLabel(input: {
+  window: UsageWindow;
+  labels: Record<UsageWindow['kind'], string>;
+}): string {
+  const base = input.labels[input.window.kind];
+  return input.window.scope === undefined ? base : `${input.window.scope} · ${base}`;
 }
 
 export function groupByProvider(accounts: readonly AccountView[]): ProviderGroup[] {
