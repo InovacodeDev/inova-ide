@@ -48,6 +48,101 @@ export function isSameComposerTrigger(
   return a.kind === b.kind && a.query === b.query && a.start === b.start && a.end === b.end;
 }
 
+export type MessageFileSegment = { kind: 'text'; value: string } | { kind: 'file'; path: string };
+
+const KNOWN_EXTENSIONLESS_FILES = new Set([
+  'README',
+  'LICENSE',
+  'Makefile',
+  'Dockerfile',
+  'Procfile',
+]);
+
+// REGEX: match @path tokens at start, whitespace, or opening delimiter
+const MESSAGE_FILE_PATTERN = /(^|[\s([{"'])@([^\s()[\]{}<>"'`]+)/g;
+
+function isLikelyRelativeFilePath(candidate: string): boolean {
+  return (
+    candidate.includes('/') || candidate.includes('.') || KNOWN_EXTENSIONLESS_FILES.has(candidate)
+  );
+}
+
+export function detachFileTrigger(input: { text: string; trigger: ComposerTrigger }): {
+  text: string;
+  cursor: number;
+} {
+  const { text, trigger } = input;
+  const before = text.slice(0, trigger.start);
+  const after = text.slice(trigger.end);
+  const trimmedAfter = before.endsWith(' ') && after.startsWith(' ') ? after.slice(1) : after;
+  return { text: `${before}${trimmedAfter}`, cursor: before.length };
+}
+
+export function buildPromptWithAttachedFiles(input: {
+  text: string;
+  files: readonly string[];
+}): string {
+  const body = input.text.trim();
+  const seen = new Set<string>();
+  const uniqueFiles: string[] = [];
+  for (const file of input.files) {
+    if (file === '' || seen.has(file)) continue;
+    seen.add(file);
+    uniqueFiles.push(file);
+  }
+  const existingMentions = new Set(
+    parseMessageFileSegments(body)
+      .filter(
+        (segment): segment is Extract<MessageFileSegment, { kind: 'file' }> =>
+          segment.kind === 'file',
+      )
+      .map((segment) => segment.path),
+  );
+  const prefixTokens = uniqueFiles
+    .filter((file) => !existingMentions.has(file))
+    .map((file) => `@${file}`);
+  if (prefixTokens.length === 0) return body;
+  const prefix = prefixTokens.join(' ');
+  return body === '' ? prefix : `${prefix}\n${body}`;
+}
+
+function appendTextSegment(segments: MessageFileSegment[], value: string): void {
+  if (value === '') return;
+  const previous = segments[segments.length - 1];
+  if (previous?.kind === 'text') {
+    previous.value += value;
+    return;
+  }
+  segments.push({ kind: 'text', value });
+}
+
+export function parseMessageFileSegments(text: string): MessageFileSegment[] {
+  const segments: MessageFileSegment[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(MESSAGE_FILE_PATTERN)) {
+    const matchIndex = match.index ?? 0;
+    const lead = match[1] ?? '';
+    const rawCandidate = match[2] ?? '';
+    const stripped = rawCandidate.replace(/[.,;:!?]+$/, '');
+    const trailingPunctuation = rawCandidate.slice(stripped.length);
+    if (!isLikelyRelativeFilePath(stripped)) continue;
+    const tokenStart = matchIndex + lead.length;
+    if (tokenStart > cursor) {
+      appendTextSegment(segments, text.slice(cursor, tokenStart));
+    }
+    segments.push({ kind: 'file', path: stripped });
+    cursor = tokenStart + 1 + stripped.length;
+    if (trailingPunctuation !== '') {
+      appendTextSegment(segments, trailingPunctuation);
+      cursor += trailingPunctuation.length;
+    }
+  }
+  if (cursor < text.length) {
+    appendTextSegment(segments, text.slice(cursor));
+  }
+  return segments;
+}
+
 export function applyFileSuggestion(input: {
   text: string;
   trigger: ComposerTrigger;

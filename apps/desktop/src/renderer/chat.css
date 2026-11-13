@@ -251,6 +251,51 @@
   border-color: var(--accent-border);
 }
 
+.chat-composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+
+.chat-file-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 90, 31, 0.14);
+  color: var(--accent-hover);
+  font-size: 12px;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.chat-file-tag-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-file-tag-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-left: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.chat-file-tag-remove:hover {
+  opacity: 1;
+}
+
 .chat-input {
   min-width: 0;
   padding: 12px 14px 4px;

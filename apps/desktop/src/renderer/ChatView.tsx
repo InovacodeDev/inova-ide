@@ -7,14 +7,17 @@ import type { ChatItem, ChatState } from './chat-reducer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
 import {
   applyCommandSuggestion,
-  applyFileSuggestion,
+  buildPromptWithAttachedFiles,
+  detachFileTrigger,
   detectComposerTrigger,
   filterCommands,
   isSameComposerTrigger,
+  parseMessageFileSegments,
   type ComposerTrigger,
 } from './composer-trigger';
 import {
   ClockIcon,
+  CloseIcon,
   FileIcon,
   GitForkIcon,
   PencilIcon,
@@ -254,7 +257,22 @@ function Message({
               </button>
             ) : null}
           </div>
-          <div className="chat-user-bubble">{item.text}</div>
+          <div className="chat-user-bubble">
+            {parseMessageFileSegments(item.text).map((segment, segmentIndex) =>
+              segment.kind === 'file' ? (
+                <span
+                  key={`${segment.path}-${segmentIndex}`}
+                  className="chat-file-tag"
+                  title={segment.path}
+                >
+                  <FileIcon size={12} />
+                  <span className="chat-file-tag-path mono">{segment.path}</span>
+                </span>
+              ) : (
+                <span key={`text-${segmentIndex}`}>{segment.value}</span>
+              ),
+            )}
+          </div>
         </div>
       );
     case 'assistant':
@@ -366,6 +384,7 @@ export function ChatView({
   onCancel,
 }: ChatViewProps) {
   const [draft, setDraft] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -471,8 +490,9 @@ export function ChatView({
 
   const applySelectedFile = (filePath: string) => {
     if (!activeTrigger || activeTrigger.kind !== 'file') return;
-    const applied = applyFileSuggestion({ text: draft, trigger: activeTrigger, filePath });
+    const applied = detachFileTrigger({ text: draft, trigger: activeTrigger });
     setDraft(applied.text);
+    setAttachedFiles((current) => (current.includes(filePath) ? current : [...current, filePath]));
     commitTrigger(null);
     setActiveIndex(0);
     queueMicrotask(() => {
@@ -552,11 +572,12 @@ export function ChatView({
   };
 
   const submit = () => {
-    const prompt = draft.trim();
+    const prompt = buildPromptWithAttachedFiles({ text: draft, files: attachedFiles });
     if (prompt === '' || running || readOnly) return;
     stickRef.current = true;
     onSend(prompt);
     setDraft('');
+    setAttachedFiles([]);
     commitTrigger(null);
   };
 
@@ -704,7 +725,9 @@ export function ChatView({
                   type="button"
                   className="btn btn-sm"
                   onClick={() => {
-                    setDraft((current) => (current.trim() === '' ? busyConflict.prompt : current));
+                    if (draft.trim() === '' && attachedFiles.length === 0) {
+                      setDraft(busyConflict.prompt);
+                    }
                     onDismissBusyConflict();
                   }}
                 >
@@ -716,6 +739,26 @@ export function ChatView({
         ) : null}
         {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
+          {attachedFiles.length > 0 ? (
+            <div className="chat-composer-files" aria-label="Arquivos anexados">
+              {attachedFiles.map((filePath) => (
+                <span key={filePath} className="chat-file-tag" title={filePath}>
+                  <FileIcon size={12} />
+                  <span className="chat-file-tag-path mono">{filePath}</span>
+                  <button
+                    type="button"
+                    className="chat-file-tag-remove"
+                    aria-label={`Remover ${filePath}`}
+                    onClick={() =>
+                      setAttachedFiles((current) => current.filter((item) => item !== filePath))
+                    }
+                  >
+                    <CloseIcon size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             className="chat-input"
@@ -791,7 +834,7 @@ export function ChatView({
                 type="button"
                 className="chat-send"
                 aria-label="Enviar mensagem"
-                disabled={readOnly || draft.trim() === ''}
+                disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}
               >
                 <SendIcon size={16} />

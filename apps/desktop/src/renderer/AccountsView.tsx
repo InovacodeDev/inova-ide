@@ -184,90 +184,97 @@ export function AccountsView(props: AccountsViewProps) {
           <div className="accounts-empty">
             Nenhuma conta ainda. Adicione uma conta para começar.
           </div>
-        ) : null}
-        {groups.map((group) => {
-          const missingCli = group.accounts.some((a) => a.status === 'binary-missing');
-          return (
-            <section key={group.provider} className="accounts-card">
-              <div className="accounts-card-head">
-                <ProviderBadge provider={group.provider} size={28} />
-                <h2>{PROVIDER_NAME[group.provider]}</h2>
-                {missingCli ? (
-                  <span className="accounts-health accounts-health-bad">
-                    <AlertIcon size={14} />
-                    CLI não instalado
-                  </span>
-                ) : (
-                  <span className="accounts-health accounts-health-ok">
-                    <CheckIcon size={14} />
-                    Saudável
-                  </span>
-                )}
-              </div>
-              <div className="accounts-scroll">
-                <div className="account-row account-row-head section-label">
-                  <span>Conta</span>
-                  <span className="account-status-head">Status</span>
-                  <span>Uso</span>
-                  <span />
-                </div>
-                {group.accounts.map((account) => {
-                  const count = projects.filter((p) => p.accountLabel === account.label).length;
-                  const display = accountDisplayName(account);
-                  return (
-                    <div key={account.id} className="account-row">
-                      <div>
-                        <div className="account-name">{display}</div>
-                        <div className="account-sub">
-                          {count} {count === 1 ? 'projeto' : 'projetos'}
-                        </div>
-                      </div>
-                      <span className="account-status-cell">
-                        <span className={`account-status-tag ${statusTagClass(account.status)}`}>
-                          <span className="dot" aria-hidden="true" />
-                          {STATUS_TEXT[account.status]}
-                        </span>
+        ) : (
+          <div className="accounts-grid">
+            {groups.map((group) => {
+              const missingCli = group.accounts.some((a) => a.status === 'binary-missing');
+              return (
+                <section key={group.provider} className="accounts-card">
+                  <div className="accounts-card-head">
+                    <ProviderBadge provider={group.provider} size={28} />
+                    <h2>{PROVIDER_NAME[group.provider]}</h2>
+                    {missingCli ? (
+                      <span className="accounts-health accounts-health-bad">
+                        <AlertIcon size={14} />
+                        CLI não instalado
                       </span>
-                      <AccountUsage state={usage[account.label]} />
-                      <div className="account-actions">
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          disabled={loggingInLabel === account.label}
-                          onClick={() => onLogin(account)}
-                        >
-                          {loggingInLabel === account.label
-                            ? 'Conectando…'
-                            : account.status === 'logged-in'
-                              ? 'Renovar login'
-                              : 'Entrar'}
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          aria-label="Atualizar consumo"
-                          title="Atualizar consumo"
-                          onClick={() => onLoadUsage(account)}
-                        >
-                          <RefreshIcon size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          aria-label={`Deslogar e remover conta ${display}`}
-                          title="Deslogar e remover conta"
-                          onClick={() => onRemove(account)}
-                        >
-                          <TrashIcon size={14} />
-                        </button>
-                      </div>
+                    ) : (
+                      <span className="accounts-health accounts-health-ok">
+                        <CheckIcon size={14} />
+                        Saudável
+                      </span>
+                    )}
+                  </div>
+                  <div className="accounts-scroll">
+                    <div className="account-row account-row-head section-label">
+                      <span>Conta</span>
+                      <span className="account-col-center">Status</span>
+                      <span className="account-col-center">Uso</span>
+                      <span className="account-col-center">Ações</span>
                     </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
+                    {group.accounts.map((account) => {
+                      const count = projects.filter((p) => p.accountLabel === account.label).length;
+                      const display = accountDisplayName(account);
+                      return (
+                        <div key={account.id} className="account-row">
+                          <div className="account-identity">
+                            <div className="account-name">{display}</div>
+                            <div className="account-sub">
+                              {count} {count === 1 ? 'projeto' : 'projetos'}
+                            </div>
+                          </div>
+                          <span className="account-status-cell">
+                            <span
+                              className={`account-status-tag ${statusTagClass(account.status)}`}
+                            >
+                              <span className="dot" aria-hidden="true" />
+                              {STATUS_TEXT[account.status]}
+                            </span>
+                          </span>
+                          <div className="account-usage-cell">
+                            <AccountUsage state={usage[account.label]} />
+                          </div>
+                          <div className="account-actions">
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              disabled={loggingInLabel === account.label}
+                              onClick={() => onLogin(account)}
+                            >
+                              {loggingInLabel === account.label
+                                ? 'Conectando…'
+                                : account.status === 'logged-in'
+                                  ? 'Renovar login'
+                                  : 'Entrar'}
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              aria-label="Atualizar consumo"
+                              title="Atualizar consumo"
+                              onClick={() => onLoadUsage(account)}
+                            >
+                              <RefreshIcon size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              aria-label={`Deslogar e remover conta ${display}`}
+                              title="Deslogar e remover conta"
+                              onClick={() => onRemove(account)}
+                            >
+                              <TrashIcon size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

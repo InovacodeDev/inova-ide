@@ -2,9 +2,12 @@ import { expect, test } from 'vitest';
 import {
   applyCommandSuggestion,
   applyFileSuggestion,
+  buildPromptWithAttachedFiles,
+  detachFileTrigger,
   detectComposerTrigger,
   filterCommands,
   isSameComposerTrigger,
+  parseMessageFileSegments,
 } from '../src/renderer/composer-trigger.js';
 import type { ProjectCommandView } from '../src/shared/api.js';
 
@@ -82,4 +85,39 @@ test('isSameComposerTrigger compares triggers by value so unchanged cursor does 
   expect(isSameComposerTrigger(null, repeated)).toBe(false);
   expect(isSameComposerTrigger(base, repeated)).toBe(true);
   expect(isSameComposerTrigger(base, edited)).toBe(false);
+});
+
+test('detachFileTrigger removes @query token without corrupting surrounding spaces', () => {
+  expect(
+    detachFileTrigger({
+      text: '@.prett',
+      trigger: { kind: 'file', query: '.prett', start: 0, end: 7 },
+    }),
+  ).toEqual({ text: '', cursor: 0 });
+
+  expect(
+    detachFileTrigger({
+      text: 'ver @src/ap hoje',
+      trigger: { kind: 'file', query: 'src/ap', start: 4, end: 11 },
+    }),
+  ).toEqual({ text: 'ver hoje', cursor: 4 });
+});
+
+test('buildPromptWithAttachedFiles combines deduplicated files and prompt text', () => {
+  expect(buildPromptWithAttachedFiles({ text: '', files: ['.prettierrc'] })).toBe('@.prettierrc');
+  expect(
+    buildPromptWithAttachedFiles({
+      text: 'Explique @.prettierrc aqui',
+      files: ['.prettierrc', 'docs/a.md', 'docs/a.md'],
+    }),
+  ).toBe('@docs/a.md\nExplique @.prettierrc aqui');
+});
+
+test('parseMessageFileSegments extracts relative file tags while preserving emails and punctuation', () => {
+  expect(parseMessageFileSegments('@.prettierrc')).toEqual([{ kind: 'file', path: '.prettierrc' }]);
+  expect(parseMessageFileSegments('Revise @src/app.ts. E envie para tito@inovacode.dev')).toEqual([
+    { kind: 'text', value: 'Revise ' },
+    { kind: 'file', path: 'src/app.ts' },
+    { kind: 'text', value: '. E envie para tito@inovacode.dev' },
+  ]);
 });
