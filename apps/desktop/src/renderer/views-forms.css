@@ -7,17 +7,10 @@
   padding: 24px;
 }
 
-.accounts-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+.accounts-list {
+  display: flex;
+  flex-direction: column;
   gap: 20px;
-}
-
-@container (min-width: 1400px) {
-  .accounts-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
 }
 
 .accounts-head {
@@ -78,10 +71,25 @@
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.accounts-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .accounts-card-head h2 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+}
+
+.accounts-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .accounts-health {
@@ -136,8 +144,48 @@
 }
 
 .account-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.account-sub > span + span::before {
+  content: '· ';
+}
+
+.account-projects-cell {
+  display: none;
+  min-width: 0;
+}
+
+.account-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.account-project-chip,
+.account-project-more {
+  max-width: 100%;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-project-more {
+  border-style: dashed;
+}
+
+.account-medium-only,
+.account-wide-only {
+  display: none;
 }
 
 .account-col-center {
@@ -192,6 +240,14 @@
   min-width: 0;
 }
 
+.account-usage-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
 .account-usage {
   display: flex;
   flex-direction: column;
@@ -208,11 +264,71 @@
   text-align: center;
 }
 
+.account-usage-fetched {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .account-actions {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+}
+
+@container (min-width: 720px) {
+  .account-medium-only {
+    display: inline;
+  }
+}
+
+@container (min-width: 1000px) {
+  .account-row {
+    grid-template-columns:
+      minmax(190px, 1.2fr)
+      minmax(150px, 1fr)
+      minmax(125px, 0.7fr)
+      minmax(240px, 1.6fr)
+      minmax(175px, 0.9fr);
+  }
+
+  .account-projects-cell {
+    display: block;
+  }
+
+  .account-wide-only {
+    display: inline;
+  }
+
+  div.account-wide-only {
+    display: block;
+  }
+
+  .account-narrow-only {
+    display: none;
+  }
+}
+
+@container (min-width: 1320px) {
+  .account-row {
+    grid-template-columns:
+      minmax(210px, 1.1fr)
+      minmax(180px, 1fr)
+      minmax(125px, 0.6fr)
+      minmax(360px, 2.4fr)
+      minmax(175px, 0.8fr);
+  }
+
+  .account-usage {
+    flex-direction: row;
+    gap: 16px;
+    max-width: none;
+  }
+
+  .account-usage-window {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 }
 
 .accounts-empty {
