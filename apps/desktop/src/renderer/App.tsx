@@ -557,6 +557,7 @@ export function App() {
               return (
                 <ChatView
                   key={tab.sessionId}
+                  projectId={tabProject?.id ?? null}
                   state={chats[tab.sessionId] ?? initialChatState}
                   visible={inWorkspace && tab.sessionId === tabs.active}
                   provider={tab.provider}

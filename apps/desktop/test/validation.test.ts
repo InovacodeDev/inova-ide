@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   parseBinding,
+  parseFileSearch,
   parseLoginCode,
   parseNewAccount,
   parseMessage,
@@ -149,6 +150,24 @@ test('paths must be absolute and at most 4096 characters', () => {
     path: '/abs',
     accountLabel: 'a',
   });
+});
+
+test('file search validates projectId, query length, and limit bounds', () => {
+  expect(parseFileSearch({ projectId: 'p', query: '' })).toEqual({
+    projectId: 'p',
+    query: '',
+    limit: 40,
+  });
+  expect(parseFileSearch({ projectId: 'p', query: 'chat', limit: 25 })).toEqual({
+    projectId: 'p',
+    query: 'chat',
+    limit: 25,
+  });
+  expect(parseFileSearch({ projectId: '', query: 'a' })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a'.repeat(256) })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 0 })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 101 })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 1.5 })).toBeUndefined();
 });
 
 test('login code requires safe sessionId and trimmed non-empty code up to 512 chars', () => {

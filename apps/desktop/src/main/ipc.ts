@@ -44,6 +44,8 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
+  handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
+  handle(CHANNELS.listCommands, (input) => handlers.listCommands(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
 

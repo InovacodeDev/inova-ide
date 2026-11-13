@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -889,5 +889,49 @@ test('listModels returns dynamic agy models for gemini, caches them, and falls b
   expect(opencodeDynamic.models).toEqual([
     { id: 'deepseek/deepseek-reasoner', label: 'deepseek-reasoner', description: 'deepseek' },
     { id: 'openai/gpt-5', label: 'gpt-5', description: 'openai' },
+  ]);
+});
+
+test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, 'src'), { recursive: true });
+  await writeFile(join(project.path, 'src', 'alpha.ts'), '');
+
+  const first = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'alpha' }));
+  expect(first.files).toEqual(['src/alpha.ts']);
+
+  await writeFile(join(project.path, 'src', 'beta.ts'), '');
+  const cached = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'beta' }));
+  expect(cached.files).toEqual([]);
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  const refreshed = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'beta' }));
+  expect(refreshed.files).toEqual(['src/beta.ts']);
+});
+
+test('listCommands returns project prompts and skills across providers', async () => {
+  const { root, handlers } = await setup();
+  const { project } = await seedProject(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'review.md'),
+    '---\ndescription: Code review\n---\nReview $ARGUMENTS',
+  );
+
+  const commands = unwrap(await handlers.listCommands({ projectId: project.id }));
+  expect(commands).toEqual([
+    {
+      name: 'review',
+      description: 'Code review',
+      source: 'claude',
+      kind: 'command',
+      body: 'Review $ARGUMENTS',
+    },
   ]);
 });

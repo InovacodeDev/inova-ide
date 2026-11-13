@@ -1,7 +1,15 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import type { ProjectCommand } from '@inova/core/commands';
 import type { ProviderModels } from '@inova/core/models';
 import type { EffortLevel, ProviderId, Session, Workspace } from '@inova/core/types';
+
+export type ProjectCommandView = ProjectCommand;
+
+export interface ProjectFileSearchResult {
+  files: string[];
+  truncated: boolean;
+}
 
 export type SessionView = Session;
 
@@ -70,6 +78,12 @@ export interface InovaApi {
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
+  searchFiles(input: {
+    projectId: string;
+    query: string;
+    limit?: number;
+  }): Promise<Result<ProjectFileSearchResult>>;
+  listCommands(input: { projectId: string }): Promise<Result<ProjectCommandView[]>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
   startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
@@ -96,6 +110,8 @@ export const CHANNELS = {
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
   listModels: 'inova:listModels',
+  searchFiles: 'inova:searchFiles',
+  listCommands: 'inova:listCommands',
   chatEvent: 'inova:chat:event',
   startLogin: 'inova:startLogin',
   submitLoginCode: 'inova:submitLoginCode',

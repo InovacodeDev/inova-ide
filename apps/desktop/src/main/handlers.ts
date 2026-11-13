@@ -3,6 +3,8 @@ import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import { listProjectCommands } from '@inova/core/commands';
+import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
 import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import {
@@ -39,6 +41,7 @@ import {
   guarded,
   ok,
   parseBinding,
+  parseFileSearch,
   parseLoginCode,
   parseMessage,
   parseNewAccount,
@@ -68,6 +71,7 @@ export interface HandlerDeps {
 
 const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão']);
 const TITLE_CHARS = 60;
+const FILE_CACHE_TTL_MS = 5_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
 
@@ -139,6 +143,9 @@ export function createHandlers(deps: HandlerDeps) {
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
   const modelsCache = new Map<string, ProviderModels>();
+  const fileListCache = new Map<string, { list: ProjectFileList; expiresAt: number }>();
+  const fileListInflight = new Map<string, Promise<ProjectFileList>>();
+  const sessionProjects = new Map<string, string>();
   const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
   const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
   let storeQueue: Promise<unknown> = Promise.resolve();
@@ -218,6 +225,41 @@ export function createHandlers(deps: HandlerDeps) {
     }
   }
 
+  function invalidateProjectFiles(sessionId: string): void {
+    const projectId = sessionProjects.get(sessionId);
+    if (projectId !== undefined) {
+      fileListCache.delete(projectId);
+      return;
+    }
+    void loadStore(deps.root)
+      .then((store) => {
+        const session = sessionsOf(store).find((item) => item.id === sessionId);
+        if (session) fileListCache.delete(session.projectId);
+      })
+      .catch(() => undefined);
+  }
+
+  async function cachedProjectFiles(
+    projectId: string,
+    projectPath: string,
+  ): Promise<ProjectFileList> {
+    const now = Date.now();
+    const cached = fileListCache.get(projectId);
+    if (cached && cached.expiresAt > now) return cached.list;
+    const existing = fileListInflight.get(projectId);
+    if (existing) return existing;
+    const promise = listProjectFiles({ projectPath })
+      .then((list) => {
+        fileListCache.set(projectId, { list, expiresAt: Date.now() + FILE_CACHE_TTL_MS });
+        return list;
+      })
+      .finally(() => {
+        if (fileListInflight.get(projectId) === promise) fileListInflight.delete(projectId);
+      });
+    fileListInflight.set(projectId, promise);
+    return promise;
+  }
+
   function handleChatEvent(sessionId: string, event: ChatEvent): void {
     deps.emit(sessionId, event);
     if (event.kind !== 'text-delta') enqueueAppend(sessionId, event);
@@ -234,7 +276,10 @@ export function createHandlers(deps: HandlerDeps) {
         fetchedAt: deps.usageDeps.now().toISOString(),
       });
     }
-    if (event.kind === 'done') turnOwners.delete(sessionId);
+    if (event.kind === 'done') {
+      turnOwners.delete(sessionId);
+      invalidateProjectFiles(sessionId);
+    }
   }
 
   async function accountView(account: Account): Promise<AccountView> {
@@ -341,6 +386,7 @@ export function createHandlers(deps: HandlerDeps) {
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
     }
+    sessionProjects.set(sessionId, session.projectId);
     turnOwners.set(sessionId, { accountId: account.id, provider: account.provider });
     handleChatEvent(sessionId, { kind: 'user', text: prompt, at: new Date().toISOString() });
     deps.chat.send({
@@ -569,6 +615,24 @@ export function createHandlers(deps: HandlerDeps) {
           if (error instanceof Error) return ok(fallback);
           throw error;
         }
+      }),
+    searchFiles: (input: unknown) =>
+      validated(input, parseFileSearch, async ({ projectId, query, limit }) => {
+        const store = await loadStore(deps.root);
+        const project = store.projects.find((item) => item.id === projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        const list = await cachedProjectFiles(project.id, project.path);
+        return ok({
+          files: rankProjectFiles(list.files, query, limit),
+          truncated: list.truncated,
+        });
+      }),
+    listCommands: (input: unknown) =>
+      validated(input, parseProjectRef, async ({ projectId }) => {
+        const store = await loadStore(deps.root);
+        const project = store.projects.find((item) => item.id === projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        return ok(await listProjectCommands(project.path));
       }),
     handlePtyData: (sessionId: string, chunk: string): void =>
       loginFlow.handlePtyData(sessionId, chunk),

@@ -158,6 +158,26 @@ export function parseUsageRequest(input: unknown): { accountLabel: string } | un
     : undefined;
 }
 
+const DEFAULT_FILE_SEARCH_LIMIT = 40;
+const MAX_FILE_SEARCH_LIMIT = 100;
+
+export function parseFileSearch(
+  input: unknown,
+): { projectId: string; query: string; limit: number } | undefined {
+  if (!isRecord(input) || !isText(input['projectId'])) return undefined;
+  const { query, limit = DEFAULT_FILE_SEARCH_LIMIT } = input;
+  if (typeof query !== 'string' || query.length > MAX_TEXT) return undefined;
+  if (
+    typeof limit !== 'number' ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_FILE_SEARCH_LIMIT
+  ) {
+    return undefined;
+  }
+  return { projectId: input['projectId'], query, limit };
+}
+
 export function parseLoginCode(input: unknown): { sessionId: string; code: string } | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
   const code = typeof input['code'] === 'string' ? input['code'].trim() : '';

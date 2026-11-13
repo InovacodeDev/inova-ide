@@ -1,7 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { ProviderModels } from '@inova/core/models';
 import type { EffortLevel, ProviderId } from '@inova/core/types';
+import type { ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
+import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
+import {
+  applyCommandSuggestion,
+  applyFileSuggestion,
+  detectComposerTrigger,
+  filterCommands,
+  type ComposerTrigger,
+} from './composer-trigger';
 import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
@@ -10,6 +19,7 @@ import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
 
 export interface ChatViewProps {
+  projectId: string | null;
   state: ChatState;
   visible: boolean;
   provider: ProviderId | null;
@@ -25,6 +35,7 @@ export interface ChatViewProps {
 
 const NEAR_BOTTOM_PX = 80;
 const MAX_COMPOSER_PX = 200;
+const FILE_SEARCH_DEBOUNCE_MS = 80;
 
 function firstLine(input: string): string {
   const line = input.split('\n').find((candidate) => candidate.trim() !== '') ?? '';
@@ -127,6 +138,7 @@ function Message({ item, showAgentLabel, provider }: MessageProps) {
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
+  projectId,
   state,
   visible,
   provider,
@@ -140,12 +152,149 @@ export function ChatView({
   onCancel,
 }: ChatViewProps) {
   const [draft, setDraft] = useState('');
+  const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
+  const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [fileResults, setFileResults] = useState<{
+    files: string[];
+    truncated: boolean;
+    loading: boolean;
+  }>({ files: [], truncated: false, loading: false });
+  const [commandResults, setCommandResults] = useState<{
+    commands: ProjectCommandView[];
+    loading: boolean;
+  }>({ commands: [], loading: false });
+  const searchSeqRef = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
+
+  const triggerKey = trigger ? `${trigger.kind}:${trigger.start}:${trigger.query}` : null;
+  const activeTrigger =
+    !readOnly && visible && trigger && triggerKey !== dismissedTriggerKey ? trigger : null;
+
+  useEffect(() => {
+    if (!activeTrigger || activeTrigger.kind !== 'file' || projectId === null) return;
+    const seq = ++searchSeqRef.current;
+    const timer = setTimeout(() => {
+      void window.inova
+        .searchFiles({ projectId, query: activeTrigger.query, limit: 40 })
+        .then((result) => {
+          if (searchSeqRef.current !== seq) return;
+          setFileResults(
+            result.ok
+              ? { files: result.value.files, truncated: result.value.truncated, loading: false }
+              : { files: [], truncated: false, loading: false },
+          );
+        })
+        .catch(() => {
+          if (searchSeqRef.current === seq) {
+            setFileResults({ files: [], truncated: false, loading: false });
+          }
+        });
+    }, FILE_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [activeTrigger, projectId]);
+
+  useEffect(() => {
+    if (!activeTrigger || activeTrigger.kind !== 'command' || projectId === null) return;
+    let alive = true;
+    void window.inova
+      .listCommands({ projectId })
+      .then((result) => {
+        if (!alive) return;
+        setCommandResults({ commands: result.ok ? result.value : [], loading: false });
+      })
+      .catch(() => {
+        if (alive) setCommandResults({ commands: [], loading: false });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeTrigger?.kind, projectId]);
+
+  const filteredCommands = useMemo(
+    () =>
+      activeTrigger?.kind === 'command'
+        ? filterCommands(commandResults.commands, activeTrigger.query)
+        : [],
+    [activeTrigger, commandResults.commands],
+  );
+
+  const syncTrigger = (text: string, cursor: number) => {
+    const next = detectComposerTrigger(text, cursor);
+    setTrigger(next);
+    setActiveIndex(0);
+    setDismissedTriggerKey(null);
+    if (next?.kind === 'file') {
+      setFileResults((current) => ({ ...current, loading: true }));
+    } else if (next?.kind === 'command') {
+      setCommandResults((current) => ({ ...current, loading: current.commands.length === 0 }));
+    }
+  };
+
+  const applySelectedFile = (filePath: string) => {
+    if (!activeTrigger || activeTrigger.kind !== 'file') return;
+    const applied = applyFileSuggestion({ text: draft, trigger: activeTrigger, filePath });
+    setDraft(applied.text);
+    setTrigger(null);
+    setActiveIndex(0);
+    queueMicrotask(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(applied.cursor, applied.cursor);
+    });
+  };
+
+  const applySelectedCommand = (command: ProjectCommandView) => {
+    if (!activeTrigger || activeTrigger.kind !== 'command') return;
+    const applied = applyCommandSuggestion({ text: draft, trigger: activeTrigger, command });
+    setDraft(applied.text);
+    setTrigger(null);
+    setActiveIndex(0);
+    queueMicrotask(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(applied.cursor, applied.cursor);
+    });
+  };
+
+  const popupModel: ComposerPopupModel | null = useMemo(() => {
+    if (!activeTrigger || projectId === null) return null;
+    if (activeTrigger.kind === 'file') {
+      const bounded =
+        fileResults.files.length === 0 ? 0 : Math.min(activeIndex, fileResults.files.length - 1);
+      return {
+        kind: 'file',
+        items: fileResults.files,
+        truncated: fileResults.truncated,
+        loading: fileResults.loading,
+        activeIndex: bounded,
+        onSelect: applySelectedFile,
+      };
+    }
+    const bounded =
+      filteredCommands.length === 0 ? 0 : Math.min(activeIndex, filteredCommands.length - 1);
+    return {
+      kind: 'command',
+      items: filteredCommands,
+      loading: commandResults.loading,
+      activeIndex: bounded,
+      onSelect: applySelectedCommand,
+    };
+  }, [
+    activeTrigger,
+    projectId,
+    fileResults,
+    filteredCommands,
+    commandResults.loading,
+    activeIndex,
+  ]);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -175,9 +324,44 @@ export function ChatView({
     stickRef.current = true;
     onSend(prompt);
     setDraft('');
+    setTrigger(null);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (popupModel) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        const total = popupModel.items.length;
+        if (total > 0) setActiveIndex((popupModel.activeIndex + 1) % total);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const total = popupModel.items.length;
+        if (total > 0) setActiveIndex((popupModel.activeIndex - 1 + total) % total);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDismissedTriggerKey(triggerKey);
+        return;
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        const count = popupModel.items.length;
+        if (count > 0) {
+          event.preventDefault();
+          if (popupModel.kind === 'file') {
+            const chosen = popupModel.items[popupModel.activeIndex];
+            if (chosen !== undefined) popupModel.onSelect(chosen);
+          } else {
+            const chosen = popupModel.items[popupModel.activeIndex];
+            if (chosen !== undefined) popupModel.onSelect(chosen);
+          }
+          return;
+        }
+      }
+    }
     if (event.key !== 'Enter' || event.shiftKey) return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     event.preventDefault();
@@ -215,15 +399,24 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
           <textarea
             ref={inputRef}
             className="chat-input"
             rows={1}
             value={draft}
-            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente…'}
+            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente… (@arquivo, /comando)'}
             disabled={readOnly}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setDraft(nextValue);
+              syncTrigger(nextValue, event.target.selectionStart ?? nextValue.length);
+            }}
+            onClick={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
             onKeyDown={onKeyDown}
           />
           <div className="chat-composer-bar">

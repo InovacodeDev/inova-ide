@@ -40,6 +40,8 @@ function setup() {
       'listAccounts',
       'listProjects',
       'pickFolder',
+      'searchFiles',
+      'listCommands',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
@@ -115,6 +117,10 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   const input = { sessionId: 's', prompt: 'oi' };
   await invoke('inova:sendMessage', trusted, input);
   expect(handlers['sendMessage']).toHaveBeenCalledWith(input);
+  await invoke('inova:searchFiles', trusted, { projectId: 'p', query: 'a' });
+  expect(handlers['searchFiles']).toHaveBeenCalledWith({ projectId: 'p', query: 'a' });
+  await invoke('inova:listCommands', trusted, { projectId: 'p' });
+  expect(handlers['listCommands']).toHaveBeenCalledWith({ projectId: 'p' });
   for (const name of ['listSessions', 'createSession', 'updateSession', 'deleteSession']) {
     await invoke(`inova:${name}`, trusted, input);
     expect(handlers[name]).toHaveBeenCalledWith(input);
