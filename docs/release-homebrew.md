@@ -45,8 +45,9 @@ Siga esta sequência para publicar qualquer versão nova:
 
 | Ação | Comando |
 | --- | --- |
-| Instalar | `brew install --cask --no-quarantine InovacodeDev/tap/inova-ide` |
-| Atualizar | `brew update && brew upgrade --cask --no-quarantine inova-ide` |
+| Instalar | `brew install --cask InovacodeDev/tap/inova-ide` |
+| Liberar quarentena (sem notarização) | `xattr -dr com.apple.quarantine /Applications/InovaIDE.app` |
+| Atualizar | `brew update && brew upgrade --cask inova-ide` |
 | Verificar versão CLI | `inova --version` |
 | Remover app (mantém `~/.inova`) | `brew uninstall --cask inova-ide` |
 | Remover tudo (apaga `~/.inova`) | `brew uninstall --cask --zap inova-ide` |
@@ -80,4 +81,4 @@ Quando possuir um certificado `Developer ID Application`:
    - `APPLE_APP_SPECIFIC_PASSWORD`
    - `APPLE_TEAM_ID`
 2. O workflow `.github/workflows/release.yml` e `apps/desktop/scripts/after-pack.mjs` detectam `CSC_LINK` automaticamente e usam assinatura oficial com `build/entitlements.mac.plist`.
-3. Remova `--no-quarantine` da seção `caveats` em `Casks/inova-ide.rb` e da tabela de comandos acima.
+3. Remova o aviso de quarentena (`xattr`) da seção `caveats` em `Casks/inova-ide.rb` e da tabela de comandos acima.

@@ -15,13 +15,19 @@ Workspace desktop e CLI multi-conta para Claude, Codex e Gemini.
 ### macOS (Apple Silicon via Homebrew)
 
 ```bash
-brew install --cask --no-quarantine InovacodeDev/tap/inova-ide
+brew install --cask InovacodeDev/tap/inova-ide
+```
+
+Se o macOS bloquear a abertura por falta de notarização Apple, remova a quarentena após instalar:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/InovaIDE.app
 ```
 
 Para atualizar para a versão mais recente:
 
 ```bash
-brew update && brew upgrade --cask --no-quarantine inova-ide
+brew update && brew upgrade --cask inova-ide
 ```
 
 Para remover apenas o aplicativo mantendo contas e sessões em `~/.inova`:
