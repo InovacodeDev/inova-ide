@@ -208,6 +208,23 @@ test('sendMessage rejects invalid input and unknown sessions', async () => {
   expect(send).not.toHaveBeenCalled();
 });
 
+test('sendMessage grants the approved extra directories to the claude turn', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(
+    await handlers.sendMessage({
+      sessionId: session.id,
+      prompt: '@/Users/me/Downloads/doc.pdf resuma',
+      extraDirs: ['/Users/me/Downloads'],
+    }),
+  );
+  const args = send.mock.calls[0]?.[0]?.spec.args ?? [];
+  const flag = args.indexOf('--add-dir');
+  expect(args[flag + 1]).toBe('/Users/me/Downloads');
+  expect(flag).toBeGreaterThan(-1);
+  expect(flag).toBeLessThan(args.indexOf('--'));
+});
+
 test('a new claude turn persists the session id before spawning and derives the title', async () => {
   const { root, bin, send, handlers } = await setup();
   const { account, project, session } = await seedSession(root);

@@ -22,6 +22,7 @@ const MAX_TEXT = 255;
 const MAX_PATH = 4096;
 const MAX_LOGIN_CODE = 512;
 const MAX_PROMPT = 100_000;
+const MAX_EXTRA_DIRS = 16;
 const MAX_WORKSPACE_INPUT = 1000;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
 
@@ -237,11 +238,17 @@ export function parseWorkspace(
   return { openSessionIds, activeSessionId };
 }
 
-export function parseMessage(input: unknown): { sessionId: string; prompt: string } | undefined {
+export function parseMessage(
+  input: unknown,
+): { sessionId: string; prompt: string; extraDirs: string[] } | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
   const prompt = typeof input['prompt'] === 'string' ? input['prompt'].trim() : '';
   if (prompt === '' || prompt.length > MAX_PROMPT) return undefined;
-  return { sessionId: input['sessionId'], prompt };
+  const rawDirs: unknown = input['extraDirs'] ?? [];
+  if (!Array.isArray(rawDirs) || rawDirs.length > MAX_EXTRA_DIRS) return undefined;
+  const extraDirs = rawDirs.filter((dir): dir is string => isPath(dir) && !dir.includes('\0'));
+  if (extraDirs.length !== rawDirs.length) return undefined;
+  return { sessionId: input['sessionId'], prompt, extraDirs };
 }
 
 export function parseTurnRef(input: unknown): { turnId: string } | undefined {

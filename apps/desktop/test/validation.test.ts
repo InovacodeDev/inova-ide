@@ -81,7 +81,14 @@ test('prompts are trimmed and limited to 100000 characters', () => {
   expect(parseMessage({ sessionId: 's', prompt: '  oi \n' })).toEqual({
     sessionId: 's',
     prompt: 'oi',
+    extraDirs: [],
   });
+  expect(
+    parseMessage({ sessionId: 's', prompt: 'oi', extraDirs: ['/Users/me/Downloads'] })?.extraDirs,
+  ).toEqual(['/Users/me/Downloads']);
+  for (const extraDirs of ['/x', ['relative/dir'], ['/a\0b'], [5], new Array(17).fill('/x')]) {
+    expect(parseMessage({ sessionId: 's', prompt: 'oi', extraDirs })).toBeUndefined();
+  }
   expect(parseMessage({ sessionId: 's', prompt: '   ' })).toBeUndefined();
   expect(parseMessage({ sessionId: 's', prompt: 5 })).toBeUndefined();
   const longest = 'a'.repeat(100_000);

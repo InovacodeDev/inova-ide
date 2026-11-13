@@ -745,6 +745,7 @@ export function createHandlers(deps: HandlerDeps) {
     project: Project;
     file: string;
     baseEnv: NodeJS.ProcessEnv;
+    extraDirs?: readonly string[];
   }): Promise<Result<null>> {
     const { sessionId, prompt, account, project } = input;
     verificationControllers.get(sessionId)?.abort();
@@ -790,6 +791,7 @@ export function createHandlers(deps: HandlerDeps) {
       model: session.model ?? null,
       effort: session.effort ?? null,
       executionMode,
+      extraDirs: input.extraDirs,
     });
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
@@ -1135,7 +1137,7 @@ export function createHandlers(deps: HandlerDeps) {
         ok(await readTranscriptEvents(sessionId)),
       ),
     sendMessage: (input: unknown): Promise<Result<null>> =>
-      validated(input, parseMessage, async ({ sessionId, prompt }) => {
+      validated(input, parseMessage, async ({ sessionId, prompt, extraDirs }) => {
         if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
@@ -1176,6 +1178,7 @@ export function createHandlers(deps: HandlerDeps) {
             project,
             file,
             baseEnv,
+            extraDirs,
           });
         });
       }),

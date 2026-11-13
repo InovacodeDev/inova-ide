@@ -21,12 +21,18 @@ vi.mock('electron', () => ({
     send: electron.send,
     invoke: electron.invoke,
   },
+  webUtils: { getPathForFile: (file: { name: string }) => `/abs/${file.name}` },
 }));
 
 async function loadApi(): Promise<InovaApi> {
   await import('../src/preload/index.js');
   return electron.exposed.get('inova') as InovaApi;
 }
+
+test('getPathForFile resolves the dropped file path through webUtils', async () => {
+  const api = await loadApi();
+  expect(api.getPathForFile({ name: 'a.txt' } as File)).toBe('/abs/a.txt');
+});
 
 test('onLoginEvent delivers only the payload and unsubscribes the exact listener', async () => {
   const api = await loadApi();

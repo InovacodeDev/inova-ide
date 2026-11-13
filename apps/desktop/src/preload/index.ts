@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { IpcRendererEvent } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { InovaApi } from '../shared/api.js';
@@ -36,6 +36,7 @@ const api: InovaApi = {
   saveWorkspace: (input) => ipcRenderer.invoke(CHANNELS.saveWorkspace, input),
   loadTranscript: (input) => ipcRenderer.invoke(CHANNELS.loadTranscript, input),
   sendMessage: (input) => ipcRenderer.invoke(CHANNELS.sendMessage, input),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
   enqueueTurn: (input) => ipcRenderer.invoke(CHANNELS.enqueueTurn, input),
   cancelQueuedTurn: (input) => ipcRenderer.invoke(CHANNELS.cancelQueuedTurn, input),
   listTurnQueue: () => ipcRenderer.invoke(CHANNELS.listTurnQueue),

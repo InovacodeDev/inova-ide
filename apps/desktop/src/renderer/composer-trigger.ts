@@ -78,6 +78,29 @@ export function detachFileTrigger(input: { text: string; trigger: ComposerTrigge
   return { text: `${before}${trimmedAfter}`, cursor: before.length };
 }
 
+export interface DroppedPath {
+  mention: string;
+  grantDir: string | null;
+}
+
+// NOTE: a path with spaces breaks the @mention token; quoting needs provider-specific syntax
+export function resolveDroppedPath(input: {
+  path: string;
+  cwd: string | null;
+  isDirectory: boolean;
+}): DroppedPath {
+  const { path, cwd, isDirectory } = input;
+  const separator = path.includes('\\') && !path.includes('/') ? '\\' : '/';
+  const root = cwd === null ? null : cwd.replace(/[\\/]+$/, '');
+  if (root !== null && path === root) return { mention: '.', grantDir: null };
+  if (root !== null && root !== '' && path.startsWith(`${root}${separator}`)) {
+    return { mention: path.slice(root.length + 1), grantDir: null };
+  }
+  const parentEnd = path.lastIndexOf(separator);
+  const parent = parentEnd <= 0 ? separator : path.slice(0, parentEnd);
+  return { mention: path, grantDir: isDirectory ? path : parent };
+}
+
 export function buildPromptWithAttachedFiles(input: {
   text: string;
   files: readonly string[];

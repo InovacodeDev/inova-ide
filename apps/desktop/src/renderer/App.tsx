@@ -375,9 +375,9 @@ export function App() {
     return result.value;
   };
 
-  const sendMessage = async (sessionId: string, prompt: string) => {
+  const sendMessage = async (sessionId: string, prompt: string, extraDirs: string[] = []) => {
     dispatchChat({ sessionId, action: { type: 'started' } });
-    const result = await guard(() => window.inova.sendMessage({ sessionId, prompt }));
+    const result = await guard(() => window.inova.sendMessage({ sessionId, prompt, extraDirs }));
     if (!result || !result.ok) {
       dispatchChat({
         sessionId,
@@ -1057,6 +1057,7 @@ export function App() {
                   mode={tabSession?.mode ?? null}
                   defaultModes={defaultModes}
                   inWorktree={Boolean(tabSession?.worktree)}
+                  workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   queuedTurns={tabQueuedTurns}
@@ -1103,7 +1104,7 @@ export function App() {
                     })
                   }
                   onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
-                  onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
+                  onSend={(prompt, extraDirs) => void sendMessage(tab.sessionId, prompt, extraDirs)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
               );

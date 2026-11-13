@@ -137,7 +137,12 @@ export interface InovaApi {
   getWorkspace(): Promise<Result<WorkspaceView>>;
   saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
   loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
-  sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
+  sendMessage(input: {
+    sessionId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }): Promise<Result<null>>;
+  getPathForFile(file: File): string;
   enqueueTurn(input: { sessionId: string; prompt: string }): Promise<Result<QueuedTurn>>;
   cancelQueuedTurn(input: { turnId: string }): Promise<Result<null>>;
   listTurnQueue(): Promise<Result<QueuedTurn[]>>;

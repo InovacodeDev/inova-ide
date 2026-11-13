@@ -13,6 +13,7 @@ export interface TurnModelOptions {
   model?: string | null;
   effort?: EffortLevel | null;
   executionMode?: ExecutionMode | null;
+  extraDirs?: readonly string[] | undefined;
 }
 
 function isolatedEnv(account: Account, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -67,6 +68,7 @@ function claudeTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOption
     '--verbose',
     '--include-partial-messages',
     ...claudeModeArgs(mode),
+    ...(options.extraDirs?.length ? ['--add-dir', ...options.extraDirs] : []),
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['--effort', options.effort] : []),
   ];
@@ -284,11 +286,13 @@ export function buildChatTurn(ctx: {
   model?: string | null;
   effort?: EffortLevel | null;
   executionMode?: ExecutionMode | null;
+  extraDirs?: readonly string[];
 }): LaunchSpec {
   const options: TurnModelOptions = {
     model: ctx.model,
     effort: ctx.effort,
     executionMode: ctx.executionMode,
+    extraDirs: ctx.extraDirs,
   };
   const args = argsForProvider(ctx.account.provider, ctx.prompt, ctx.turn, options);
   return buildLaunch({ account: ctx.account, cwd: ctx.cwd, args, baseEnv: ctx.baseEnv });
