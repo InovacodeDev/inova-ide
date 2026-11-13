@@ -1164,3 +1164,105 @@ test('switchSessionAccount, handoffSession, and forkSession preserve context acr
   expect(send.mock.calls[0]?.[0].provider).toBe('codex');
   expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
 });
+
+test('startComparison runs two isolated sessions in parallel, computes diffs, and applies winner', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers, send } = await setup();
+  const leftAcc = await addAccount({ root, provider: 'claude', label: 'cmp-claude' });
+  const rightAcc = await addAccount({ root, provider: 'codex', label: 'cmp-codex' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'file.ts'), 'export const n = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+  const project = unwrap(await handlers.bindProject({ path: repoDir, accountLabel: 'cmp-claude' }));
+
+  const started = unwrap(
+    await handlers.startComparison({
+      projectId: project.id,
+      prompt: 'Implemente feature X',
+      leftAccountId: leftAcc.id,
+      rightAccountId: rightAcc.id,
+      leftEffort: 'high',
+      rightMode: 'read-only',
+    }),
+  );
+
+  expect(started.left.comparisonGroupId).toBe(started.groupId);
+  expect(started.left.comparisonRole).toBe('left');
+  expect(started.right.comparisonRole).toBe('right');
+  expect(send).toHaveBeenCalledTimes(2);
+  const cwds = send.mock.calls.map((call) => call[0].spec.cwd);
+  expect(cwds).toContain(started.left.worktree?.path);
+  expect(cwds).toContain(started.right.worktree?.path);
+
+  await writeFile(join(started.left.worktree!.path, 'file.ts'), 'export const n = 10;\n');
+  await writeFile(join(started.right.worktree!.path, 'file.ts'), 'export const n = 20;\n');
+
+  const diff = unwrap(await handlers.getComparisonDiff({ groupId: started.groupId }));
+  expect(diff.files[0]?.path).toBe('file.ts');
+  expect(diff.files[0]?.leftDiff).toContain('+export const n = 10;');
+  expect(diff.files[0]?.rightDiff).toContain('+export const n = 20;');
+
+  const resolved = unwrap(
+    await handlers.resolveComparison({
+      groupId: started.groupId,
+      winner: 'right',
+      cleanupWorktrees: true,
+    }),
+  );
+  expect(resolved.winnerSessionId).toBe(started.right.id);
+  expect(await readFile(join(repoDir, 'file.ts'), 'utf8')).toBe('export const n = 20;\n');
+});
+
+test('previewProfileSync and applyProfileSync synchronize .mcp.json and project rules with backups', async () => {
+  const { root, handlers } = await setup();
+  const claudeAcc = await addAccount({ root, provider: 'claude', label: 'sync-claude' });
+  const codexAcc = await addAccount({ root, provider: 'codex', label: 'sync-codex' });
+  const repoDir = await tmp();
+  await writeFile(
+    join(repoDir, '.mcp.json'),
+    JSON.stringify({
+      mcpServers: {
+        linear: {
+          command: 'npx',
+          args: ['-y', '@linear/mcp'],
+          env: { LINEAR_TOKEN: 'lin_secret_xyz' },
+        },
+      },
+    }),
+  );
+  await writeFile(join(repoDir, 'AGENTS.md'), '# Regras oficiais\n');
+  const project = unwrap(
+    await handlers.bindProject({ path: repoDir, accountLabel: claudeAcc.label }),
+  );
+
+  const preview = unwrap(
+    await handlers.previewProfileSync({
+      projectId: project.id,
+      accountIds: [claudeAcc.id, codexAcc.id],
+      rulesSource: 'AGENTS.md',
+    }),
+  );
+  expect(preview.mcpServerCount).toBe(1);
+  expect(
+    preview.items.some((item) => item.id === 'rules:CLAUDE.md' && item.status === 'create'),
+  ).toBe(true);
+
+  const applied = unwrap(
+    await handlers.applyProfileSync({
+      projectId: project.id,
+      accountIds: [claudeAcc.id, codexAcc.id],
+      rulesSource: 'AGENTS.md',
+      approvedIds: preview.items.map((item) => item.id),
+      rulesStrategy: 'copy',
+    }),
+  );
+  expect(applied.appliedIds).toContain(`mcp:${codexAcc.id}`);
+  expect(await readFile(join(repoDir, 'CLAUDE.md'), 'utf8')).toBe('# Regras oficiais\n');
+  expect(await readFile(join(codexAcc.homeDir, 'config.toml'), 'utf8')).toContain(
+    '[mcp_servers.linear]',
+  );
+});

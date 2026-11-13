@@ -4,6 +4,7 @@ import { isExecutionMode, isModeSupported } from './modes.js';
 import { loadStore, saveStore } from './store.js';
 import type {
   Account,
+  EffortLevel,
   ExecutionMode,
   Project,
   ProviderId,
@@ -181,6 +182,10 @@ export async function createSession(ctx: {
   title?: string;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
+  comparisonGroupId?: string | null;
+  comparisonRole?: 'left' | 'right' | null;
+  model?: string | null;
+  effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
   now?: () => Date;
@@ -204,6 +209,11 @@ export async function createSession(ctx: {
   const resolvedAccountOverride =
     ctx.accountIdOverride !== undefined ? ctx.accountIdOverride : parentAccountOverride;
   const provider = providerForSession(store, ctx.projectId, resolvedAccountOverride);
+  const resolvedModel = normalizeModel(ctx.model ?? null);
+  const resolvedEffort = ctx.effort ?? null;
+  if (resolvedEffort !== null && !isEffortLevel(resolvedEffort)) {
+    throw new SessionError('invalid-effort', `Invalid effort level: ${String(resolvedEffort)}`);
+  }
   const inheritedMode =
     ctx.mode !== undefined ? ctx.mode : provider ? (store.defaultModes?.[provider] ?? null) : null;
   if (
@@ -221,8 +231,10 @@ export async function createSession(ctx: {
     providerSessionId: null,
     ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
     ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
-    model: null,
-    effort: null,
+    ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
+    ...(ctx.comparisonRole ? { comparisonRole: ctx.comparisonRole } : {}),
+    model: resolvedModel,
+    effort: resolvedEffort,
     mode: inheritedMode,
     worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
     createdAt: timestamp,

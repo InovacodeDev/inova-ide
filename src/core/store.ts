@@ -82,6 +82,8 @@ function isSession(value: unknown): boolean {
     providerSessionId,
     accountIdOverride,
     handoffContext,
+    comparisonGroupId,
+    comparisonRole,
     model,
     effort,
     mode,
@@ -95,6 +97,11 @@ function isSession(value: unknown): boolean {
     isStringOrNull(providerSessionId) &&
     (accountIdOverride === undefined || isSafeIdOrNull(accountIdOverride)) &&
     (handoffContext === undefined || isStringOrNull(handoffContext)) &&
+    (comparisonGroupId === undefined || isSafeIdOrNull(comparisonGroupId)) &&
+    (comparisonRole === undefined ||
+      comparisonRole === null ||
+      comparisonRole === 'left' ||
+      comparisonRole === 'right') &&
     (model === undefined || isStringOrNull(model)) &&
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (mode === undefined || mode === null || isExecutionMode(mode)) &&

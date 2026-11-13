@@ -59,6 +59,11 @@ function setup() {
       'pickFolder',
       'searchFiles',
       'listCommands',
+      'startComparison',
+      'getComparisonDiff',
+      'resolveComparison',
+      'previewProfileSync',
+      'applyProfileSync',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
@@ -171,6 +176,16 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:listInbox', trusted);
   await invoke('inova:markInboxRead', trusted, { sessionId: 's' });
   await invoke('inova:clearReadInbox', trusted);
+  await invoke('inova:startComparison', trusted, {
+    projectId: 'p',
+    prompt: 'oi',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+  });
+  await invoke('inova:getComparisonDiff', trusted, { groupId: 'g1' });
+  await invoke('inova:resolveComparison', trusted, { groupId: 'g1', winner: 'left' });
+  await invoke('inova:previewProfileSync', trusted, { projectId: 'p' });
+  await invoke('inova:applyProfileSync', trusted, { projectId: 'p', approvedIds: ['x'] });
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);

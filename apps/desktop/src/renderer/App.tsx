@@ -10,11 +10,21 @@ import type {
   Session,
   VerificationCheck,
 } from '@inova/core/types';
-import type { AccountView, ProjectView, WorktreeStatusView } from '../shared/api';
+import type {
+  AccountView,
+  ComparisonDiffView,
+  ProfileSyncApplyResult,
+  ProfileSyncPreview,
+  ProjectView,
+  RulesFile,
+  RulesStrategy,
+  WorktreeStatusView,
+} from '../shared/api';
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
 import { ChatView } from './ChatView';
+import { CompareView } from './CompareView';
 import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
@@ -25,6 +35,7 @@ import { Header } from './Header';
 import { AlertIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
+import { ProfileSyncModal } from './ProfileSyncModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
@@ -88,6 +99,11 @@ export function App() {
     isLatestTurn: boolean;
   } | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
+  const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
+  const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
+  const [compareMetrics, setCompareMetrics] = useState<
+    Record<string, { costUsd: number | null; durationMs: number | null }>
+  >({});
   const [windowFocused, setWindowFocused] = useState(() =>
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
@@ -227,6 +243,10 @@ export function App() {
       if (event.kind === 'user') dispatchChat({ sessionId, action: { type: 'started' } });
       dispatchChat({ sessionId, action: { type: 'event', event } });
       if (event.kind !== 'done') return;
+      setCompareMetrics((current) => ({
+        ...current,
+        [sessionId]: { costUsd: event.costUsd, durationMs: event.durationMs },
+      }));
       const {
         accounts: knownAccounts,
         projects: knownProjects,
@@ -679,6 +699,79 @@ export function App() {
     await Promise.all([reloadAccounts(), reloadProjects()]);
   };
 
+  const startComparison = useCallback(
+    async (input: {
+      projectId: string;
+      prompt: string;
+      leftAccountId: string;
+      rightAccountId: string;
+      leftModel?: string | null;
+      leftEffort?: EffortLevel | null;
+      leftMode?: ExecutionMode | null;
+      rightModel?: string | null;
+      rightEffort?: EffortLevel | null;
+      rightMode?: ExecutionMode | null;
+    }): Promise<string | null> => {
+      const result = await call(() => window.inova.startComparison(input));
+      if (!result) return null;
+      await reloadSessions(input.projectId);
+      setSelectedComparisonGroupId(result.value.groupId);
+      return result.value.groupId;
+    },
+    [call, reloadSessions],
+  );
+
+  const getComparisonDiff = useCallback(
+    async (groupId: string): Promise<ComparisonDiffView | null> => {
+      const result = await call(() => window.inova.getComparisonDiff({ groupId }));
+      return result?.value ?? null;
+    },
+    [call],
+  );
+
+  const resolveComparison = useCallback(
+    async (input: {
+      groupId: string;
+      winner: 'left' | 'right';
+      cleanupWorktrees: boolean;
+    }): Promise<boolean> => {
+      const result = await call(() => window.inova.resolveComparison(input));
+      if (!result) return false;
+      const projectId = Object.keys(latest.current.sessions).find((id) =>
+        latest.current.sessions[id]?.some((session) => session.comparisonGroupId === input.groupId),
+      );
+      if (projectId) await reloadSessions(projectId);
+      return true;
+    },
+    [call, reloadSessions],
+  );
+
+  const previewProfileSync = useCallback(
+    async (input: {
+      projectId: string;
+      accountIds?: string[];
+      rulesSource?: RulesFile | null;
+    }): Promise<ProfileSyncPreview | null> => {
+      const result = await call(() => window.inova.previewProfileSync(input));
+      return result?.value ?? null;
+    },
+    [call],
+  );
+
+  const applyProfileSync = useCallback(
+    async (input: {
+      projectId: string;
+      accountIds?: string[];
+      rulesSource?: RulesFile | null;
+      approvedIds: string[];
+      rulesStrategy: RulesStrategy;
+    }): Promise<ProfileSyncApplyResult | null> => {
+      const result = await call(() => window.inova.applyProfileSync(input));
+      return result?.value ?? null;
+    },
+    [call],
+  );
+
   const accountDisplayOf = (
     account: AccountView | undefined,
     project: ProjectView | undefined,
@@ -762,6 +855,7 @@ export function App() {
           }}
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
+          onOpenProfileSync={(project) => setProfileSyncProject(project)}
           onUnbind={async (project) => {
             const result = await call(() => window.inova.unbindProject({ path: project.path }));
             if (!result) return;
@@ -797,6 +891,21 @@ export function App() {
                 void window.inova.markInboxRead({ sessionId });
               }}
               onNewSession={() => setView('new-session')}
+            />
+          )}
+          {view === 'compare' && (
+            <CompareView
+              projects={projects}
+              accounts={accounts}
+              sessions={sessions}
+              chats={chats}
+              compareMetrics={compareMetrics}
+              selectedGroupId={selectedComparisonGroupId}
+              onSelectGroup={setSelectedComparisonGroupId}
+              onStartComparison={startComparison}
+              onGetDiff={getComparisonDiff}
+              onResolveComparison={resolveComparison}
+              onOpenSession={(session) => void openChatTab(session)}
             />
           )}
           {view === 'accounts' && (
@@ -1131,6 +1240,15 @@ export function App() {
               createWorktree,
             });
           }}
+        />
+      )}
+      {profileSyncProject && (
+        <ProfileSyncModal
+          project={profileSyncProject}
+          accounts={accounts}
+          onPreview={previewProfileSync}
+          onApply={applyProfileSync}
+          onClose={() => setProfileSyncProject(null)}
         />
       )}
     </div>

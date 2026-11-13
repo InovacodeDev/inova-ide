@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest';
 import {
+  parseApplyProfileSync,
   parseBinding,
+  parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
   parseForkSession,
@@ -10,13 +12,16 @@ import {
   parseMessage,
   parseNewSession,
   parsePath,
+  parsePreviewProfileSync,
   parseProjectRef,
   parseProjectVerification,
   parseRemoval,
+  parseResolveComparison,
   parseRestoreCheckpoint,
   parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
+  parseStartComparison,
   parseSwitchAccount,
   parseTurnRef,
   parseUiFocus,
@@ -253,13 +258,20 @@ test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
     accountId: 'a2',
     generateHandoff: false,
   });
-  expect(parseHandoffSession({ sessionId: 's1', targetAccountId: 'a2', createWorktree: true })).toEqual({
+  expect(
+    parseHandoffSession({ sessionId: 's1', targetAccountId: 'a2', createWorktree: true }),
+  ).toEqual({
     sessionId: 's1',
     targetAccountId: 'a2',
     createWorktree: true,
   });
   expect(
-    parseForkSession({ sessionId: 's1', turnIndex: 0, targetAccountId: 'a2', copyWorktreeFiles: true }),
+    parseForkSession({
+      sessionId: 's1',
+      turnIndex: 0,
+      targetAccountId: 'a2',
+      copyWorktreeFiles: true,
+    }),
   ).toEqual({
     sessionId: 's1',
     turnIndex: 0,
@@ -271,4 +283,65 @@ test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
     activeSessionId: null,
     windowFocused: false,
   });
+});
+
+test('comparison and profile sync validation', () => {
+  expect(
+    parseStartComparison({
+      projectId: 'p1',
+      prompt: 'Refatore módulo',
+      leftAccountId: 'a1',
+      rightAccountId: 'a2',
+      leftEffort: 'high',
+      rightMode: 'plan',
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    prompt: 'Refatore módulo',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+    leftEffort: 'high',
+    rightMode: 'plan',
+  });
+  expect(
+    parseStartComparison({
+      projectId: 'p1',
+      prompt: '   ',
+      leftAccountId: 'a1',
+      rightAccountId: 'a2',
+    }),
+  ).toBeUndefined();
+  expect(parseComparisonRef({ groupId: 'g1' })).toEqual({ groupId: 'g1' });
+  expect(parseComparisonRef({ groupId: '../bad' })).toBeUndefined();
+  expect(parseResolveComparison({ groupId: 'g1', winner: 'left', cleanupWorktrees: true })).toEqual(
+    {
+      groupId: 'g1',
+      winner: 'left',
+      cleanupWorktrees: true,
+    },
+  );
+  expect(parseResolveComparison({ groupId: 'g1', winner: 'center' })).toBeUndefined();
+  expect(
+    parsePreviewProfileSync({ projectId: 'p1', accountIds: ['a1'], rulesSource: 'AGENTS.md' }),
+  ).toEqual({
+    projectId: 'p1',
+    accountIds: ['a1'],
+    rulesSource: 'AGENTS.md',
+  });
+  expect(
+    parseApplyProfileSync({
+      projectId: 'p1',
+      rulesSource: 'CLAUDE.md',
+      approvedIds: ['rules:AGENTS.md'],
+      rulesStrategy: 'symlink',
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    rulesSource: 'CLAUDE.md',
+    approvedIds: ['rules:AGENTS.md'],
+    rulesStrategy: 'symlink',
+  });
+  expect(
+    parseApplyProfileSync({ projectId: 'p1', approvedIds: [''], rulesStrategy: 'copy' }),
+  ).toBeUndefined();
 });

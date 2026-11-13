@@ -1,7 +1,28 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
+import type { ComparisonDiffView } from '@inova/core/git-compare';
 import type { ProviderModels } from '@inova/core/models';
+import type {
+  ProfileSyncApplyResult,
+  ProfileSyncPreview,
+  RulesFile,
+  RulesStrategy,
+} from '@inova/core/profile-sync';
+
+export type {
+  ComparisonDiffView,
+  ComparisonFileDiff,
+  ComparisonSideSummary,
+} from '@inova/core/git-compare';
+export type {
+  ProfileSyncApplyResult,
+  ProfileSyncItem,
+  ProfileSyncPreview,
+  ProfileSyncStatus,
+  RulesFile,
+  RulesStrategy,
+} from '@inova/core/profile-sync';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -150,6 +171,36 @@ export interface InovaApi {
     sessionId?: string;
   }): Promise<Result<ProjectFileSearchResult>>;
   listCommands(input: { projectId: string }): Promise<Result<ProjectCommandView[]>>;
+  startComparison(input: {
+    projectId: string;
+    prompt: string;
+    leftAccountId: string;
+    rightAccountId: string;
+    leftModel?: string | null;
+    leftEffort?: EffortLevel | null;
+    leftMode?: ExecutionMode | null;
+    rightModel?: string | null;
+    rightEffort?: EffortLevel | null;
+    rightMode?: ExecutionMode | null;
+  }): Promise<Result<{ groupId: string; left: SessionView; right: SessionView }>>;
+  getComparisonDiff(input: { groupId: string }): Promise<Result<ComparisonDiffView>>;
+  resolveComparison(input: {
+    groupId: string;
+    winner: 'left' | 'right';
+    cleanupWorktrees?: boolean;
+  }): Promise<Result<{ appliedFiles: string[]; winnerSessionId: string }>>;
+  previewProfileSync(input: {
+    projectId: string;
+    accountIds?: string[];
+    rulesSource?: RulesFile | null;
+  }): Promise<Result<ProfileSyncPreview>>;
+  applyProfileSync(input: {
+    projectId: string;
+    accountIds?: string[];
+    rulesSource?: RulesFile | null;
+    approvedIds: string[];
+    rulesStrategy?: RulesStrategy;
+  }): Promise<Result<ProfileSyncApplyResult>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
   onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
   onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
@@ -198,6 +249,11 @@ export const CHANNELS = {
   listModels: 'inova:listModels',
   searchFiles: 'inova:searchFiles',
   listCommands: 'inova:listCommands',
+  startComparison: 'inova:startComparison',
+  getComparisonDiff: 'inova:getComparisonDiff',
+  resolveComparison: 'inova:resolveComparison',
+  previewProfileSync: 'inova:previewProfileSync',
+  applyProfileSync: 'inova:applyProfileSync',
   chatEvent: 'inova:chat:event',
   inboxEvent: 'inova:inbox:event',
   queueEvent: 'inova:queue:event',

@@ -11,6 +11,7 @@ import { Eye } from 'pulsoicon-react/icons/eye';
 import { File } from 'pulsoicon-react/icons/file';
 import { Folder } from 'pulsoicon-react/icons/folder';
 import { GitBranch } from 'pulsoicon-react/icons/git-branch';
+import { GitCompare } from 'pulsoicon-react/icons/git-compare';
 import { GitFork } from 'pulsoicon-react/icons/git-fork';
 import { Inbox } from 'pulsoicon-react/icons/inbox';
 import { Key } from 'pulsoicon-react/icons/key';
@@ -26,6 +27,7 @@ import { RotateCcw } from 'pulsoicon-react/icons/rotate-ccw';
 import { Shield } from 'pulsoicon-react/icons/shield';
 import { ShieldAlert } from 'pulsoicon-react/icons/shield-alert';
 import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
+import { SlidersHorizontal } from 'pulsoicon-react/icons/sliders-horizontal';
 import { Square } from 'pulsoicon-react/icons/square';
 import { Terminal } from 'pulsoicon-react/icons/terminal';
 import { Trash } from 'pulsoicon-react/icons/trash';
@@ -190,4 +192,12 @@ export function SwitchIcon({ size = 16 }: IconProps) {
 
 export function ClockIcon({ size = 16 }: IconProps) {
   return <Clock size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function CompareIcon({ size = 16 }: IconProps) {
+  return <GitCompare size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SlidersIcon({ size = 16 }: IconProps) {
+  return <SlidersHorizontal size={size} strokeWidth={1.7} aria-hidden="true" />;
 }

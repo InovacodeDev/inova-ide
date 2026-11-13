@@ -10,6 +10,11 @@ import {
   removeSessionCheckpoints,
   restoreCheckpoint,
 } from '@inova/core/git-checkpoints';
+import {
+  applyComparisonWinner,
+  createComparisonWorktrees,
+  getComparisonDiff,
+} from '@inova/core/git-compare';
 import { tryRunGit } from '@inova/core/git-exec';
 import {
   applyWorktreeToProject,
@@ -32,6 +37,7 @@ import {
 } from '@inova/core/models';
 import type { ProviderModels } from '@inova/core/models';
 import { isModeSupported, resolveExecutionMode } from '@inova/core/modes';
+import { applyProfileSync, previewProfileSync } from '@inova/core/profile-sync';
 import {
   PathNotFoundError,
   bindProject,
@@ -89,7 +95,9 @@ import {
   fail,
   guarded,
   ok,
+  parseApplyProfileSync,
   parseBinding,
+  parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
   parseForkSession,
@@ -99,13 +107,16 @@ import {
   parseNewAccount,
   parseNewSession,
   parsePath,
+  parsePreviewProfileSync,
   parseProjectRef,
   parseProjectVerification,
   parseRemoval,
+  parseResolveComparison,
   parseRestoreCheckpoint,
   parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
+  parseStartComparison,
   parseSwitchAccount,
   parseTurnRef,
   parseUiFocus,
@@ -1392,6 +1403,239 @@ export function createHandlers(deps: HandlerDeps) {
         if (!project) return fail('Projeto não encontrado.');
         return ok(await listProjectCommands(project.path));
       }),
+    startComparison: (input: unknown) =>
+      validated(input, parseStartComparison, (parsed) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const project = store.projects.find((item) => item.id === parsed.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const leftAccount = store.accounts.find((item) => item.id === parsed.leftAccountId);
+          const rightAccount = store.accounts.find((item) => item.id === parsed.rightAccountId);
+          if (!leftAccount || !rightAccount) {
+            return fail('Conta selecionada para comparação não encontrada.');
+          }
+          if (leftAccount.id === rightAccount.id) {
+            return fail('Selecione duas contas diferentes para executar em paralelo.');
+          }
+          const inUse = deps.chat.accountsInUse();
+          if (inUse.has(leftAccount.id) || inUse.has(rightAccount.id)) {
+            return fail('Uma das contas selecionadas já está executando outra sessão.');
+          }
+
+          const baseEnv = await deps.baseEnv();
+          const leftAdapter = providers[leftAccount.provider];
+          const rightAdapter = providers[rightAccount.provider];
+          const [leftFile, rightFile] = await Promise.all([
+            findBinary(leftAdapter.binary, baseEnv['PATH'] ?? ''),
+            findBinary(rightAdapter.binary, baseEnv['PATH'] ?? ''),
+          ]);
+          if (leftFile === undefined) {
+            return fail(
+              `${leftAdapter.binary} não encontrado. Instale: ${leftAdapter.installHint}`,
+            );
+          }
+          if (rightFile === undefined) {
+            return fail(
+              `${rightAdapter.binary} não encontrado. Instale: ${rightAdapter.installHint}`,
+            );
+          }
+
+          const groupId = randomUUID();
+          const pair = await createComparisonWorktrees({
+            root: deps.root,
+            projectId: project.id,
+            projectPath: project.path,
+            groupId,
+            leftSessionId: `cmp-${groupId.slice(0, 8)}-a`,
+            rightSessionId: `cmp-${groupId.slice(0, 8)}-b`,
+          });
+
+          const cleanupPairOnError = async () => {
+            await Promise.all([
+              removeSessionWorktree({
+                projectPath: project.path,
+                worktree: pair.left,
+                force: true,
+              }),
+              removeSessionWorktree({
+                projectPath: project.path,
+                worktree: pair.right,
+                force: true,
+              }),
+            ]).catch(() => undefined);
+          };
+
+          let leftSession: Session;
+          let rightSession: Session;
+          try {
+            leftSession = await createSession({
+              root: deps.root,
+              projectId: project.id,
+              title: `Comparação A · ${leftAccount.label}`,
+              accountIdOverride: leftAccount.id,
+              comparisonGroupId: groupId,
+              comparisonRole: 'left',
+              worktree: pair.left,
+              ...(parsed.leftModel === undefined ? {} : { model: parsed.leftModel }),
+              ...(parsed.leftEffort === undefined ? {} : { effort: parsed.leftEffort }),
+              ...(parsed.leftMode === undefined ? {} : { mode: parsed.leftMode }),
+            });
+            try {
+              rightSession = await createSession({
+                root: deps.root,
+                projectId: project.id,
+                title: `Comparação B · ${rightAccount.label}`,
+                accountIdOverride: rightAccount.id,
+                comparisonGroupId: groupId,
+                comparisonRole: 'right',
+                worktree: pair.right,
+                ...(parsed.rightModel === undefined ? {} : { model: parsed.rightModel }),
+                ...(parsed.rightEffort === undefined ? {} : { effort: parsed.rightEffort }),
+                ...(parsed.rightMode === undefined ? {} : { mode: parsed.rightMode }),
+              });
+            } catch (error: unknown) {
+              await deleteSession({ root: deps.root, sessionId: leftSession.id }).catch(
+                () => undefined,
+              );
+              throw error;
+            }
+          } catch (error: unknown) {
+            await cleanupPairOnError();
+            throw error;
+          }
+
+          const [leftRun, rightRun] = await Promise.all([
+            runTurn({
+              sessionId: leftSession.id,
+              prompt: parsed.prompt,
+              account: leftAccount,
+              project,
+              file: leftFile,
+              baseEnv,
+            }),
+            runTurn({
+              sessionId: rightSession.id,
+              prompt: parsed.prompt,
+              account: rightAccount,
+              project,
+              file: rightFile,
+              baseEnv,
+            }),
+          ]);
+          if (!leftRun.ok) return leftRun;
+          if (!rightRun.ok) return rightRun;
+
+          return ok({ groupId, left: leftSession, right: rightSession });
+        }),
+      ),
+    getComparisonDiff: (input: unknown) =>
+      validated(input, parseComparisonRef, async ({ groupId }) => {
+        const store = await loadStore(deps.root);
+        const groupSessions = sessionsOf(store).filter(
+          (item) => item.comparisonGroupId === groupId,
+        );
+        const left = groupSessions.find((item) => item.comparisonRole === 'left');
+        const right = groupSessions.find((item) => item.comparisonRole === 'right');
+        if (!left?.worktree || !right?.worktree) {
+          return fail('Comparação ou worktrees não encontrados.');
+        }
+        return ok(
+          await getComparisonDiff({
+            groupId,
+            leftSessionId: left.id,
+            leftWorktree: left.worktree,
+            rightSessionId: right.id,
+            rightWorktree: right.worktree,
+          }),
+        );
+      }),
+    resolveComparison: (input: unknown) =>
+      validated(input, parseResolveComparison, ({ groupId, winner, cleanupWorktrees }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const groupSessions = sessionsOf(store).filter(
+            (item) => item.comparisonGroupId === groupId,
+          );
+          const left = groupSessions.find((item) => item.comparisonRole === 'left');
+          const right = groupSessions.find((item) => item.comparisonRole === 'right');
+          if (!left?.worktree || !right?.worktree) {
+            return fail('Comparação ou worktrees não encontrados.');
+          }
+          if (deps.chat.isRunning(left.id) || deps.chat.isRunning(right.id)) {
+            return fail('Aguarde ambos os agentes concluírem antes de aplicar o vencedor.');
+          }
+          const project = store.projects.find((item) => item.id === left.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const winnerSession = winner === 'left' ? left : right;
+          const loserSession = winner === 'left' ? right : left;
+          const winnerWorktree = winnerSession.worktree!;
+          const loserWorktree = loserSession.worktree ?? null;
+          const shouldCleanup = cleanupWorktrees ?? false;
+
+          const applied = await applyComparisonWinner({
+            projectPath: project.path,
+            winnerWorktree,
+            loserWorktree,
+            cleanupWorktrees: shouldCleanup,
+          });
+          if (shouldCleanup) {
+            await updateSession({
+              root: deps.root,
+              sessionId: winnerSession.id,
+              patch: { worktree: null },
+            });
+            await updateSession({
+              root: deps.root,
+              sessionId: loserSession.id,
+              patch: { worktree: null },
+            });
+          }
+          return ok({ appliedFiles: applied.appliedFiles, winnerSessionId: winnerSession.id });
+        }),
+      ),
+    previewProfileSync: (input: unknown) =>
+      validated(input, parsePreviewProfileSync, async ({ projectId, accountIds, rulesSource }) => {
+        const store = await loadStore(deps.root);
+        const project = store.projects.find((item) => item.id === projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        const selected = accountIds
+          ? store.accounts.filter((account) => accountIds.includes(account.id))
+          : store.accounts;
+        return ok(
+          await previewProfileSync({
+            projectPath: project.path,
+            accounts: selected,
+            ...(rulesSource === undefined ? {} : { rulesSource }),
+          }),
+        );
+      }),
+    applyProfileSync: (input: unknown) =>
+      validated(
+        input,
+        parseApplyProfileSync,
+        ({ projectId, accountIds, rulesSource, approvedIds, rulesStrategy }) =>
+          serialized(async () => {
+            const store = await loadStore(deps.root);
+            const project = store.projects.find((item) => item.id === projectId);
+            if (!project) return fail('Projeto não encontrado.');
+            const selected = accountIds
+              ? store.accounts.filter((account) => accountIds.includes(account.id))
+              : store.accounts;
+            const baseEnv = await deps.baseEnv();
+            return ok(
+              await applyProfileSync({
+                root: deps.root,
+                projectPath: project.path,
+                accounts: selected,
+                approvedIds,
+                runner: deps.runner,
+                baseEnv,
+                ...(rulesSource === undefined ? {} : { rulesSource }),
+                ...(rulesStrategy === undefined ? {} : { rulesStrategy }),
+              }),
+            );
+          }),
+      ),
     handlePtyData: (sessionId: string, chunk: string): void =>
       loginFlow.handlePtyData(sessionId, chunk),
     handlePtyExit: (sessionId: string, exitCode: number): Promise<void> =>

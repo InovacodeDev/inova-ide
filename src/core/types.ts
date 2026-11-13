@@ -44,6 +44,8 @@ export interface Session {
   providerSessionId: string | null;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
+  comparisonGroupId?: string | null;
+  comparisonRole?: 'left' | 'right' | null;
   model?: string | null;
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;

@@ -308,6 +308,154 @@ export function parseUiFocus(
   return { activeSessionId, windowFocused };
 }
 
+function parseOptionalModel(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' || trimmed.length > 200 ? undefined : trimmed;
+}
+
+function parseOptionalEffort(value: unknown): EffortLevel | null | undefined {
+  if (value === undefined || value === null) return value;
+  return isEffortLevel(value) ? value : undefined;
+}
+
+function parseOptionalMode(value: unknown): ExecutionMode | null | undefined {
+  if (value === undefined || value === null) return value;
+  return isExecutionMode(value) ? value : undefined;
+}
+
+export function parseStartComparison(input: unknown):
+  | {
+      projectId: string;
+      prompt: string;
+      leftAccountId: string;
+      rightAccountId: string;
+      leftModel?: string | null;
+      leftEffort?: EffortLevel | null;
+      leftMode?: ExecutionMode | null;
+      rightModel?: string | null;
+      rightEffort?: EffortLevel | null;
+      rightMode?: ExecutionMode | null;
+    }
+  | undefined {
+  if (
+    !isRecord(input) ||
+    !isSafeId(input['projectId']) ||
+    !isSafeId(input['leftAccountId']) ||
+    !isSafeId(input['rightAccountId'])
+  ) {
+    return undefined;
+  }
+  const prompt = typeof input['prompt'] === 'string' ? input['prompt'].trim() : '';
+  if (prompt === '' || prompt.length > MAX_PROMPT) return undefined;
+  const leftModel = parseOptionalModel(input['leftModel']);
+  const rightModel = parseOptionalModel(input['rightModel']);
+  const leftEffort = parseOptionalEffort(input['leftEffort']);
+  const rightEffort = parseOptionalEffort(input['rightEffort']);
+  const leftMode = parseOptionalMode(input['leftMode']);
+  const rightMode = parseOptionalMode(input['rightMode']);
+  if (
+    (input['leftModel'] !== undefined && leftModel === undefined) ||
+    (input['rightModel'] !== undefined && rightModel === undefined) ||
+    (input['leftEffort'] !== undefined && leftEffort === undefined) ||
+    (input['rightEffort'] !== undefined && rightEffort === undefined) ||
+    (input['leftMode'] !== undefined && leftMode === undefined) ||
+    (input['rightMode'] !== undefined && rightMode === undefined)
+  ) {
+    return undefined;
+  }
+  return {
+    projectId: input['projectId'],
+    prompt,
+    leftAccountId: input['leftAccountId'],
+    rightAccountId: input['rightAccountId'],
+    ...(leftModel === undefined ? {} : { leftModel }),
+    ...(leftEffort === undefined ? {} : { leftEffort }),
+    ...(leftMode === undefined ? {} : { leftMode }),
+    ...(rightModel === undefined ? {} : { rightModel }),
+    ...(rightEffort === undefined ? {} : { rightEffort }),
+    ...(rightMode === undefined ? {} : { rightMode }),
+  };
+}
+
+export function parseComparisonRef(input: unknown): { groupId: string } | undefined {
+  return isRecord(input) && isSafeId(input['groupId']) ? { groupId: input['groupId'] } : undefined;
+}
+
+export function parseResolveComparison(
+  input: unknown,
+): { groupId: string; winner: 'left' | 'right'; cleanupWorktrees?: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['groupId'])) return undefined;
+  const { winner, cleanupWorktrees } = input;
+  if (winner !== 'left' && winner !== 'right') return undefined;
+  if (cleanupWorktrees !== undefined && typeof cleanupWorktrees !== 'boolean') return undefined;
+  return {
+    groupId: input['groupId'],
+    winner,
+    ...(cleanupWorktrees === undefined ? {} : { cleanupWorktrees }),
+  };
+}
+
+function isRulesFile(value: unknown): value is 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md' {
+  return value === 'AGENTS.md' || value === 'CLAUDE.md' || value === 'GEMINI.md';
+}
+
+export function parsePreviewProfileSync(input: unknown):
+  | {
+      projectId: string;
+      accountIds?: string[];
+      rulesSource?: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md' | null;
+    }
+  | undefined {
+  if (!isRecord(input) || !isSafeId(input['projectId'])) return undefined;
+  const { accountIds, rulesSource } = input;
+  if (
+    accountIds !== undefined &&
+    (!Array.isArray(accountIds) || accountIds.length > 50 || !accountIds.every(isSafeId))
+  ) {
+    return undefined;
+  }
+  if (rulesSource !== undefined && rulesSource !== null && !isRulesFile(rulesSource)) {
+    return undefined;
+  }
+  return {
+    projectId: input['projectId'],
+    ...(accountIds === undefined ? {} : { accountIds }),
+    ...(rulesSource === undefined ? {} : { rulesSource }),
+  };
+}
+
+export function parseApplyProfileSync(input: unknown):
+  | {
+      projectId: string;
+      accountIds?: string[];
+      rulesSource?: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md' | null;
+      approvedIds: string[];
+      rulesStrategy?: 'copy' | 'symlink';
+    }
+  | undefined {
+  const base = parsePreviewProfileSync(input);
+  if (!base || !isRecord(input)) return undefined;
+  const { approvedIds, rulesStrategy } = input;
+  if (
+    !Array.isArray(approvedIds) ||
+    approvedIds.length > 100 ||
+    !approvedIds.every((id) => typeof id === 'string' && id.trim() !== '' && id.length <= 200)
+  ) {
+    return undefined;
+  }
+  if (rulesStrategy !== undefined && rulesStrategy !== 'copy' && rulesStrategy !== 'symlink') {
+    return undefined;
+  }
+  return {
+    ...base,
+    approvedIds,
+    ...(rulesStrategy === undefined ? {} : { rulesStrategy }),
+  };
+}
+
 export function parseUsageRequest(input: unknown): { accountLabel: string } | undefined {
   return isRecord(input) && isText(input['accountLabel'])
     ? { accountLabel: input['accountLabel'] }

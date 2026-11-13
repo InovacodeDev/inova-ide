@@ -63,6 +63,11 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
   handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
   handle(CHANNELS.listCommands, (input) => handlers.listCommands(input));
+  handle(CHANNELS.startComparison, (input) => handlers.startComparison(input));
+  handle(CHANNELS.getComparisonDiff, (input) => handlers.getComparisonDiff(input));
+  handle(CHANNELS.resolveComparison, (input) => handlers.resolveComparison(input));
+  handle(CHANNELS.previewProfileSync, (input) => handlers.previewProfileSync(input));
+  handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
 

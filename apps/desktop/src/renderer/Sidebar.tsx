@@ -10,11 +10,13 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CompareIcon,
   FolderIcon,
   GridIcon,
   KeyIcon,
   PencilIcon,
   PlusIcon,
+  SlidersIcon,
   TrashIcon,
 } from './icons';
 import { ProviderBadge } from './ProviderBadge';
@@ -29,7 +31,7 @@ import {
 } from './session-tree';
 import './sidebar.css';
 
-export type View = 'workspace' | 'agents' | 'accounts' | 'new-session';
+export type View = 'workspace' | 'agents' | 'compare' | 'accounts' | 'new-session';
 
 export interface SidebarProps {
   view: View;
@@ -42,6 +44,7 @@ export interface SidebarProps {
   statusOf: (sessionId: string) => SessionStatus;
   onOpenInboxItem?: (sessionId: string) => void;
   onClearReadInbox?: () => void;
+  onOpenProfileSync?: (project: ProjectView) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
   onUnbind: (project: ProjectView) => void;
@@ -73,6 +76,7 @@ type SessionActions = Pick<
 const NAV_ITEMS: { view: Exclude<View, 'new-session'>; label: string; icon: ReactNode }[] = [
   { view: 'workspace', label: 'Workspace', icon: <ChatIcon size={16} /> },
   { view: 'agents', label: 'Agentes em paralelo', icon: <GridIcon size={16} /> },
+  { view: 'compare', label: 'Comparar', icon: <CompareIcon size={16} /> },
   { view: 'accounts', label: 'Contas e providers', icon: <KeyIcon size={16} /> },
 ];
 
@@ -271,12 +275,20 @@ interface ProjectSectionProps extends SessionActions {
   accountLabelText: string;
   sessions: Session[];
   activeSessionId: string | null;
+  onOpenProfileSync?: (project: ProjectView) => void;
   onRequestUnbind: (project: ProjectView) => void;
 }
 
 function ProjectSection(props: ProjectSectionProps) {
-  const { project, accountLabelText, sessions, activeSessionId, onRequestUnbind, ...actions } =
-    props;
+  const {
+    project,
+    accountLabelText,
+    sessions,
+    activeSessionId,
+    onOpenProfileSync,
+    onRequestUnbind,
+    ...actions
+  } = props;
   const { onNewSession } = actions;
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -315,6 +327,17 @@ function ProjectSection(props: ProjectSectionProps) {
           </span>
         </button>
         <div className="project-actions">
+          {onOpenProfileSync ? (
+            <button
+              type="button"
+              className="session-action"
+              aria-label="Sincronizar MCPs e regras"
+              title="Sincronizar MCPs e regras"
+              onClick={() => onOpenProfileSync(project)}
+            >
+              <SlidersIcon size={14} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="session-action"
@@ -452,6 +475,7 @@ export function Sidebar(props: SidebarProps) {
               sessions={sessions[project.id] ?? []}
               activeSessionId={activeSessionId}
               statusOf={props.statusOf}
+              onOpenProfileSync={props.onOpenProfileSync}
               onOpenSession={props.onOpenSession}
               onNewSession={props.onNewSession}
               onRenameSession={props.onRenameSession}
