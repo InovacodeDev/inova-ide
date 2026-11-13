@@ -1,5 +1,6 @@
 import { loadStore, saveStore, withStoreLock } from './store.js';
-import type { Settings, SettingsPatch, VoiceModelId } from './types.js';
+import { isEffortLevel, isEffortSupported } from './models.js';
+import type { ProviderId, Settings, SettingsPatch, VoiceModelId } from './types.js';
 
 export class SettingsError extends Error {
   constructor(message: string) {
@@ -25,11 +26,35 @@ export const DEFAULT_SETTINGS: Settings = {
     completed: false,
     onlyWhenUnfocused: true,
   },
+  models: {
+    claude: { model: null, effort: 'medium' },
+    codex: { model: null, effort: 'medium' },
+    gemini: { model: null, effort: 'medium' },
+    deepseek: { model: null, effort: 'medium' },
+    kimi: { model: null, effort: 'medium' },
+    grok: { model: null, effort: 'medium' },
+    qwen: { model: null, effort: 'medium' },
+    opencode: { model: null, effort: 'medium' },
+  },
 };
 
 type FieldGuard = (value: unknown) => boolean;
 
 const isBoolean: FieldGuard = (value) => typeof value === 'boolean';
+
+const MAX_MODEL_ID_LENGTH = 200;
+
+function providerModelDefaults(provider: ProviderId): FieldGuard {
+  return (value) =>
+    isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    (value['model'] === null ||
+      (typeof value['model'] === 'string' &&
+        value['model'].length > 0 &&
+        value['model'].length <= MAX_MODEL_ID_LENGTH)) &&
+    isEffortLevel(value['effort']) &&
+    isEffortSupported(provider, value['effort']);
+}
 
 function oneOf(options: readonly unknown[]): FieldGuard {
   return (value) => options.includes(value);
@@ -48,6 +73,16 @@ const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Secti
       failed: isBoolean,
       completed: isBoolean,
       onlyWhenUnfocused: isBoolean,
+    },
+    models: {
+      claude: providerModelDefaults('claude'),
+      codex: providerModelDefaults('codex'),
+      gemini: providerModelDefaults('gemini'),
+      deepseek: providerModelDefaults('deepseek'),
+      kimi: providerModelDefaults('kimi'),
+      grok: providerModelDefaults('grok'),
+      qwen: providerModelDefaults('qwen'),
+      opencode: providerModelDefaults('opencode'),
     },
   };
 
@@ -105,6 +140,7 @@ function mergeSettings(input: {
       ...stored?.notifications,
       ...patch?.notifications,
     },
+    models: { ...DEFAULT_SETTINGS.models, ...stored?.models, ...patch?.models },
   };
 }
 

@@ -19,9 +19,14 @@ import type {
   QueuedTurn,
   Settings,
 } from '@inova/core/types';
-import type { AccountView, ProjectCommandView } from '../shared/api';
+import type { AccountView, AttachmentKind, ProjectCommandView } from '../shared/api';
+import { AttachMenu } from './AttachMenu';
 import type { ChatItem, ChatState } from './chat-reducer';
+import type { ComposerFormat } from './composer-format';
+import { formatForShortcut, formatTextarea } from './composer-textarea';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
+import { ComposerToolbar } from './ComposerToolbar';
+import { isMacPlatform } from './shortcuts';
 import {
   applyCommandSuggestion,
   buildPromptWithAttachedFiles,
@@ -106,6 +111,7 @@ export interface ChatViewProps {
   onCancel: () => void;
 }
 
+const IS_MAC = isMacPlatform(navigator.platform);
 const NEAR_BOTTOM_PX = 80;
 const MAX_COMPOSER_PX = 200;
 const FILE_SEARCH_DEBOUNCE_MS = 80;
@@ -766,9 +772,31 @@ export function ChatView({
       const isDirectory = item.webkitGetAsEntry()?.isDirectory ?? false;
       return [resolveDroppedPath({ path, cwd: workingDir, isDirectory })];
     });
+    routeDropped(dropped);
+  };
+
+  const routeDropped = (dropped: readonly DroppedPath[]) => {
     const outside = dropped.filter((item) => item.grantDir !== null);
     attachMentions(dropped.filter((item) => item.grantDir === null));
     if (outside.length > 0) setPendingDrop(outside);
+  };
+
+  const pickAttachments = async (kind: AttachmentKind) => {
+    const result = await window.inova.pickAttachments({ kind });
+    if (!result.ok || result.value.length === 0) return;
+    routeDropped(
+      result.value.map(({ path, isDirectory }) =>
+        resolveDroppedPath({ path, cwd: workingDir, isDirectory }),
+      ),
+    );
+  };
+
+  const formatDraft = (format: ComposerFormat) => {
+    const textarea = inputRef.current;
+    if (textarea === null || readOnly) return;
+    formatTextarea({ textarea, format });
+    setDraft(textarea.value);
+    syncTrigger(textarea.value, textarea.selectionStart);
   };
 
   const confirmPendingDrop = () => {
@@ -807,6 +835,12 @@ export function ChatView({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const shortcutFormat = formatForShortcut({ event, isMac: IS_MAC });
+    if (shortcutFormat !== null) {
+      event.preventDefault();
+      formatDraft(shortcutFormat);
+      return;
+    }
     if (popupModel) {
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -984,6 +1018,7 @@ export function ChatView({
         ) : null}
         {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
+          {readOnly ? null : <ComposerToolbar isMac={IS_MAC} onFormat={formatDraft} />}
           {attachedFiles.length > 0 ? (
             <div className="chat-composer-files" aria-label="Arquivos anexados">
               {attachedFiles.map((filePath) => (
@@ -1032,6 +1067,7 @@ export function ChatView({
             onKeyDown={onKeyDown}
           />
           <div className="chat-composer-bar">
+            {readOnly ? null : <AttachMenu onPick={(kind) => void pickAttachments(kind)} />}
             {provider ? (
               <>
                 <span

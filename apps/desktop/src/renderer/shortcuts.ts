@@ -10,8 +10,23 @@ export type ShortcutId =
   | 'focus-composer'
   | 'toggle-dictation'
   | 'send-message'
+  | FormatShortcutId
   | 'submit-new-session'
   | 'dismiss';
+
+export type FormatShortcutId =
+  | 'format-bold'
+  | 'format-italic'
+  | 'format-underline'
+  | 'format-strike'
+  | 'format-code'
+  | 'format-link';
+
+export type AppShortcutId = Exclude<ShortcutId, FormatShortcutId>;
+
+function isAppShortcutId(id: ShortcutId): id is AppShortcutId {
+  return !id.startsWith('format-');
+}
 
 export type ShortcutGroup = 'Geral' | 'Sessões' | 'Abas' | 'Composer';
 
@@ -100,6 +115,24 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     binding: 'enter',
     global: false,
   },
+  { id: 'format-bold', group: 'Composer', label: 'Negrito', binding: 'mod+b', global: false },
+  { id: 'format-italic', group: 'Composer', label: 'Itálico', binding: 'mod+i', global: false },
+  {
+    id: 'format-underline',
+    group: 'Composer',
+    label: 'Sublinhado',
+    binding: 'mod+u',
+    global: false,
+  },
+  {
+    id: 'format-strike',
+    group: 'Composer',
+    label: 'Tachado',
+    binding: 'mod+shift+x',
+    global: false,
+  },
+  { id: 'format-code', group: 'Composer', label: 'Código inline', binding: 'mod+e', global: false },
+  { id: 'format-link', group: 'Composer', label: 'Link', binding: 'mod+k', global: false },
 ];
 
 const PUNCTUATION_CODES: Readonly<Record<string, string>> = {
@@ -138,13 +171,13 @@ export function matchTabIndex(event: ShortcutEvent, isMac: boolean): number | nu
   return digit === undefined ? null : Number(digit) - 1;
 }
 
-export function findShortcut(event: ShortcutEvent, isMac: boolean): ShortcutId | null {
+export function findShortcut(event: ShortcutEvent, isMac: boolean): AppShortcutId | null {
   const hit = SHORTCUTS.find((item) => item.global && matchShortcut(event, item.binding, isMac));
-  return hit?.id ?? null;
+  return hit !== undefined && isAppShortcutId(hit.id) ? hit.id : null;
 }
 
 export interface ShortcutCommand {
-  id: ShortcutId;
+  id: AppShortcutId;
   tabIndex: number | null;
 }
 

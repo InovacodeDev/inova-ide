@@ -105,6 +105,7 @@ async function setup(
     emitLogin: (event) => loginEvents.push(event),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
+    pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
   });
   return {
     root,
@@ -145,6 +146,17 @@ test('addAccount rejects unknown provider and empty label without touching the s
     expect(await handlers.addAccount(input)).toEqual(INVALID);
   }
   expect((await loadStore(root)).accounts).toEqual([]);
+});
+
+test('pickAttachments forwards a valid kind and rejects an unknown one', async () => {
+  const { handlers } = await setup();
+  expect(unwrap(await handlers.pickAttachments({ kind: 'images' }))).toEqual([
+    { path: '/picked/images', isDirectory: false },
+  ]);
+  expect(await handlers.pickAttachments({ kind: 'videos' })).toEqual({
+    ok: false,
+    message: 'Entrada inválida.',
+  });
 });
 
 test('addAccount creates the account and reports its status', async () => {

@@ -9,8 +9,9 @@ import {
 describe('model-picker-state', () => {
   test('formats trigger label for default, known, and custom models with effort', () => {
     const claude = PROVIDER_MODELS.claude;
-    expect(formatPickerLabel({ model: null, effort: null, catalog: claude })).toBe(
-      'Padrão (Padrão)',
+    expect(formatPickerLabel({ model: null, effort: null, catalog: claude })).toBe('Padrão');
+    expect(formatPickerLabel({ model: null, effort: 'medium', catalog: claude })).toBe(
+      'Padrão (Médio)',
     );
     expect(formatPickerLabel({ model: 'opus', effort: 'high', catalog: claude })).toBe(
       'Opus 5.5 (Alto)',

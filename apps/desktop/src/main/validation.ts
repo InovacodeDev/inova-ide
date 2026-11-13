@@ -24,7 +24,8 @@ import type {
   VerificationCheck,
 } from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
-import type { Result } from '../shared/api.js';
+import { ATTACHMENT_KINDS } from '../shared/api.js';
+import type { AttachmentKind, Result } from '../shared/api.js';
 
 const MAX_TEXT = 255;
 const MAX_PATH = 4096;
@@ -76,6 +77,12 @@ export function parseRemoval(input: unknown): { label: string; force: boolean } 
 
 export function parsePath(input: unknown): { path: string } | undefined {
   return isRecord(input) && isPath(input['path']) ? { path: input['path'] } : undefined;
+}
+
+export function parseAttachmentPick(input: unknown): { kind: AttachmentKind } | undefined {
+  if (!isRecord(input)) return undefined;
+  const kind = ATTACHMENT_KINDS.find((candidate) => candidate === input['kind']);
+  return kind === undefined ? undefined : { kind };
 }
 
 export function parseBinding(input: unknown): { path: string; accountLabel: string } | undefined {

@@ -73,6 +73,22 @@ describe('findShortcut', () => {
     expect(findShortcut(press({ key: 'x', metaKey: true }), true)).toBeNull();
   });
 
+  test('composer formatting shortcuts are listed but never global', () => {
+    const formatting = SHORTCUTS.filter((item) => item.id.startsWith('format-'));
+    expect(formatting.map((item) => item.binding)).toEqual([
+      'mod+b',
+      'mod+i',
+      'mod+u',
+      'mod+shift+x',
+      'mod+e',
+      'mod+k',
+    ]);
+    expect(formatting.every((item) => !item.global && item.group === 'Composer')).toBe(true);
+    expect(findShortcut(press({ key: 'b', metaKey: true }), true)).toBeNull();
+    const globalBindings = SHORTCUTS.filter((item) => item.global).map((item) => item.binding);
+    expect(formatting.some((item) => globalBindings.includes(item.binding))).toBe(false);
+  });
+
   test('global bindings are unique', () => {
     const bindings = SHORTCUTS.filter((item) => item.global).map((item) => item.binding);
     expect(new Set(bindings).size).toBe(bindings.length);

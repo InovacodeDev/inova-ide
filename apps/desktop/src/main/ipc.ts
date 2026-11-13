@@ -37,6 +37,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.removeAccount, (input) => handlers.removeAccount(input));
   handle(CHANNELS.listProjects, () => handlers.listProjects());
   handle(CHANNELS.pickFolder, () => handlers.pickFolder());
+  handle(CHANNELS.pickAttachments, (input) => handlers.pickAttachments(input));
   handle(CHANNELS.bindProject, (input) => handlers.bindProject(input));
   handle(CHANNELS.unbindProject, (input) => handlers.unbindProject(input));
   handle(CHANNELS.listSessions, (input) => handlers.listSessions(input));
@@ -49,6 +50,9 @@ export function registerIpc(deps: {
   handle(CHANNELS.sendTestNotification, () => handlers.sendTestNotification());
   handle(CHANNELS.openNotificationSettings, () => handlers.openNotificationSettings());
   handle(CHANNELS.openDataFolder, () => handlers.openDataFolder());
+  handle(CHANNELS.getAppInfo, () => handlers.getAppInfo());
+  handle(CHANNELS.checkForUpdate, () => handlers.checkForUpdate());
+  handle(CHANNELS.openExternalUrl, (input) => handlers.openExternalUrl(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
   handle(CHANNELS.applyWorktree, (input) => handlers.applyWorktree(input));

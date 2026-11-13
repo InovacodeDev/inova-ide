@@ -3,7 +3,7 @@ import { SETTINGS_SECTIONS, moveSection } from '../src/renderer/settings-section
 
 describe('moveSection', () => {
   test('moves to the neighbor section', () => {
-    expect(moveSection({ current: 'general', delta: 1 })).toBe('appearance');
+    expect(moveSection({ current: 'general', delta: 1 })).toBe('models');
     expect(moveSection({ current: 'voice', delta: -1 })).toBe('notifications');
   });
 
@@ -15,6 +15,7 @@ describe('moveSection', () => {
   test('exposes the six phase-one sections once each', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'general',
+      'models',
       'appearance',
       'sessions',
       'notifications',

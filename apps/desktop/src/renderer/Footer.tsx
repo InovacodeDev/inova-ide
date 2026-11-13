@@ -16,6 +16,7 @@ import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { STATUS_TEXT, type UsageState } from './UsageBar';
 import './footer.css';
+import './update.css';
 
 export type { UsageState } from './UsageBar';
 
@@ -25,6 +26,9 @@ export interface FooterProps {
   usage: Record<string, UsageState>;
   onLoadUsage: (account: AccountView) => void;
   onManageAccounts: () => void;
+  version?: string | null;
+  updateAvailable?: boolean;
+  onOpenChangelog?: () => void;
 }
 
 const WINDOW_LABEL: Record<UsageWindow['kind'], string> = {
@@ -139,6 +143,7 @@ function PopoverAccountCard(props: {
 
 export function Footer(props: FooterProps) {
   const { accounts, focusedAccountLabel, usage, onLoadUsage, onManageAccounts } = props;
+  const { version = null, updateAvailable = false, onOpenChangelog } = props;
   const loadRef = useRef(onLoadUsage);
   const [popover, setPopover] = useState<{ provider: ProviderId; alignRight: boolean } | null>(
     null,
@@ -283,6 +288,20 @@ export function Footer(props: FooterProps) {
       <button type="button" className="footer-manage" onClick={onManageAccounts}>
         Gerenciar contas
       </button>
+      {version !== null ? (
+        <button
+          type="button"
+          className="footer-version mono"
+          title={updateAvailable ? 'Atualização disponível' : 'Ver novidades'}
+          aria-label={
+            updateAvailable ? `Versão ${version}, atualização disponível` : `Versão ${version}`
+          }
+          onClick={onOpenChangelog}
+        >
+          v{version}
+          {updateAvailable ? <span className="footer-version-dot" aria-hidden="true" /> : null}
+        </button>
+      ) : null}
     </footer>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
+import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -42,6 +42,9 @@ import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
 import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
+import { ChangelogModal } from './ChangelogModal';
+import { UpdateToast } from './UpdateToast';
+import { useUpdates } from './useUpdates';
 import { formatShortcut, isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
 import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
@@ -118,6 +121,7 @@ export function App() {
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
   const { warning, dismiss, guard, call } = useWarning();
+  const updates = useUpdates();
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
@@ -1045,6 +1049,7 @@ export function App() {
               sessions={sessions}
               chats={chats}
               compareMetrics={compareMetrics}
+              modelDefaults={settings?.models ?? null}
               selectedGroupId={selectedComparisonGroupId}
               onSelectGroup={setSelectedComparisonGroupId}
               onStartComparison={startComparison}
@@ -1134,6 +1139,14 @@ export function App() {
               const tabCatalog =
                 (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
                 PROVIDER_MODELS[tabProvider ?? 'claude'];
+              const tabModelConfig = settings
+                ? resolveModelConfig({
+                    provider: tabProvider ?? 'claude',
+                    model: tabSession?.model ?? null,
+                    effort: tabSession?.effort ?? null,
+                    settings,
+                  })
+                : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
               const tabState = chats[tab.sessionId] ?? initialChatState;
               const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
               const alternativeAccounts = accounts.filter(
@@ -1149,8 +1162,8 @@ export function App() {
                   visible={inWorkspace && tab.sessionId === tabs.active}
                   provider={tabProvider}
                   accountDisplay={accountDisplayOf(tabAccount, tabProject)}
-                  model={tabSession?.model ?? null}
-                  effort={tabSession?.effort ?? null}
+                  model={tabModelConfig.model}
+                  effort={tabModelConfig.effort}
                   mode={tabSession?.mode ?? null}
                   defaultModes={defaultModes}
                   inWorktree={Boolean(tabSession?.worktree)}
@@ -1236,7 +1249,20 @@ export function App() {
         usage={usage}
         onLoadUsage={(account) => void loadUsage(account.label)}
         onManageAccounts={() => setView('accounts')}
+        version={updates.version}
+        updateAvailable={updates.updateAvailable}
+        onOpenChangelog={updates.openChangelog}
       />
+      {updates.toastVisible && updates.info && (
+        <UpdateToast info={updates.info} onDismiss={updates.dismissToast} />
+      )}
+      {updates.changelog && (
+        <ChangelogModal
+          version={updates.version}
+          whatsNew={updates.changelog.whatsNew}
+          onClose={updates.closeChangelog}
+        />
+      )}
       {loginModal && (
         <LoginModal
           key={loginModal.sessionId ?? loginModal.accountLabel}

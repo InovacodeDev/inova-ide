@@ -10,6 +10,7 @@ import {
   SessionsSection,
   ShortcutsSection,
 } from './SettingsSections';
+import { ModelsSection } from './SettingsModels';
 import { VoiceSection } from './SettingsVoice';
 import type { WarningCall } from './useWarning';
 import './modal.css';
@@ -66,6 +67,7 @@ export function SettingsModal(props: SettingsModalProps) {
     general: (
       <GeneralSection defaultModes={defaultModes} call={call} onSetDefaultMode={onSetDefaultMode} />
     ),
+    models: <ModelsSection settings={settings} onUpdate={onUpdate} />,
     appearance: <AppearanceSection settings={settings} onUpdate={onUpdate} />,
     sessions: <SessionsSection settings={settings} onUpdate={onUpdate} />,
     notifications: <NotificationsSection settings={settings} onUpdate={onUpdate} call={call} />,

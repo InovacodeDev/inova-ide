@@ -65,6 +65,7 @@ function setup() {
       'listAccounts',
       'listProjects',
       'pickFolder',
+      'pickAttachments',
       'searchFiles',
       'listCommands',
       'startComparison',

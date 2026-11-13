@@ -104,6 +104,12 @@ export interface Settings {
     completed: boolean;
     onlyWhenUnfocused: boolean;
   };
+  models: Record<ProviderId, ProviderModelDefaults>;
+}
+
+export interface ProviderModelDefaults {
+  model: string | null;
+  effort: EffortLevel;
 }
 
 export type SettingsPatch = { [Section in keyof Settings]?: Partial<Settings[Section]> };
