@@ -1025,7 +1025,9 @@ export function App() {
           onRequestArchiveSession={setPendingArchive}
           onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
-        <main className="main">
+        <main
+          className={inWorkspace && activeSession && activeProject ? 'main has-details' : 'main'}
+        >
           {view === 'agents' && (
             <AgentsView
               agents={chatTabs.map((tab) => {

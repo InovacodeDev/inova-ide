@@ -129,6 +129,7 @@ a:hover {
 }
 
 .app-body {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -141,6 +142,10 @@ a:hover {
   display: flex;
   flex-direction: column;
   background: var(--bg);
+}
+
+.main.has-details {
+  padding-right: 312px;
 }
 
 .main-content {
