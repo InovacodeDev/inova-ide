@@ -4,6 +4,7 @@ import {
   applyFileSuggestion,
   detectComposerTrigger,
   filterCommands,
+  isSameComposerTrigger,
 } from '../src/renderer/composer-trigger.js';
 import type { ProjectCommandView } from '../src/shared/api.js';
 
@@ -70,4 +71,15 @@ test('filterCommands matches name and description case-insensitively', () => {
   ];
   expect(filterCommands(commands, 'sec').map((c) => c.name)).toEqual(['audit']);
   expect(filterCommands(commands, 'dep').map((c) => c.name)).toEqual(['deploy']);
+});
+
+test('isSameComposerTrigger compares triggers by value so unchanged cursor does not reset selection', () => {
+  const base = detectComposerTrigger('@docs/', 6);
+  const repeated = detectComposerTrigger('@docs/', 6);
+  const edited = detectComposerTrigger('@docs/a', 7);
+  expect(isSameComposerTrigger(null, null)).toBe(true);
+  expect(isSameComposerTrigger(base, null)).toBe(false);
+  expect(isSameComposerTrigger(null, repeated)).toBe(false);
+  expect(isSameComposerTrigger(base, repeated)).toBe(true);
+  expect(isSameComposerTrigger(base, edited)).toBe(false);
 });

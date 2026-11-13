@@ -10,6 +10,7 @@ import {
   applyFileSuggestion,
   detectComposerTrigger,
   filterCommands,
+  isSameComposerTrigger,
   type ComposerTrigger,
 } from './composer-trigger';
 import {
@@ -378,6 +379,7 @@ export function ChatView({
     loading: boolean;
   }>({ commands: [], loading: false });
   const searchSeqRef = useRef(0);
+  const triggerRef = useRef<ComposerTrigger | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
@@ -449,9 +451,15 @@ export function ChatView({
     [activeTrigger, commandResults.commands],
   );
 
+  const commitTrigger = (next: ComposerTrigger | null) => {
+    triggerRef.current = next;
+    setTrigger(next);
+  };
+
   const syncTrigger = (text: string, cursor: number) => {
     const next = detectComposerTrigger(text, cursor);
-    setTrigger(next);
+    if (isSameComposerTrigger(triggerRef.current, next)) return;
+    commitTrigger(next);
     setActiveIndex(0);
     setDismissedTriggerKey(null);
     if (next?.kind === 'file') {
@@ -465,7 +473,7 @@ export function ChatView({
     if (!activeTrigger || activeTrigger.kind !== 'file') return;
     const applied = applyFileSuggestion({ text: draft, trigger: activeTrigger, filePath });
     setDraft(applied.text);
-    setTrigger(null);
+    commitTrigger(null);
     setActiveIndex(0);
     queueMicrotask(() => {
       const input = inputRef.current;
@@ -479,7 +487,7 @@ export function ChatView({
     if (!activeTrigger || activeTrigger.kind !== 'command') return;
     const applied = applyCommandSuggestion({ text: draft, trigger: activeTrigger, command });
     setDraft(applied.text);
-    setTrigger(null);
+    commitTrigger(null);
     setActiveIndex(0);
     queueMicrotask(() => {
       const input = inputRef.current;
@@ -549,7 +557,7 @@ export function ChatView({
     stickRef.current = true;
     onSend(prompt);
     setDraft('');
-    setTrigger(null);
+    commitTrigger(null);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -557,13 +565,15 @@ export function ChatView({
       if (event.key === 'ArrowDown') {
         event.preventDefault();
         const total = popupModel.items.length;
-        if (total > 0) setActiveIndex((popupModel.activeIndex + 1) % total);
+        if (total > 0) setActiveIndex((current) => (Math.min(current, total - 1) + 1) % total);
         return;
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault();
         const total = popupModel.items.length;
-        if (total > 0) setActiveIndex((popupModel.activeIndex - 1 + total) % total);
+        if (total > 0) {
+          setActiveIndex((current) => (Math.min(current, total - 1) - 1 + total) % total);
+        }
         return;
       }
       if (event.key === 'Escape') {

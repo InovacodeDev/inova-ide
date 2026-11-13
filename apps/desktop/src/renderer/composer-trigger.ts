@@ -39,6 +39,15 @@ export function detectComposerTrigger(text: string, cursor: number): ComposerTri
   return null;
 }
 
+export function isSameComposerTrigger(
+  a: ComposerTrigger | null,
+  b: ComposerTrigger | null,
+): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  return a.kind === b.kind && a.query === b.query && a.start === b.start && a.end === b.end;
+}
+
 export function applyFileSuggestion(input: {
   text: string;
   trigger: ComposerTrigger;
