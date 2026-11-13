@@ -2,11 +2,19 @@ import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
+import { WorktreeError } from '@inova/core/git-worktree';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
 import { SessionError } from '@inova/core/sessions';
 import { StoreCorruptError } from '@inova/core/store';
-import type { Account, EffortLevel, ExecutionMode, ProviderId, Store } from '@inova/core/types';
+import type {
+  Account,
+  EffortLevel,
+  ExecutionMode,
+  ProviderId,
+  Store,
+  VerificationCheck,
+} from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
 import type { Result } from '../shared/api.js';
 
@@ -85,18 +93,87 @@ export function parseProjectRef(input: unknown): { projectId: string } | undefin
 
 export function parseNewSession(
   input: unknown,
-): { projectId: string; parentId: string | null } | undefined {
+): { projectId: string; parentId: string | null; isolatedWorktree?: boolean } | undefined {
   if (!isRecord(input) || !isText(input['projectId'])) return undefined;
-  const { projectId, parentId = null } = input;
+  const { projectId, parentId = null, isolatedWorktree } = input;
   if (!isText(projectId)) return undefined;
   if (parentId !== null && !isText(parentId)) return undefined;
-  return { projectId, parentId };
+  if (isolatedWorktree !== undefined && typeof isolatedWorktree !== 'boolean') return undefined;
+  return {
+    projectId,
+    parentId,
+    ...(isolatedWorktree === undefined ? {} : { isolatedWorktree }),
+  };
 }
 
 export function parseSessionRef(input: unknown): { sessionId: string } | undefined {
   return isRecord(input) && isSafeId(input['sessionId'])
     ? { sessionId: input['sessionId'] }
     : undefined;
+}
+
+export function parseSessionDelete(
+  input: unknown,
+): { sessionId: string; force: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { force = false } = input;
+  if (typeof force !== 'boolean') return undefined;
+  return { sessionId: input['sessionId'], force };
+}
+
+export function parseRestoreCheckpoint(
+  input: unknown,
+): { sessionId: string; ref: string; preserveFiles: string[] } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { ref, preserveFiles = [] } = input;
+  if (!isText(ref) || !ref.startsWith('refs/inova/checkpoints/') || ref.includes('..')) {
+    return undefined;
+  }
+  if (!Array.isArray(preserveFiles) || !preserveFiles.every((f) => isBoundedString(f, MAX_PATH))) {
+    return undefined;
+  }
+  return { sessionId: input['sessionId'], ref, preserveFiles };
+}
+
+function isCheckInput(value: unknown): value is VerificationCheck {
+  if (!isRecord(value)) return false;
+  return (
+    isText(value['id']) &&
+    isText(value['label']) &&
+    isBoundedString(value['command'], 1000) &&
+    typeof value['enabled'] === 'boolean'
+  );
+}
+
+export function parseProjectVerification(input: unknown):
+  | {
+      projectId: string;
+      autoWorktree?: boolean;
+      autoVerify?: boolean;
+      verificationChecks?: VerificationCheck[];
+    }
+  | undefined {
+  if (!isRecord(input) || !isText(input['projectId'])) return undefined;
+  const { projectId, autoWorktree, autoVerify, verificationChecks } = input;
+  if (autoWorktree === undefined && autoVerify === undefined && verificationChecks === undefined) {
+    return undefined;
+  }
+  if (autoWorktree !== undefined && typeof autoWorktree !== 'boolean') return undefined;
+  if (autoVerify !== undefined && typeof autoVerify !== 'boolean') return undefined;
+  if (
+    verificationChecks !== undefined &&
+    (!Array.isArray(verificationChecks) ||
+      verificationChecks.length > 20 ||
+      !verificationChecks.every(isCheckInput))
+  ) {
+    return undefined;
+  }
+  return {
+    projectId,
+    ...(autoWorktree === undefined ? {} : { autoWorktree }),
+    ...(autoVerify === undefined ? {} : { autoVerify }),
+    ...(verificationChecks === undefined ? {} : { verificationChecks }),
+  };
 }
 
 export interface SessionUpdateInput {
@@ -178,9 +255,9 @@ const MAX_FILE_SEARCH_LIMIT = 100;
 
 export function parseFileSearch(
   input: unknown,
-): { projectId: string; query: string; limit: number } | undefined {
+): { projectId: string; query: string; limit: number; sessionId?: string } | undefined {
   if (!isRecord(input) || !isText(input['projectId'])) return undefined;
-  const { query, limit = DEFAULT_FILE_SEARCH_LIMIT } = input;
+  const { query, limit = DEFAULT_FILE_SEARCH_LIMIT, sessionId } = input;
   if (typeof query !== 'string' || query.length > MAX_TEXT) return undefined;
   if (
     typeof limit !== 'number' ||
@@ -190,7 +267,13 @@ export function parseFileSearch(
   ) {
     return undefined;
   }
-  return { projectId: input['projectId'], query, limit };
+  if (sessionId !== undefined && !isSafeId(sessionId)) return undefined;
+  return {
+    projectId: input['projectId'],
+    query,
+    limit,
+    ...(sessionId === undefined ? {} : { sessionId }),
+  };
 }
 
 export function parseLoginCode(input: unknown): { sessionId: string; code: string } | undefined {
@@ -257,6 +340,7 @@ export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Pr
   } catch (error: unknown) {
     if (error instanceof AccountError) return fail(accountMessage(error, label));
     if (error instanceof SessionError) return fail(sessionMessage(error));
+    if (error instanceof WorktreeError) return fail(error.message);
     if (error instanceof UsageError) return fail(usageMessage(error));
     if (error instanceof StoreCorruptError)
       return fail(`Arquivo de dados corrompido: ${error.path}.`);

@@ -125,4 +125,39 @@ describe('chatReducer', () => {
     const live = run([{ kind: 'user', text: 'novo', at: 'now' }]);
     expect(chatReducer(live, loadAction)).toBe(live);
   });
+
+  test('tracks checkpoint and upserts verification events by turnId', () => {
+    const next = run([
+      { kind: 'user', text: 'corrija', at: 'now' },
+      {
+        kind: 'checkpoint',
+        turnId: 't1',
+        ref: 'refs/inova/checkpoints/s1/t1',
+        createdAt: 'now',
+        skippedLargeFiles: [],
+      },
+      { kind: 'verification', turnId: 't1', status: 'running', checks: [] },
+      {
+        kind: 'verification',
+        turnId: 't1',
+        status: 'failed',
+        checks: [
+          {
+            id: 'lint',
+            label: 'Lint',
+            command: 'pnpm lint',
+            passed: false,
+            exitCode: 1,
+            timedOut: false,
+            durationMs: 50,
+            output: 'err',
+          },
+        ],
+      },
+    ]);
+    expect(next.items.some((item) => item.type === 'checkpoint')).toBe(true);
+    const verifs = next.items.filter((item) => item.type === 'verification');
+    expect(verifs).toHaveLength(1);
+    expect(verifs[0]).toMatchObject({ status: 'failed', turnId: 't1' });
+  });
 });

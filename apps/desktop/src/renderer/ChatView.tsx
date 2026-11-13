@@ -11,7 +11,15 @@ import {
   filterCommands,
   type ComposerTrigger,
 } from './composer-trigger';
-import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
+import {
+  FileIcon,
+  PencilIcon,
+  PlayIcon,
+  RotateCcwIcon,
+  SendIcon,
+  StopIcon,
+  TerminalIcon,
+} from './icons';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { ModePicker } from './ModePicker';
@@ -20,6 +28,7 @@ import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
 
 export interface ChatViewProps {
+  sessionId?: string | null;
   projectId: string | null;
   state: ChatState;
   visible: boolean;
@@ -35,6 +44,7 @@ export interface ChatViewProps {
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onChangeMode: (mode: ExecutionMode) => void;
   onSetDefaultMode: (mode: ExecutionMode) => void;
+  onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onSend: (prompt: string) => void;
   onCancel: () => void;
 }
@@ -88,10 +98,99 @@ function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
   );
 }
 
+function buildVerificationRetryPrompt(item: Extract<ChatItem, { type: 'verification' }>): string {
+  const failed = item.checks.filter((check) => !check.passed);
+  const details = failed
+    .map((check) => {
+      const exitLabel = check.exitCode === null ? 'sem código' : String(check.exitCode);
+      const output = check.output.trim();
+      return output
+        ? `Comando: ${check.command} (exit ${exitLabel})\n\`\`\`\n${output}\n\`\`\``
+        : `Comando: ${check.command} (exit ${exitLabel})`;
+    })
+    .join('\n\n');
+  return `A verificação automática falhou. Corrija os erros abaixo:\n\n${details}`;
+}
+
+function VerificationCard({
+  item,
+  canFix,
+  onFix,
+}: {
+  item: Extract<ChatItem, { type: 'verification' }>;
+  canFix: boolean;
+  onFix: () => void;
+}) {
+  const statusLabel =
+    item.status === 'running'
+      ? 'Executando verificações'
+      : item.status === 'passed'
+        ? 'Verificação aprovada'
+        : 'Verificação falhou';
+  return (
+    <details
+      className={`chat-verification chat-verification-${item.status}`}
+      open={item.status === 'failed'}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <PlayIcon size={15} />
+        </span>
+        <span className="chat-tool-name">{statusLabel}</span>
+        <span className="chat-tool-preview">
+          {item.checks
+            .map(
+              (c) => `${c.passed ? 'OK' : item.status === 'running' ? '...' : 'ERRO'} ${c.label}`,
+            )
+            .join(' · ')}
+        </span>
+      </summary>
+      <div className="chat-tool-body">
+        {item.checks.map((check) => (
+          <div key={check.id} className="chat-verification-item">
+            <div className="chat-verification-item-head">
+              <span className="chat-tool-name">{check.label}</span>
+              <span className="mono chat-verification-cmd">{check.command}</span>
+              <span
+                className={
+                  check.passed
+                    ? 'chat-verification-badge chat-verification-ok'
+                    : item.status === 'running'
+                      ? 'chat-verification-badge'
+                      : 'chat-verification-badge chat-verification-fail'
+                }
+              >
+                {item.status === 'running'
+                  ? 'executando'
+                  : check.passed
+                    ? `ok (${check.durationMs}ms)`
+                    : `falhou (${check.exitCode ?? 'erro'})`}
+              </span>
+            </div>
+            {check.output.trim() !== '' ? (
+              <pre className="chat-tool-pre">{check.output}</pre>
+            ) : null}
+          </div>
+        ))}
+        {item.status === 'failed' && canFix ? (
+          <div className="chat-verification-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={onFix}>
+              Corrigir falha com o agente
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 interface MessageProps {
   item: ChatItem;
   showAgentLabel: boolean;
   provider: ProviderId | null;
+  busy: boolean;
+  onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
+  onFixVerification?: (prompt: string) => void;
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
@@ -103,7 +202,14 @@ function AgentLabel({ provider }: { provider: ProviderId | null }) {
   );
 }
 
-function Message({ item, showAgentLabel, provider }: MessageProps) {
+function Message({
+  item,
+  showAgentLabel,
+  provider,
+  busy,
+  onRestoreCheckpoint,
+  onFixVerification,
+}: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   switch (item.type) {
     case 'user':
@@ -130,6 +236,47 @@ function Message({ item, showAgentLabel, provider }: MessageProps) {
           <ToolCard item={item} />
         </div>
       );
+    case 'checkpoint':
+      return (
+        <div className="chat-row">
+          <div className="chat-checkpoint">
+            <span className="chat-checkpoint-info">
+              <RotateCcwIcon size={13} />
+              <span>Checkpoint antes do turno</span>
+              {item.skippedLargeFiles.length > 0 ? (
+                <span className="chat-checkpoint-warn" title={item.skippedLargeFiles.join(', ')}>
+                  {item.skippedLargeFiles.length} arquivo(s) &gt;10MB preservado(s)
+                </span>
+              ) : null}
+            </span>
+            {onRestoreCheckpoint ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() =>
+                  onRestoreCheckpoint({
+                    ref: item.ref,
+                    skippedLargeFiles: item.skippedLargeFiles,
+                  })
+                }
+              >
+                Restaurar
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    case 'verification':
+      return (
+        <div className="chat-row">
+          <VerificationCard
+            item={item}
+            canFix={!busy && Boolean(onFixVerification)}
+            onFix={() => onFixVerification?.(buildVerificationRetryPrompt(item))}
+          />
+        </div>
+      );
     case 'error':
       return (
         <div className="chat-row">
@@ -144,6 +291,7 @@ function Message({ item, showAgentLabel, provider }: MessageProps) {
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
+  sessionId = null,
   projectId,
   state,
   visible,
@@ -159,6 +307,7 @@ export function ChatView({
   onChangeModelConfig,
   onChangeMode,
   onSetDefaultMode,
+  onRestoreCheckpoint,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -192,7 +341,12 @@ export function ChatView({
     const seq = ++searchSeqRef.current;
     const timer = setTimeout(() => {
       void window.inova
-        .searchFiles({ projectId, query: activeTrigger.query, limit: 40 })
+        .searchFiles({
+          projectId,
+          query: activeTrigger.query,
+          limit: 40,
+          ...(sessionId ? { sessionId } : {}),
+        })
         .then((result) => {
           if (searchSeqRef.current !== seq) return;
           setFileResults(
@@ -208,7 +362,7 @@ export function ChatView({
         });
     }, FILE_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [activeTrigger, projectId]);
+  }, [activeTrigger, projectId, sessionId]);
 
   useEffect(() => {
     if (!activeTrigger || activeTrigger.kind !== 'command' || projectId === null) return;
@@ -391,6 +545,11 @@ export function ChatView({
               key={item.id}
               item={item}
               provider={provider}
+              busy={running || readOnly}
+              onRestoreCheckpoint={onRestoreCheckpoint}
+              onFixVerification={(fixPrompt) => {
+                if (!running && !readOnly) onSend(fixPrompt);
+              }}
               showAgentLabel={
                 (item.type === 'assistant' || item.type === 'tool') &&
                 (index === 0 || items[index - 1]?.type === 'user')

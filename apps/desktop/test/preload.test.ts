@@ -126,4 +126,22 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     provider: 'claude',
     mode: 'plan',
   });
+  void api.getWorktreeStatus({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getWorktreeStatus', { sessionId: 's' });
+  void api.applyWorktree({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:applyWorktree', { sessionId: 's' });
+  void api.restoreCheckpoint({ sessionId: 's', ref: 'refs/inova/checkpoints/s/1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:restoreCheckpoint', {
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  void api.detectProjectChecks({ projectId: 'p' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:detectProjectChecks', { projectId: 'p' });
+  void api.updateProjectVerification({ projectId: 'p', autoVerify: true });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:updateProjectVerification', {
+    projectId: 'p',
+    autoVerify: true,
+  });
+  void api.runVerification({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:runVerification', { sessionId: 's' });
 });

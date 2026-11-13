@@ -25,6 +25,13 @@ const api: InovaApi = {
   getDefaultModes: () => ipcRenderer.invoke(CHANNELS.getDefaultModes),
   setDefaultMode: (input) => ipcRenderer.invoke(CHANNELS.setDefaultMode, input),
   deleteSession: (input) => ipcRenderer.invoke(CHANNELS.deleteSession, input),
+  getWorktreeStatus: (input) => ipcRenderer.invoke(CHANNELS.getWorktreeStatus, input),
+  applyWorktree: (input) => ipcRenderer.invoke(CHANNELS.applyWorktree, input),
+  restoreCheckpoint: (input) => ipcRenderer.invoke(CHANNELS.restoreCheckpoint, input),
+  detectProjectChecks: (input) => ipcRenderer.invoke(CHANNELS.detectProjectChecks, input),
+  updateProjectVerification: (input) =>
+    ipcRenderer.invoke(CHANNELS.updateProjectVerification, input),
+  runVerification: (input) => ipcRenderer.invoke(CHANNELS.runVerification, input),
   getWorkspace: () => ipcRenderer.invoke(CHANNELS.getWorkspace),
   saveWorkspace: (input) => ipcRenderer.invoke(CHANNELS.saveWorkspace, input),
   loadTranscript: (input) => ipcRenderer.invoke(CHANNELS.loadTranscript, input),

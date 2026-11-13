@@ -2,13 +2,28 @@ import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ExecutionMode, ProviderId, Session, Workspace } from '@inova/core/types';
+import type {
+  EffortLevel,
+  ExecutionMode,
+  ProviderId,
+  Session,
+  VerificationCheck,
+  Workspace,
+} from '@inova/core/types';
 
 export type ProjectCommandView = ProjectCommand;
 
 export interface ProjectFileSearchResult {
   files: string[];
   truncated: boolean;
+}
+
+export interface WorktreeStatusView {
+  branch: string;
+  changedFiles: string[];
+  diffStat: string;
+  diff: string;
+  dirty: boolean;
 }
 
 export type SessionView = Session;
@@ -31,6 +46,9 @@ export interface ProjectView {
   accountLabel: string;
   accountEmail: string | null;
   provider: ProviderId;
+  autoWorktree?: boolean;
+  autoVerify?: boolean;
+  verificationChecks?: VerificationCheck[];
 }
 
 export type LoginStage =
@@ -62,6 +80,7 @@ export interface InovaApi {
   createSession(input: {
     projectId: string;
     parentId?: string | null;
+    isolatedWorktree?: boolean;
   }): Promise<Result<SessionView>>;
   updateSession(input: {
     sessionId: string;
@@ -76,7 +95,22 @@ export interface InovaApi {
     provider: ProviderId;
     mode: ExecutionMode;
   }): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
-  deleteSession(input: { sessionId: string }): Promise<Result<null>>;
+  deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
+  getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
+  applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
+  restoreCheckpoint(input: {
+    sessionId: string;
+    ref: string;
+    preserveFiles?: string[];
+  }): Promise<Result<null>>;
+  detectProjectChecks(input: { projectId: string }): Promise<Result<VerificationCheck[]>>;
+  updateProjectVerification(input: {
+    projectId: string;
+    autoWorktree?: boolean;
+    autoVerify?: boolean;
+    verificationChecks?: VerificationCheck[];
+  }): Promise<Result<ProjectView>>;
+  runVerification(input: { sessionId: string }): Promise<Result<null>>;
   getWorkspace(): Promise<Result<WorkspaceView>>;
   saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
   loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
@@ -88,6 +122,7 @@ export interface InovaApi {
     projectId: string;
     query: string;
     limit?: number;
+    sessionId?: string;
   }): Promise<Result<ProjectFileSearchResult>>;
   listCommands(input: { projectId: string }): Promise<Result<ProjectCommandView[]>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
@@ -111,6 +146,12 @@ export const CHANNELS = {
   getDefaultModes: 'inova:getDefaultModes',
   setDefaultMode: 'inova:setDefaultMode',
   deleteSession: 'inova:deleteSession',
+  getWorktreeStatus: 'inova:getWorktreeStatus',
+  applyWorktree: 'inova:applyWorktree',
+  restoreCheckpoint: 'inova:restoreCheckpoint',
+  detectProjectChecks: 'inova:detectProjectChecks',
+  updateProjectVerification: 'inova:updateProjectVerification',
+  runVerification: 'inova:runVerification',
   getWorkspace: 'inova:getWorkspace',
   saveWorkspace: 'inova:saveWorkspace',
   loadTranscript: 'inova:loadTranscript',

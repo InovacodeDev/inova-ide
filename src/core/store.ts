@@ -46,8 +46,27 @@ function isAccount(value: unknown): boolean {
   );
 }
 
+function isVerificationCheck(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasStrings(value, ['id', 'label', 'command']) &&
+    typeof value['enabled'] === 'boolean'
+  );
+}
+
+function isWorktree(value: unknown): boolean {
+  return isRecord(value) && hasStrings(value, ['path', 'branch', 'baseCommit', 'createdAt']);
+}
+
 function isProject(value: unknown): boolean {
-  return isRecord(value) && hasStrings(value, ['id', 'path', 'accountId']);
+  if (!isRecord(value) || !hasStrings(value, ['id', 'path', 'accountId'])) return false;
+  const { autoWorktree, autoVerify, verificationChecks } = value;
+  return (
+    (autoWorktree === undefined || typeof autoWorktree === 'boolean') &&
+    (autoVerify === undefined || typeof autoVerify === 'boolean') &&
+    (verificationChecks === undefined ||
+      (Array.isArray(verificationChecks) && verificationChecks.every(isVerificationCheck)))
+  );
 }
 
 function isStringOrNull(value: unknown): boolean {
@@ -57,7 +76,7 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId, model, effort, mode, archivedAt } = value;
+  const { id, parentId, providerSessionId, model, effort, mode, worktree, archivedAt } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
@@ -66,6 +85,7 @@ function isSession(value: unknown): boolean {
     (model === undefined || isStringOrNull(model)) &&
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (mode === undefined || mode === null || isExecutionMode(mode)) &&
+    (worktree === undefined || worktree === null || isWorktree(worktree)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
 }

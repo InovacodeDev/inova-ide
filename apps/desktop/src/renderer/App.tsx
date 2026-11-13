@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ExecutionMode, ProviderId, Session } from '@inova/core/types';
-import type { AccountView, ProjectView } from '../shared/api';
+import type {
+  EffortLevel,
+  ExecutionMode,
+  ProviderId,
+  Session,
+  VerificationCheck,
+} from '@inova/core/types';
+import type { AccountView, ProjectView, WorktreeStatusView } from '../shared/api';
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
@@ -57,6 +63,16 @@ export function App() {
   const [loginModal, setLoginModal] = useState<LoginModalState | null>(null);
   const [pendingRemoveAccount, setPendingRemoveAccount] = useState<AccountView | null>(null);
   const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
+  const [pendingForceDelete, setPendingForceDelete] = useState<Session | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<{
+    sessionId: string;
+    ref: string;
+    skippedLargeFiles: string[];
+  } | null>(null);
+  const [worktreeModal, setWorktreeModal] = useState<{
+    session: Session;
+    status: WorktreeStatusView;
+  } | null>(null);
   const { warning, dismiss, guard, call } = useWarning();
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
@@ -236,11 +252,18 @@ export function App() {
     await loadChat(session.id);
   };
 
-  const newSession = async (input: { project: ProjectView; parent: Session | null }) => {
+  const newSession = async (input: {
+    project: ProjectView;
+    parent: Session | null;
+    isolatedWorktree?: boolean;
+  }) => {
     const result = await call(() =>
       window.inova.createSession({
         projectId: input.project.id,
         parentId: input.parent?.id ?? null,
+        ...(input.isolatedWorktree === undefined
+          ? {}
+          : { isolatedWorktree: input.isolatedWorktree }),
       }),
     );
     if (!result) return;
@@ -318,12 +341,78 @@ export function App() {
   const sessionIdsOf = (projectIds: string[]): string[] =>
     projectIds.flatMap((id) => (latest.current.sessions[id] ?? []).map((session) => session.id));
 
-  const deleteSession = async (session: Session) => {
+  const deleteSession = async (session: Session, force = false) => {
     const known = latest.current.sessions[session.projectId] ?? [];
-    const result = await call(() => window.inova.deleteSession({ sessionId: session.id }));
-    if (!result) return;
+    const response = await guard(() =>
+      window.inova.deleteSession({ sessionId: session.id, force }),
+    );
+    if (!response) return;
+    if (!response.ok) {
+      if (!force && response.message.includes('worktree')) {
+        setPendingForceDelete(session);
+        return;
+      }
+      await call(() => Promise.resolve(response));
+      return;
+    }
     dropSessions(subtreeIds({ sessions: known, rootId: session.id }));
     await reloadSessions(session.projectId);
+  };
+
+  const inspectWorktree = async (session: Session) => {
+    const result = await call(() => window.inova.getWorktreeStatus({ sessionId: session.id }));
+    if (result) setWorktreeModal({ session, status: result.value });
+  };
+
+  const applyWorktree = async (session: Session) => {
+    const result = await call(() => window.inova.applyWorktree({ sessionId: session.id }));
+    if (!result) return;
+    setWorktreeModal(null);
+  };
+
+  const confirmRestoreCheckpoint = async (target: {
+    sessionId: string;
+    ref: string;
+    skippedLargeFiles: string[];
+  }) => {
+    const result = await call(() =>
+      window.inova.restoreCheckpoint({
+        sessionId: target.sessionId,
+        ref: target.ref,
+        preserveFiles: target.skippedLargeFiles,
+      }),
+    );
+    if (!result) return;
+  };
+
+  const updateProjectVerification = async (
+    projectId: string,
+    patch: {
+      autoWorktree?: boolean;
+      autoVerify?: boolean;
+      verificationChecks?: VerificationCheck[];
+    },
+  ) => {
+    const result = await call(() =>
+      window.inova.updateProjectVerification({ projectId, ...patch }),
+    );
+    if (!result) return;
+    setProjects((current) =>
+      current.map((item) => (item.id === result.value.id ? result.value : item)),
+    );
+  };
+
+  const detectChecks = async (project: ProjectView) => {
+    const detected = await call(() => window.inova.detectProjectChecks({ projectId: project.id }));
+    if (!detected) return;
+    const existing = project.verificationChecks ?? [];
+    const knownIds = new Set(existing.map((c) => c.id));
+    const merged = [...existing, ...detected.value.filter((c) => !knownIds.has(c.id))];
+    await updateProjectVerification(project.id, { verificationChecks: merged });
+  };
+
+  const runVerification = async (sessionId: string) => {
+    await call(() => window.inova.runVerification({ sessionId }));
   };
 
   const renameSession = async (input: { session: Session; title: string }) => {
@@ -369,7 +458,11 @@ export function App() {
     await reloadSessions(input.session.projectId);
   };
 
-  const startSession = async (input: { target: NewSessionTarget; prompt: string }) => {
+  const startSession = async (input: {
+    target: NewSessionTarget;
+    prompt: string;
+    isolatedWorktree?: boolean;
+  }) => {
     let project: ProjectView;
     if (input.target.kind === 'project') {
       project = input.target.project;
@@ -380,7 +473,11 @@ export function App() {
       await reloadProjects();
       project = bound.value;
     }
-    const session = await newSession({ project, parent: null });
+    const session = await newSession({
+      project,
+      parent: null,
+      isolatedWorktree: input.isolatedWorktree,
+    });
     if (session && input.prompt !== '') await sendMessage(session.id, input.prompt);
   };
 
@@ -540,6 +637,10 @@ export function App() {
                 provider={activeTab.provider}
                 accountDisplay={accountDisplayOf(activeProject)}
                 path={activeProject?.path ?? null}
+                worktreeBranch={activeSession?.worktree?.branch ?? null}
+                worktreeBusy={
+                  activeTab.kind === 'chat' ? Boolean(chats[activeTab.sessionId]?.running) : false
+                }
                 status={
                   activeTab.kind === 'chat' ? sessionStatus(chats[activeTab.sessionId]) : null
                 }
@@ -548,6 +649,12 @@ export function App() {
                   activeSession
                     ? (title) => void renameSession({ session: activeSession, title })
                     : undefined
+                }
+                onInspectWorktree={
+                  activeSession?.worktree ? () => void inspectWorktree(activeSession) : undefined
+                }
+                onApplyWorktree={
+                  activeSession?.worktree ? () => void applyWorktree(activeSession) : undefined
                 }
                 onClose={() => {
                   if (chats[activeTab.sessionId]?.running) setPendingCloseTab(activeTab);
@@ -566,6 +673,7 @@ export function App() {
               return (
                 <ChatView
                   key={tab.sessionId}
+                  sessionId={tab.sessionId}
                   projectId={tabProject?.id ?? null}
                   state={chats[tab.sessionId] ?? initialChatState}
                   visible={inWorkspace && tab.sessionId === tabs.active}
@@ -575,6 +683,7 @@ export function App() {
                   effort={tabSession?.effort ?? null}
                   mode={tabSession?.mode ?? null}
                   defaultModes={defaultModes}
+                  inWorktree={Boolean(tabSession?.worktree)}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   onChangeModelConfig={(patch) =>
@@ -586,6 +695,13 @@ export function App() {
                   onSetDefaultMode={(mode) => {
                     if (tab.provider) void setDefaultProviderMode(tab.provider, mode);
                   }}
+                  onRestoreCheckpoint={(cp) =>
+                    setPendingRestore({
+                      sessionId: tab.sessionId,
+                      ref: cp.ref,
+                      skippedLargeFiles: cp.skippedLargeFiles,
+                    })
+                  }
                   onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
@@ -600,6 +716,12 @@ export function App() {
             project={activeProject}
             account={accounts.find((account) => account.label === activeProject.accountLabel)}
             usage={usage[activeProject.accountLabel]}
+            running={Boolean(chats[activeSession.id]?.running)}
+            onDetectChecks={() => void detectChecks(activeProject)}
+            onRunVerification={() => void runVerification(activeSession.id)}
+            onUpdateProjectVerification={(patch) =>
+              void updateProjectVerification(activeProject.id, patch)
+            }
           />
         )}
       </div>
@@ -659,6 +781,76 @@ export function App() {
             closeTab(target);
           }}
         />
+      )}
+      {pendingRestore && (
+        <ConfirmModal
+          title="Restaurar checkpoint"
+          description={
+            pendingRestore.skippedLargeFiles.length > 0
+              ? `Restaurar os arquivos do repositório ao estado anterior a este turno? Arquivos acima de 10 MB preservados: ${pendingRestore.skippedLargeFiles.join(', ')}.`
+              : 'Restaurar os arquivos do repositório ao estado anterior a este turno? Alterações posteriores neste worktree serão substituídas.'
+          }
+          confirmLabel="Restaurar"
+          danger
+          onCancel={() => setPendingRestore(null)}
+          onConfirm={() => {
+            const target = pendingRestore;
+            setPendingRestore(null);
+            void confirmRestoreCheckpoint(target);
+          }}
+        />
+      )}
+      {pendingForceDelete && (
+        <ConfirmModal
+          title="Descartar alterações do worktree"
+          description={`A sessão "${pendingForceDelete.title}" possui alterações não aplicadas no worktree. Apagar a sessão descartará essas alterações.`}
+          confirmLabel="Apagar e descartar"
+          danger
+          onCancel={() => setPendingForceDelete(null)}
+          onConfirm={() => {
+            const target = pendingForceDelete;
+            setPendingForceDelete(null);
+            void deleteSession(target, true);
+          }}
+        />
+      )}
+      {worktreeModal && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="worktree-diff-title"
+          onClick={() => setWorktreeModal(null)}
+        >
+          <div className="modal modal-wide" onClick={(event) => event.stopPropagation()}>
+            <h2 id="worktree-diff-title" className="modal-title">
+              Alterações do worktree ({worktreeModal.status.branch})
+            </h2>
+            {worktreeModal.status.changedFiles.length === 0 ? (
+              <p className="modal-body">Nenhuma alteração pendente em relação à base.</p>
+            ) : (
+              <>
+                <p className="modal-body mono">{worktreeModal.status.diffStat}</p>
+                <pre className="worktree-diff-pre">{worktreeModal.status.diff}</pre>
+              </>
+            )}
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={() => setWorktreeModal(null)}>
+                Fechar
+              </button>
+              {worktreeModal.status.changedFiles.length > 0 ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={Boolean(chats[worktreeModal.session.id]?.running)}
+                  onClick={() => void applyWorktree(worktreeModal.session)}
+                >
+                  Aplicar no projeto principal
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

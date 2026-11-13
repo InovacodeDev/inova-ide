@@ -31,6 +31,12 @@ function setup() {
       'getDefaultModes',
       'setDefaultMode',
       'deleteSession',
+      'getWorktreeStatus',
+      'applyWorktree',
+      'restoreCheckpoint',
+      'detectProjectChecks',
+      'updateProjectVerification',
+      'runVerification',
       'getWorkspace',
       'saveWorkspace',
       'loadTranscript',
@@ -137,11 +143,32 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:listModels', trusted, input);
   await invoke('inova:getDefaultModes', trusted);
   await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
+  await invoke('inova:getWorktreeStatus', trusted, { sessionId: 's' });
+  await invoke('inova:applyWorktree', trusted, { sessionId: 's' });
+  await invoke('inova:restoreCheckpoint', trusted, {
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  await invoke('inova:detectProjectChecks', trusted, { projectId: 'p' });
+  await invoke('inova:updateProjectVerification', trusted, { projectId: 'p', autoVerify: true });
+  await invoke('inova:runVerification', trusted, { sessionId: 's' });
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
   expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
   expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });
+  expect(handlers['getWorktreeStatus']).toHaveBeenCalledWith({ sessionId: 's' });
+  expect(handlers['applyWorktree']).toHaveBeenCalledWith({ sessionId: 's' });
+  expect(handlers['restoreCheckpoint']).toHaveBeenCalledWith({
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  expect(handlers['detectProjectChecks']).toHaveBeenCalledWith({ projectId: 'p' });
+  expect(handlers['updateProjectVerification']).toHaveBeenCalledWith({
+    projectId: 'p',
+    autoVerify: true,
+  });
+  expect(handlers['runVerification']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(electron.invokes.has('inova:openProject')).toBe(false);
 });
 

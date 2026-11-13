@@ -3,7 +3,7 @@ import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { createChatParser } from '@inova/core/chat-events';
 import type { ChatParser } from '@inova/core/chat-events';
-import type { ChatEvent, UsageWindow } from '@inova/core/chat-types';
+import type { ChatEvent, UsageWindow, VerificationCheckResult } from '@inova/core/chat-types';
 import type { LaunchSpec } from '@inova/core/launch';
 import type { ProviderId } from '@inova/core/types';
 
@@ -96,6 +96,29 @@ function windowsOf(value: unknown): UsageWindow[] | undefined {
   return windows;
 }
 
+function checkResultsOf(value: unknown): VerificationCheckResult[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const results: VerificationCheckResult[] = [];
+  for (const item of value as unknown[]) {
+    if (!isJson(item)) return undefined;
+    const { id, label, command, passed, exitCode, timedOut, durationMs, output } = item;
+    if (
+      typeof id !== 'string' ||
+      typeof label !== 'string' ||
+      typeof command !== 'string' ||
+      typeof passed !== 'boolean' ||
+      !numberOrNull(exitCode) ||
+      typeof timedOut !== 'boolean' ||
+      typeof durationMs !== 'number' ||
+      typeof output !== 'string'
+    ) {
+      return undefined;
+    }
+    results.push({ id, label, command, passed, exitCode, timedOut, durationMs, output });
+  }
+  return results;
+}
+
 function eventOf(record: Json): ChatEvent | undefined {
   switch (record['kind']) {
     case 'session':
@@ -131,6 +154,32 @@ function eventOf(record: Json): ChatEvent | undefined {
     case 'usage-limits': {
       const windows = windowsOf(record['windows']);
       return windows && { kind: 'usage-limits', windows };
+    }
+    case 'checkpoint': {
+      const { turnId, ref, createdAt, skippedLargeFiles } = record;
+      if (
+        typeof turnId !== 'string' ||
+        typeof ref !== 'string' ||
+        typeof createdAt !== 'string' ||
+        !Array.isArray(skippedLargeFiles) ||
+        !skippedLargeFiles.every((entry) => typeof entry === 'string')
+      ) {
+        return undefined;
+      }
+      return { kind: 'checkpoint', turnId, ref, createdAt, skippedLargeFiles };
+    }
+    case 'verification': {
+      const { turnId, status, checks } = record;
+      if (
+        typeof turnId !== 'string' ||
+        (status !== 'running' && status !== 'passed' && status !== 'failed')
+      ) {
+        return undefined;
+      }
+      const parsedChecks = checkResultsOf(checks);
+      return parsedChecks
+        ? { kind: 'verification', turnId, status, checks: parsedChecks }
+        : undefined;
     }
     case 'error':
       return strings(record, ['message'])

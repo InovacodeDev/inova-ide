@@ -276,3 +276,33 @@ test('each turn gets distinct gemini block ids', () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 });
+
+test('parseTranscriptLine accepts checkpoint and verification events', () => {
+  const checkpoint = {
+    kind: 'checkpoint',
+    turnId: 't1',
+    ref: 'refs/inova/checkpoints/s1/t1',
+    createdAt: '2026-11-13T10:00:00.000Z',
+    skippedLargeFiles: ['big.bin'],
+  };
+  expect(parseTranscriptLine(JSON.stringify(checkpoint))).toEqual(checkpoint);
+
+  const verification = {
+    kind: 'verification',
+    turnId: 't1',
+    status: 'failed',
+    checks: [
+      {
+        id: 'test',
+        label: 'Testes',
+        command: 'pnpm test',
+        passed: false,
+        exitCode: 1,
+        timedOut: false,
+        durationMs: 120,
+        output: 'fail',
+      },
+    ],
+  };
+  expect(parseTranscriptLine(JSON.stringify(verification))).toEqual(verification);
+});

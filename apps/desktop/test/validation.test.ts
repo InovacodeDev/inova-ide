@@ -9,7 +9,10 @@ import {
   parseNewSession,
   parsePath,
   parseProjectRef,
+  parseProjectVerification,
   parseRemoval,
+  parseRestoreCheckpoint,
+  parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
   parseUsageRequest,
@@ -203,4 +206,36 @@ test('session mode update and default provider mode validation', () => {
   });
   expect(parseDefaultMode({ provider: 'unknown', mode: 'plan' })).toBeUndefined();
   expect(parseDefaultMode({ provider: 'claude', mode: 'invalid' })).toBeUndefined();
+});
+
+test('worktree, checkpoint restore, and project verification validation', () => {
+  expect(parseNewSession({ projectId: 'p1', isolatedWorktree: true })).toEqual({
+    projectId: 'p1',
+    parentId: null,
+    isolatedWorktree: true,
+  });
+  expect(parseSessionDelete({ sessionId: 's1', force: true })).toEqual({
+    sessionId: 's1',
+    force: true,
+  });
+  expect(parseRestoreCheckpoint({ sessionId: 's1', ref: 'refs/inova/checkpoints/s1/t1' })).toEqual({
+    sessionId: 's1',
+    ref: 'refs/inova/checkpoints/s1/t1',
+    preserveFiles: [],
+  });
+  expect(parseRestoreCheckpoint({ sessionId: 's1', ref: 'refs/heads/main' })).toBeUndefined();
+  expect(
+    parseProjectVerification({
+      projectId: 'p1',
+      autoWorktree: true,
+      autoVerify: true,
+      verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    autoWorktree: true,
+    autoVerify: true,
+    verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
+  });
+  expect(parseProjectVerification({ projectId: 'p1' })).toBeUndefined();
 });

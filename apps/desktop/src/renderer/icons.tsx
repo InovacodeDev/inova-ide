@@ -8,14 +8,17 @@ import { ExternalLink } from 'pulsoicon-react/icons/external-link';
 import { Eye } from 'pulsoicon-react/icons/eye';
 import { File } from 'pulsoicon-react/icons/file';
 import { Folder } from 'pulsoicon-react/icons/folder';
+import { GitBranch } from 'pulsoicon-react/icons/git-branch';
 import { Key } from 'pulsoicon-react/icons/key';
 import { LayoutGrid } from 'pulsoicon-react/icons/layout-grid';
 import { ListTodo } from 'pulsoicon-react/icons/list-todo';
 import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
+import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
+import { RotateCcw } from 'pulsoicon-react/icons/rotate-ccw';
 import { Shield } from 'pulsoicon-react/icons/shield';
 import { ShieldAlert } from 'pulsoicon-react/icons/shield-alert';
 import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
@@ -155,4 +158,16 @@ export function ListTodoIcon({ size = 16 }: IconProps) {
 
 export function ZapIcon({ size = 16 }: IconProps) {
   return <Zap size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function GitBranchIcon({ size = 16 }: IconProps) {
+  return <GitBranch size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function RotateCcwIcon({ size = 16 }: IconProps) {
+  return <RotateCcw size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function PlayIcon({ size = 16 }: IconProps) {
+  return <Play size={size} strokeWidth={1.7} aria-hidden="true" />;
 }

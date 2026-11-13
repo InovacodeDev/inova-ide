@@ -232,3 +232,79 @@
 .usage-error {
   color: var(--error);
 }
+
+.session-header-worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session-worktree-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.session-details-toggles,
+.session-details-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-details-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-details-check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.session-details-actions {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 8px;
+}
+
+.session-details-add-check {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.new-session-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.modal-wide {
+  width: min(760px, 92vw);
+}
+
+.worktree-diff-pre {
+  max-height: 420px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+}

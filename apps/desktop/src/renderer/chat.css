@@ -886,3 +886,81 @@
   cursor: default;
   opacity: 0.7;
 }
+
+.chat-checkpoint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: var(--surface, rgba(255, 255, 255, 0.02));
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chat-checkpoint-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-checkpoint-warn {
+  color: var(--warn, #e3b341);
+  font-size: 11px;
+}
+
+.chat-verification {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface, rgba(255, 255, 255, 0.03));
+  font-size: 13px;
+}
+
+.chat-verification-passed {
+  border-color: var(--success-border, rgba(63, 185, 80, 0.35));
+}
+
+.chat-verification-failed {
+  border-color: var(--error);
+}
+
+.chat-verification-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.chat-verification-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chat-verification-cmd {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chat-verification-badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-verification-ok {
+  color: var(--success, #3fb950);
+}
+
+.chat-verification-fail {
+  color: var(--error);
+}
+
+.chat-verification-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}

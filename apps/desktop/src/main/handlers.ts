@@ -5,6 +5,17 @@ import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
 import { listProjectCommands } from '@inova/core/commands';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
+import {
+  createCheckpoint,
+  removeSessionCheckpoints,
+  restoreCheckpoint,
+} from '@inova/core/git-checkpoints';
+import {
+  applyWorktreeToProject,
+  createSessionWorktree,
+  getWorktreeStatus,
+  removeSessionWorktree,
+} from '@inova/core/git-worktree';
 import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import {
@@ -15,7 +26,13 @@ import {
 } from '@inova/core/models';
 import type { ProviderModels } from '@inova/core/models';
 import { isModeSupported, resolveExecutionMode } from '@inova/core/modes';
-import { PathNotFoundError, bindProject, realPathOf, unbindProject } from '@inova/core/projects';
+import {
+  PathNotFoundError,
+  bindProject,
+  realPathOf,
+  unbindProject,
+  updateProjectConfig,
+} from '@inova/core/projects';
 import { providers, readAccountEmail } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
 import {
@@ -23,6 +40,7 @@ import {
   createSession,
   deleteSession,
   descendantIds,
+  effectiveCwd,
   getDefaultModes,
   getWorkspace,
   saveWorkspace,
@@ -33,14 +51,24 @@ import { loadStore } from '@inova/core/store';
 import type {
   Account,
   ExecutionMode,
+  Project,
   ProviderId,
   Session,
   Store,
+  VerificationCheck,
   Workspace,
 } from '@inova/core/types';
 import { UsageError, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
-import type { AccountView, LoginEvent, ProjectView, Result, StartedLogin } from '../shared/api.js';
+import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
+import type {
+  AccountView,
+  LoginEvent,
+  ProjectView,
+  Result,
+  StartedLogin,
+  WorktreeStatusView,
+} from '../shared/api.js';
 import { parseTranscriptLine } from './chat.js';
 import type { ChatRunner } from './chat.js';
 import { createLoginFlowManager } from './login-flow.js';
@@ -59,7 +87,10 @@ import {
   parseNewSession,
   parsePath,
   parseProjectRef,
+  parseProjectVerification,
   parseRemoval,
+  parseRestoreCheckpoint,
+  parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
   parseUsageRequest,
@@ -95,16 +126,16 @@ export function isExternalWebUrl(url: string): boolean {
   }
 }
 
-async function projectView(
-  project: { id: string; path: string },
-  account: Account,
-): Promise<ProjectView> {
+async function projectView(project: Project, account: Account): Promise<ProjectView> {
   return {
     id: project.id,
     path: project.path,
     accountLabel: account.label,
     accountEmail: await readAccountEmail(account),
     provider: account.provider,
+    autoWorktree: project.autoWorktree,
+    autoVerify: project.autoVerify,
+    verificationChecks: project.verificationChecks,
   };
 }
 
@@ -159,6 +190,9 @@ export function createHandlers(deps: HandlerDeps) {
   const sessionProjects = new Map<string, string>();
   const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
   const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
+  const sessionTurnIds = new Map<string, string>();
+  const cancelledTurns = new Set<string>();
+  const verificationControllers = new Map<string, AbortController>();
   let storeQueue: Promise<unknown> = Promise.resolve();
 
   function serialized<T>(work: () => Promise<T>): Promise<T> {
@@ -240,29 +274,98 @@ export function createHandlers(deps: HandlerDeps) {
     const projectId = sessionProjects.get(sessionId);
     if (projectId !== undefined) {
       fileListCache.delete(projectId);
+      const prefix = `${projectId}:`;
+      for (const key of fileListCache.keys()) {
+        if (key.startsWith(prefix)) fileListCache.delete(key);
+      }
       return;
     }
     fileListCache.clear();
   }
 
+  async function runVerificationForSession(input: {
+    session: Session;
+    project: Project;
+    checks: VerificationCheck[];
+    turnId: string;
+  }): Promise<void> {
+    const { session, project, checks, turnId } = input;
+    const enabledChecks = checks.filter((check) => check.enabled);
+    if (enabledChecks.length === 0) return;
+
+    verificationControllers.get(session.id)?.abort();
+    const controller = new AbortController();
+    verificationControllers.set(session.id, controller);
+
+    const cwd = effectiveCwd(session, project);
+    const baseEnv = await deps.baseEnv();
+
+    handleChatEvent(session.id, {
+      kind: 'verification',
+      turnId,
+      status: 'running',
+      checks: enabledChecks.map((check) => ({
+        id: check.id,
+        label: check.label,
+        command: check.command,
+        passed: false,
+        timedOut: false,
+        exitCode: null,
+        output: '',
+        durationMs: 0,
+      })),
+    });
+
+    try {
+      const result = await runVerificationChecks({
+        cwd,
+        checks: enabledChecks,
+        env: baseEnv,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      handleChatEvent(session.id, {
+        kind: 'verification',
+        turnId,
+        status: result.status,
+        checks: result.checks,
+      });
+    } finally {
+      if (verificationControllers.get(session.id) === controller) {
+        verificationControllers.delete(session.id);
+      }
+    }
+  }
+
+  async function maybeRunAutoVerification(sessionId: string): Promise<void> {
+    const store = await loadStore(deps.root);
+    const session = store.sessions?.find((item) => item.id === sessionId);
+    if (!session) return;
+    const project = store.projects.find((item) => item.id === session.projectId);
+    if (!project || project.autoVerify !== true) return;
+    const checks = project.verificationChecks ?? [];
+    const turnId = sessionTurnIds.get(sessionId) ?? randomUUID();
+    await runVerificationForSession({ session, project, checks, turnId });
+  }
+
   async function cachedProjectFiles(
-    projectId: string,
-    projectPath: string,
+    cacheKey: string,
+    targetPath: string,
   ): Promise<ProjectFileList> {
     const now = Date.now();
-    const cached = fileListCache.get(projectId);
+    const cached = fileListCache.get(cacheKey);
     if (cached && cached.expiresAt > now) return cached.list;
-    const existing = fileListInflight.get(projectId);
+    const existing = fileListInflight.get(cacheKey);
     if (existing) return existing;
-    const promise = listProjectFiles({ projectPath })
+    const promise = listProjectFiles({ projectPath: targetPath })
       .then((list) => {
-        fileListCache.set(projectId, { list, expiresAt: Date.now() + FILE_CACHE_TTL_MS });
+        fileListCache.set(cacheKey, { list, expiresAt: Date.now() + FILE_CACHE_TTL_MS });
         return list;
       })
       .finally(() => {
-        if (fileListInflight.get(projectId) === promise) fileListInflight.delete(projectId);
+        if (fileListInflight.get(cacheKey) === promise) fileListInflight.delete(cacheKey);
       });
-    fileListInflight.set(projectId, promise);
+    fileListInflight.set(cacheKey, promise);
     return promise;
   }
 
@@ -284,7 +387,13 @@ export function createHandlers(deps: HandlerDeps) {
     }
     if (event.kind === 'done') {
       turnOwners.delete(sessionId);
+      const wasCancelled = cancelledTurns.delete(sessionId);
       invalidateProjectFiles(sessionId);
+      if (!event.isError && !wasCancelled) {
+        void maybeRunAutoVerification(sessionId).catch((error: unknown) => {
+          console.error(`inova: failed to run verification of ${sessionId}`, error);
+        });
+      }
     }
   }
 
@@ -357,14 +466,19 @@ export function createHandlers(deps: HandlerDeps) {
     sessionId: string;
     prompt: string;
     account: Account;
-    projectPath: string;
+    project: Project;
     file: string;
     baseEnv: NodeJS.ProcessEnv;
   }): Promise<Result<null>> {
-    const { sessionId, prompt, account } = input;
+    const { sessionId, prompt, account, project } = input;
     const store = await loadStore(deps.root);
     const session = requireSession(store, sessionId);
     if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
+    const cwd = effectiveCwd(session, project);
+    const turnId = randomUUID();
+    sessionTurnIds.set(sessionId, turnId);
+    cancelledTurns.delete(sessionId);
+    const checkpoint = await createCheckpoint({ repoPath: cwd, sessionId, turnId });
     const parent = sessionsOf(store).find((item) => item.id === session.parentId);
     const { turn, newId } = decideTurn({
       session,
@@ -387,7 +501,7 @@ export function createHandlers(deps: HandlerDeps) {
     });
     const spec = buildChatTurn({
       account,
-      cwd: input.projectPath,
+      cwd,
       prompt,
       turn,
       baseEnv: input.baseEnv,
@@ -400,6 +514,15 @@ export function createHandlers(deps: HandlerDeps) {
     }
     sessionProjects.set(sessionId, session.projectId);
     turnOwners.set(sessionId, { accountId: account.id, provider: account.provider });
+    if (checkpoint !== null) {
+      handleChatEvent(sessionId, {
+        kind: 'checkpoint',
+        turnId: checkpoint.turnId,
+        ref: checkpoint.ref,
+        createdAt: checkpoint.createdAt,
+        skippedLargeFiles: checkpoint.skippedLargeFiles,
+      });
+    }
     handleChatEvent(sessionId, { kind: 'user', text: prompt, at: new Date().toISOString() });
     deps.chat.send({
       sessionId,
@@ -489,8 +612,33 @@ export function createHandlers(deps: HandlerDeps) {
         return ok(sessionsOf(store).filter((session) => session.projectId === projectId));
       }),
     createSession: (input: unknown): Promise<Result<Session>> =>
-      validated(input, parseNewSession, ({ projectId, parentId }) =>
-        serialized(async () => ok(await createSession({ root: deps.root, projectId, parentId }))),
+      validated(input, parseNewSession, ({ projectId, parentId, isolatedWorktree }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const project = store.projects.find((item) => item.id === projectId);
+          const shouldIsolate =
+            isolatedWorktree ?? (parentId === null && project?.autoWorktree === true);
+          const created = await createSession({ root: deps.root, projectId, parentId });
+          if (!shouldIsolate || !project) return ok(created);
+          try {
+            const worktree = await createSessionWorktree({
+              root: deps.root,
+              projectId: project.id,
+              sessionId: created.id,
+              projectPath: project.path,
+            });
+            return ok(
+              await updateSession({
+                root: deps.root,
+                sessionId: created.id,
+                patch: { worktree },
+              }),
+            );
+          } catch (error: unknown) {
+            await deleteSession({ root: deps.root, sessionId: created.id });
+            throw error;
+          }
+        }),
       ),
     updateSession: (input: unknown): Promise<Result<Session>> =>
       validated(input, parseSessionUpdate, ({ sessionId, title, archived, model, effort, mode }) =>
@@ -544,19 +692,134 @@ export function createHandlers(deps: HandlerDeps) {
         }),
       ),
     deleteSession: (input: unknown): Promise<Result<null>> =>
-      validated(input, parseSessionRef, ({ sessionId }) =>
+      validated(input, parseSessionDelete, ({ sessionId, force }) =>
         serialized(async () => {
           const store = await loadStore(deps.root);
-          requireSession(store, sessionId);
+          const target = requireSession(store, sessionId);
           const affected = descendantIds(store, sessionId);
           if ([...affected].some((id) => deps.chat.isRunning(id))) {
             return fail('Pare o turno em andamento antes de apagar.');
+          }
+          const project = store.projects.find((item) => item.id === target.projectId);
+          const remainingWorktreePaths = new Set(
+            sessionsOf(store)
+              .filter((item) => !affected.has(item.id) && item.worktree)
+              .map((item) => item.worktree!.path),
+          );
+          const worktreesToRemove = new Map<string, NonNullable<Session['worktree']>>();
+          for (const item of sessionsOf(store)) {
+            if (!affected.has(item.id) || !item.worktree) continue;
+            if (remainingWorktreePaths.has(item.worktree.path)) continue;
+            worktreesToRemove.set(item.worktree.path, item.worktree);
+          }
+          if (project) {
+            for (const worktree of worktreesToRemove.values()) {
+              await removeSessionWorktree({ projectPath: project.path, worktree, force });
+            }
+            for (const id of affected) {
+              await removeSessionCheckpoints({ repoPath: project.path, sessionId: id });
+            }
+          }
+          for (const id of affected) {
+            verificationControllers.get(id)?.abort();
+            verificationControllers.delete(id);
+            sessionTurnIds.delete(id);
+            cancelledTurns.delete(id);
           }
           const removed = await deleteSession({ root: deps.root, sessionId });
           await removeTranscripts(removed);
           return ok(null);
         }),
       ),
+    getWorktreeStatus: (input: unknown): Promise<Result<WorktreeStatusView>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        const store = await loadStore(deps.root);
+        const session = requireSession(store, sessionId);
+        if (!session.worktree) return fail('Esta sessão não possui worktree isolado.');
+        const status = await getWorktreeStatus({
+          worktreePath: session.worktree.path,
+          baseCommit: session.worktree.baseCommit,
+        });
+        return ok(status);
+      }),
+    applyWorktree: (input: unknown): Promise<Result<{ appliedFiles: string[] }>> =>
+      validated(input, parseSessionRef, ({ sessionId }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          if (!session.worktree) return fail('Esta sessão não possui worktree isolado.');
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de aplicar o worktree.');
+          }
+          const project = store.projects.find((item) => item.id === session.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const applied = await applyWorktreeToProject({
+            projectPath: project.path,
+            worktreePath: session.worktree.path,
+            baseCommit: session.worktree.baseCommit,
+          });
+          invalidateProjectFiles(sessionId);
+          return ok(applied);
+        }),
+      ),
+    restoreCheckpoint: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseRestoreCheckpoint, ({ sessionId, ref, preserveFiles }) =>
+        serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de restaurar o checkpoint.');
+          }
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          const project = store.projects.find((item) => item.id === session.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const cwd = effectiveCwd(session, project);
+          await restoreCheckpoint({ repoPath: cwd, ref, preserveFiles });
+          invalidateProjectFiles(sessionId);
+          return ok(null);
+        }),
+      ),
+    detectProjectChecks: (input: unknown): Promise<Result<VerificationCheck[]>> =>
+      validated(input, parseProjectRef, async ({ projectId }) => {
+        const store = await loadStore(deps.root);
+        const project = store.projects.find((item) => item.id === projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        return ok(await detectProjectChecks(project.path));
+      }),
+    updateProjectVerification: (input: unknown): Promise<Result<ProjectView>> =>
+      validated(
+        input,
+        parseProjectVerification,
+        ({ projectId, autoWorktree, autoVerify, verificationChecks }) =>
+          serialized(async () => {
+            const updated = await updateProjectConfig({
+              root: deps.root,
+              projectId,
+              patch: {
+                ...(autoWorktree === undefined ? {} : { autoWorktree }),
+                ...(autoVerify === undefined ? {} : { autoVerify }),
+                ...(verificationChecks === undefined ? {} : { verificationChecks }),
+              },
+            });
+            const store = await loadStore(deps.root);
+            const account = store.accounts.find((item) => item.id === updated.accountId);
+            if (!account) return fail('Conta do projeto não encontrada.');
+            return ok(await projectView(updated, account));
+          }),
+      ),
+    runVerification: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        const store = await loadStore(deps.root);
+        const session = requireSession(store, sessionId);
+        const project = store.projects.find((item) => item.id === session.projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        const checks = project.verificationChecks ?? [];
+        if (!checks.some((check) => check.enabled)) {
+          return fail('Nenhuma verificação ativa configurada neste projeto.');
+        }
+        const turnId = sessionTurnIds.get(sessionId) ?? randomUUID();
+        await runVerificationForSession({ session, project, checks, turnId });
+        return ok(null);
+      }),
     loadTranscript: (input: unknown): Promise<Result<ChatEvent[]>> =>
       validated(input, parseSessionRef, async ({ sessionId }) => {
         await flushTranscript(sessionId);
@@ -592,13 +855,17 @@ export function createHandlers(deps: HandlerDeps) {
             sessionId,
             prompt,
             account,
-            projectPath: project.path,
+            project,
             file,
             baseEnv,
           });
         });
       }),
-    cancelTurn: (sessionId: string): void => deps.chat.cancel(sessionId),
+    cancelTurn: (sessionId: string): void => {
+      cancelledTurns.add(sessionId);
+      verificationControllers.get(sessionId)?.abort();
+      deps.chat.cancel(sessionId);
+    },
     getUsage: (input: unknown) =>
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
@@ -645,11 +912,16 @@ export function createHandlers(deps: HandlerDeps) {
         }
       }),
     searchFiles: (input: unknown) =>
-      validated(input, parseFileSearch, async ({ projectId, query, limit }) => {
+      validated(input, parseFileSearch, async ({ projectId, query, limit, sessionId }) => {
         const store = await loadStore(deps.root);
         const project = store.projects.find((item) => item.id === projectId);
         if (!project) return fail('Projeto não encontrado.');
-        const list = await cachedProjectFiles(project.id, project.path);
+        const session = sessionId
+          ? sessionsOf(store).find((item) => item.id === sessionId && item.projectId === project.id)
+          : undefined;
+        const targetPath = session ? effectiveCwd(session, project) : project.path;
+        const cacheKey = session?.worktree ? `${project.id}:${session.id}` : project.id;
+        const list = await cachedProjectFiles(cacheKey, targetPath);
         return ok({
           files: rankProjectFiles(list.files, query, limit),
           truncated: list.truncated,

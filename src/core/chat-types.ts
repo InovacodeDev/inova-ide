@@ -13,6 +13,17 @@ export interface UsageSnapshot {
   fetchedAt: string;
 }
 
+export interface VerificationCheckResult {
+  id: string;
+  label: string;
+  command: string;
+  passed: boolean;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+  output: string;
+}
+
 export type ChatEvent =
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'user'; text: string; at: string }
@@ -21,5 +32,18 @@ export type ChatEvent =
   | { kind: 'tool-use'; toolId: string; name: string; input: string }
   | { kind: 'tool-result'; toolId: string; output: string; isError: boolean }
   | { kind: 'usage-limits'; windows: UsageWindow[] }
+  | {
+      kind: 'checkpoint';
+      turnId: string;
+      ref: string;
+      createdAt: string;
+      skippedLargeFiles: string[];
+    }
+  | {
+      kind: 'verification';
+      turnId: string;
+      status: 'running' | 'passed' | 'failed';
+      checks: VerificationCheckResult[];
+    }
   | { kind: 'error'; message: string }
   | { kind: 'done'; isError: boolean; costUsd: number | null; durationMs: number | null };

@@ -13,10 +13,27 @@ export interface Account {
   createdAt: string;
 }
 
+export interface VerificationCheck {
+  id: string;
+  label: string;
+  command: string;
+  enabled: boolean;
+}
+
 export interface Project {
   id: string;
   path: string;
   accountId: string;
+  autoWorktree?: boolean;
+  autoVerify?: boolean;
+  verificationChecks?: VerificationCheck[];
+}
+
+export interface SessionWorktree {
+  path: string;
+  branch: string;
+  baseCommit: string;
+  createdAt: string;
 }
 
 export interface Session {
@@ -28,6 +45,7 @@ export interface Session {
   model?: string | null;
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
+  worktree?: SessionWorktree | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;

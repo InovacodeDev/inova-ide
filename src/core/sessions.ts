@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
 import { loadStore, saveStore } from './store.js';
-import type { ExecutionMode, ProviderId, Session, Store, Workspace } from './types.js';
+import type {
+  ExecutionMode,
+  Project,
+  ProviderId,
+  Session,
+  SessionWorktree,
+  Store,
+  Workspace,
+} from './types.js';
 
 type SessionErrorCode =
   | 'project-not-found'
@@ -137,12 +145,20 @@ function providerForProject(store: Store, projectId: string): ProviderId | null 
   return account?.provider ?? null;
 }
 
+export function effectiveCwd(
+  session: Pick<Session, 'worktree'>,
+  project: Pick<Project, 'path'>,
+): string {
+  return session.worktree?.path ?? project.path;
+}
+
 export async function createSession(ctx: {
   root: string;
   projectId: string;
   parentId?: string | null;
   title?: string;
   mode?: ExecutionMode | null;
+  worktree?: SessionWorktree | null;
   now?: () => Date;
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
@@ -151,11 +167,13 @@ export async function createSession(ctx: {
     throw new SessionError('project-not-found', `Project not found: ${ctx.projectId}`);
   }
   const parentId = ctx.parentId ?? null;
+  let parentWorktree: SessionWorktree | null = null;
   if (parentId !== null) {
     const parent = sessionsOf(store).find((item) => item.id === parentId);
     if (parent?.projectId !== ctx.projectId) {
       throw new SessionError('parent-not-found', `Parent session not found: ${parentId}`);
     }
+    parentWorktree = parent.worktree ?? null;
   }
   const provider = providerForProject(store, ctx.projectId);
   const inheritedMode =
@@ -176,6 +194,7 @@ export async function createSession(ctx: {
     model: null,
     effort: null,
     mode: inheritedMode,
+    worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
     createdAt: timestamp,
     updatedAt: timestamp,
     archivedAt: null,
@@ -197,18 +216,21 @@ export async function getSession(ctx: { root: string; sessionId: string }): Prom
 export async function updateSession(ctx: {
   root: string;
   sessionId: string;
-  patch: Partial<Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort' | 'mode'>> & {
+  patch: Partial<
+    Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort' | 'mode' | 'worktree'>
+  > & {
     archived?: boolean;
   };
   now?: () => Date;
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
   const session = requireSession(store, ctx.sessionId);
-  const { title, providerSessionId, model, effort, mode, archived } = ctx.patch;
+  const { title, providerSessionId, model, effort, mode, worktree, archived } = ctx.patch;
   const timestamp = (ctx.now?.() ?? new Date()).toISOString();
   if (title !== undefined) session.title = normalizeTitle(title);
   if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
   if (model !== undefined) session.model = normalizeModel(model);
+  if (worktree !== undefined) session.worktree = worktree;
   if (effort !== undefined) {
     if (effort !== null && !isEffortLevel(effort)) {
       throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);

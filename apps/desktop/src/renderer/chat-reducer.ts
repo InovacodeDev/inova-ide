@@ -1,4 +1,4 @@
-import type { ChatEvent } from '@inova/core/chat-types';
+import type { ChatEvent, VerificationCheckResult } from '@inova/core/chat-types';
 
 export type ChatItem =
   | { type: 'user'; id: string; text: string }
@@ -10,6 +10,21 @@ export type ChatItem =
       input: string;
       output: string | null;
       isError: boolean;
+    }
+  | {
+      type: 'checkpoint';
+      id: string;
+      turnId: string;
+      ref: string;
+      createdAt: string;
+      skippedLargeFiles: string[];
+    }
+  | {
+      type: 'verification';
+      id: string;
+      turnId: string;
+      status: 'running' | 'passed' | 'failed';
+      checks: VerificationCheckResult[];
     }
   | { type: 'error'; id: string; message: string };
 
@@ -43,6 +58,26 @@ function upsertAssistant(
     text: update.append ? existing.text + update.text : update.text,
     streaming: update.append,
   };
+  return next;
+}
+
+function upsertVerification(
+  items: ChatItem[],
+  event: Extract<ChatEvent, { kind: 'verification' }>,
+): ChatItem[] {
+  const index = items.findIndex(
+    (item) => item.type === 'verification' && item.turnId === event.turnId,
+  );
+  const nextItem: Extract<ChatItem, { type: 'verification' }> = {
+    type: 'verification',
+    id: `verification-${event.turnId}`,
+    turnId: event.turnId,
+    status: event.status,
+    checks: event.checks,
+  };
+  if (index === -1) return [...items, nextItem];
+  const next = items.slice();
+  next[index] = nextItem;
   return next;
 }
 
@@ -87,6 +122,26 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
             ? { ...item, output: event.output, isError: event.isError }
             : item,
         ),
+      };
+    case 'checkpoint':
+      return {
+        ...state,
+        items: [
+          ...items,
+          {
+            type: 'checkpoint',
+            id: `checkpoint-${event.turnId}`,
+            turnId: event.turnId,
+            ref: event.ref,
+            createdAt: event.createdAt,
+            skippedLargeFiles: event.skippedLargeFiles,
+          },
+        ],
+      };
+    case 'verification':
+      return {
+        ...state,
+        items: upsertVerification(items, event),
       };
     case 'error':
       return {

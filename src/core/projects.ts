@@ -4,7 +4,7 @@ import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
 import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore } from './store.js';
-import type { Project, Store } from './types.js';
+import type { Project, Store, VerificationCheck } from './types.js';
 
 export class PathNotFoundError extends Error {
   readonly path: string;
@@ -73,4 +73,27 @@ export function resolveProject(store: Store, cwd: string): Project | undefined {
     if (matches && (!best || project.path.length > best.path.length)) best = project;
   }
   return best;
+}
+
+export async function updateProjectConfig(ctx: {
+  root: string;
+  projectId: string;
+  patch: {
+    autoWorktree?: boolean;
+    autoVerify?: boolean;
+    verificationChecks?: VerificationCheck[];
+  };
+}): Promise<Project> {
+  const store = await loadStore(ctx.root);
+  const project = store.projects.find((item) => item.id === ctx.projectId);
+  if (!project) {
+    throw new PathNotFoundError(ctx.projectId);
+  }
+  if (ctx.patch.autoWorktree !== undefined) project.autoWorktree = ctx.patch.autoWorktree;
+  if (ctx.patch.autoVerify !== undefined) project.autoVerify = ctx.patch.autoVerify;
+  if (ctx.patch.verificationChecks !== undefined) {
+    project.verificationChecks = ctx.patch.verificationChecks;
+  }
+  await saveStore(ctx.root, store);
+  return project;
 }

@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
@@ -961,4 +963,87 @@ test('provider execution modes validate per-provider support, persist defaults, 
 
   const inheritedSession = unwrap(await handlers.createSession({ projectId: project.id }));
   expect(inheritedSession.mode).toBe('auto');
+});
+
+test('worktrees isolate turns, searchFiles sees worktree files, checkpoints restore edits, and verification runs after done', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers, send, emitted } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'work' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'package.json'), JSON.stringify({ scripts: { test: 'echo ok' } }));
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+  const project = unwrap(await handlers.bindProject({ path: repoDir, accountLabel: 'work' }));
+  const detected = unwrap(await handlers.detectProjectChecks({ projectId: project.id }));
+  expect(detected.some((c) => c.id === 'test')).toBe(true);
+
+  unwrap(
+    await handlers.updateProjectVerification({
+      projectId: project.id,
+      autoVerify: true,
+      verificationChecks: [{ id: 'fail-check', label: 'Falha', command: 'exit 1', enabled: true }],
+    }),
+  );
+
+  const isolated = unwrap(
+    await handlers.createSession({ projectId: project.id, isolatedWorktree: true }),
+  );
+  expect(isolated.worktree?.branch).toMatch(/^inova\/s-/);
+  const wtPath = isolated.worktree!.path;
+  await writeFile(join(wtPath, 'only-in-wt.ts'), 'export const w = 2;\n');
+
+  const wtSearch = unwrap(
+    await handlers.searchFiles({
+      projectId: project.id,
+      sessionId: isolated.id,
+      query: 'only-in-wt',
+    }),
+  );
+  expect(wtSearch.files).toEqual(['only-in-wt.ts']);
+
+  await handlers.sendMessage({ sessionId: isolated.id, prompt: 'Editar' });
+  expect(send.mock.calls[0]?.[0].spec.cwd).toBe(wtPath);
+  const checkpointEvent = emitted.find(
+    (entry) => entry.sessionId === isolated.id && entry.event.kind === 'checkpoint',
+  )?.event;
+  expect(checkpointEvent?.kind).toBe('checkpoint');
+
+  await writeFile(join(wtPath, 'index.ts'), 'export const v = 999;\n');
+  const statusBeforeApply = unwrap(await handlers.getWorktreeStatus({ sessionId: isolated.id }));
+  expect(statusBeforeApply.changedFiles).toContain('index.ts');
+
+  if (checkpointEvent?.kind === 'checkpoint') {
+    unwrap(
+      await handlers.restoreCheckpoint({
+        sessionId: isolated.id,
+        ref: checkpointEvent.ref,
+      }),
+    );
+    expect(await readFile(join(wtPath, 'index.ts'), 'utf8')).toBe('export const v = 1;\n');
+  }
+
+  await writeFile(join(wtPath, 'index.ts'), 'export const v = 2;\n');
+  unwrap(await handlers.applyWorktree({ sessionId: isolated.id }));
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+
+  handlers.handleChatEvent(isolated.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  const verifEvent = emitted
+    .filter((entry) => entry.sessionId === isolated.id && entry.event.kind === 'verification')
+    .at(-1)?.event;
+  expect(verifEvent).toMatchObject({ kind: 'verification', status: 'failed' });
+
+  const nonForcedDelete = await handlers.deleteSession({ sessionId: isolated.id, force: false });
+  expect(nonForcedDelete.ok).toBe(false);
+  unwrap(await handlers.deleteSession({ sessionId: isolated.id, force: true }));
 });

@@ -40,6 +40,12 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.getDefaultModes, () => handlers.getDefaultModes());
   handle(CHANNELS.setDefaultMode, (input) => handlers.setDefaultMode(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
+  handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
+  handle(CHANNELS.applyWorktree, (input) => handlers.applyWorktree(input));
+  handle(CHANNELS.restoreCheckpoint, (input) => handlers.restoreCheckpoint(input));
+  handle(CHANNELS.detectProjectChecks, (input) => handlers.detectProjectChecks(input));
+  handle(CHANNELS.updateProjectVerification, (input) => handlers.updateProjectVerification(input));
+  handle(CHANNELS.runVerification, (input) => handlers.runVerification(input));
   handle(CHANNELS.getWorkspace, () => handlers.getWorkspace());
   handle(CHANNELS.saveWorkspace, (input) => handlers.saveWorkspace(input));
   handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
