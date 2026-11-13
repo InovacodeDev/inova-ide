@@ -32,6 +32,13 @@ describe('groupChatItems', () => {
     expect(shape(items, false)).toEqual(['u1', 'work(t1,a1,t2)', 'a2']);
   });
 
+  test('keeps every turn expanded when collapsing is turned off', () => {
+    const items = [user('u1'), tool('t1'), text('a1'), tool('t2'), text('a2')];
+    const blocks = groupChatItems(items, false, false);
+    expect(blocks.every((block) => block.kind === 'item')).toBe(true);
+    expect(blocks.map((block) => block.index)).toEqual([0, 1, 2, 3, 4]);
+  });
+
   test('keeps the running turn expanded and collapses the earlier ones', () => {
     const items = [user('u1'), tool('t1'), text('a1'), user('u2'), tool('t2'), text('a2')];
     expect(shape(items, true)).toEqual(['u1', 'work(t1)', 'a1', 'u2', 't2', 'a2']);

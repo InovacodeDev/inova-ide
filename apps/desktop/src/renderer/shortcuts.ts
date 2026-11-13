@@ -143,6 +143,46 @@ export function findShortcut(event: ShortcutEvent, isMac: boolean): ShortcutId |
   return hit?.id ?? null;
 }
 
+export interface ShortcutCommand {
+  id: ShortcutId;
+  tabIndex: number | null;
+}
+
+export function resolveShortcutCommand(input: {
+  event: ShortcutEvent;
+  isMac: boolean;
+  settingsOpen: boolean;
+  otherModalOpen: boolean;
+}): ShortcutCommand | null {
+  const { event, isMac, settingsOpen, otherModalOpen } = input;
+  if (otherModalOpen) return null;
+  const tabIndex = matchTabIndex(event, isMac);
+  const id = tabIndex === null ? findShortcut(event, isMac) : 'select-tab';
+  if (id === null || (settingsOpen && id !== 'open-settings')) return null;
+  return { id, tabIndex };
+}
+
+export function formatShortcut(input: { id: ShortcutId; isMac: boolean }): string {
+  const shortcut = SHORTCUTS.find((item) => item.id === input.id);
+  return shortcut ? formatBinding(shortcut.binding, input.isMac) : '';
+}
+
+export function isMacPlatform(platform: string): boolean {
+  return /^mac/i.test(platform);
+}
+
+export function groupShortcuts(
+  shortcuts: readonly ShortcutDef[],
+): { group: ShortcutGroup; items: ShortcutDef[] }[] {
+  const groups: { group: ShortcutGroup; items: ShortcutDef[] }[] = [];
+  for (const shortcut of shortcuts) {
+    const existing = groups.find((entry) => entry.group === shortcut.group);
+    if (existing) existing.items.push(shortcut);
+    else groups.push({ group: shortcut.group, items: [shortcut] });
+  }
+  return groups;
+}
+
 export function formatBinding(binding: string, isMac: boolean): string {
   const labels = binding.split('+').map((part) => {
     if (part === 'mod') return isMac ? '⌘' : 'Ctrl';

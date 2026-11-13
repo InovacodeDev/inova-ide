@@ -485,7 +485,7 @@
   align-items: center;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
-  background: rgba(0, 0, 0, 0.22);
+  background: var(--surface-3);
   font-family: var(--font-mono);
   font-size: 11px;
   opacity: 0.9;

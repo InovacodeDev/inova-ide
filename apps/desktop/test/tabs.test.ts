@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { tabsReducer, type TabsState } from '../src/renderer/tabs';
+import { adjacentSessionId, tabsReducer, type TabsState } from '../src/renderer/tabs';
 
 const empty: TabsState = { tabs: [], active: null };
 const open = (state: TabsState, id: string): TabsState =>
@@ -67,5 +67,24 @@ describe('tabsReducer', () => {
     expect(tabsReducer(state, { type: 'activate', sessionId: 'zzz' })).toBe(state);
     expect(tabsReducer(state, { type: 'exited', sessionId: 'zzz' })).toBe(state);
     expect(tabsReducer(state, { type: 'rename', sessionId: 'zzz', title: 'x' })).toBe(state);
+  });
+});
+
+describe('adjacentSessionId', () => {
+  const three = open(open(open(empty, 'a'), 'b'), 'c');
+  const activate = (sessionId: string) => tabsReducer(three, { type: 'activate', sessionId });
+
+  test('moves to the neighbor and wraps around both ends', () => {
+    expect(adjacentSessionId({ state: activate('b'), delta: 1 })).toBe('c');
+    expect(adjacentSessionId({ state: activate('b'), delta: -1 })).toBe('a');
+    expect(adjacentSessionId({ state: activate('c'), delta: 1 })).toBe('a');
+    expect(adjacentSessionId({ state: activate('a'), delta: -1 })).toBe('c');
+  });
+
+  test('returns null without tabs and picks an end when nothing is active', () => {
+    expect(adjacentSessionId({ state: empty, delta: 1 })).toBeNull();
+    const unfocused: TabsState = { ...three, active: null };
+    expect(adjacentSessionId({ state: unfocused, delta: 1 })).toBe('a');
+    expect(adjacentSessionId({ state: unfocused, delta: -1 })).toBe('c');
   });
 });

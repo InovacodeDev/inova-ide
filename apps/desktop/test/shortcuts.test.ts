@@ -3,8 +3,12 @@ import {
   SHORTCUTS,
   findShortcut,
   formatBinding,
+  formatShortcut,
+  groupShortcuts,
+  isMacPlatform,
   matchShortcut,
   matchTabIndex,
+  resolveShortcutCommand,
   type ShortcutEvent,
 } from '../src/renderer/shortcuts';
 
@@ -72,6 +76,65 @@ describe('findShortcut', () => {
   test('global bindings are unique', () => {
     const bindings = SHORTCUTS.filter((item) => item.global).map((item) => item.binding);
     expect(new Set(bindings).size).toBe(bindings.length);
+  });
+});
+
+describe('resolveShortcutCommand', () => {
+  const cmdN = press({ key: 'n', code: 'KeyN', metaKey: true });
+  const cmdComma = press({ key: ',', code: 'Comma', metaKey: true });
+  const cmdTwo = press({ key: '2', code: 'Digit2', metaKey: true });
+  const base = { isMac: true, settingsOpen: false, otherModalOpen: false };
+
+  test('maps global shortcuts and tab digits to commands', () => {
+    expect(resolveShortcutCommand({ ...base, event: cmdN })).toEqual({
+      id: 'new-session',
+      tabIndex: null,
+    });
+    expect(resolveShortcutCommand({ ...base, event: cmdTwo })).toEqual({
+      id: 'select-tab',
+      tabIndex: 1,
+    });
+    expect(resolveShortcutCommand({ ...base, event: press({ key: 'x' }) })).toBeNull();
+  });
+
+  test('another modal blocks every shortcut, including open-settings', () => {
+    const blocked = { ...base, otherModalOpen: true };
+    expect(resolveShortcutCommand({ ...blocked, event: cmdN })).toBeNull();
+    expect(resolveShortcutCommand({ ...blocked, event: cmdComma })).toBeNull();
+    expect(resolveShortcutCommand({ ...blocked, event: cmdTwo })).toBeNull();
+  });
+
+  test('with settings open only open-settings runs', () => {
+    const open = { ...base, settingsOpen: true };
+    expect(resolveShortcutCommand({ ...open, event: cmdComma })?.id).toBe('open-settings');
+    expect(resolveShortcutCommand({ ...open, event: cmdN })).toBeNull();
+    expect(resolveShortcutCommand({ ...open, event: cmdTwo })).toBeNull();
+  });
+});
+
+describe('formatShortcut', () => {
+  test('formats the catalog binding of a shortcut id for the platform', () => {
+    expect(formatShortcut({ id: 'open-settings', isMac: true })).toBe('⌘,');
+    expect(formatShortcut({ id: 'open-settings', isMac: false })).toBe('Ctrl+,');
+  });
+});
+
+describe('isMacPlatform', () => {
+  test('detects macOS platform strings only', () => {
+    expect(isMacPlatform('MacIntel')).toBe(true);
+    expect(isMacPlatform('MacARM')).toBe(true);
+    expect(isMacPlatform('Win32')).toBe(false);
+    expect(isMacPlatform('Linux x86_64')).toBe(false);
+    expect(isMacPlatform('')).toBe(false);
+  });
+});
+
+describe('groupShortcuts', () => {
+  test('keeps every shortcut once and groups by first appearance', () => {
+    const groups = groupShortcuts(SHORTCUTS);
+    expect(groups.map((entry) => entry.group)).toEqual(['Geral', 'Sessões', 'Abas', 'Composer']);
+    expect(groups.flatMap((entry) => entry.items)).toHaveLength(SHORTCUTS.length);
+    expect(groups[0]?.items.every((item) => item.group === 'Geral')).toBe(true);
   });
 });
 

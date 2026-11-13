@@ -35,6 +35,15 @@ function updateTab(state: TabsState, sessionId: string, patch: Partial<Tab>): Ta
   };
 }
 
+export function adjacentSessionId(input: { state: TabsState; delta: 1 | -1 }): string | null {
+  const { state, delta } = input;
+  const count = state.tabs.length;
+  if (count === 0) return null;
+  const current = state.tabs.findIndex((tab) => tab.sessionId === state.active);
+  const next = current === -1 ? (delta === 1 ? 0 : count - 1) : (current + delta + count) % count;
+  return state.tabs[next]?.sessionId ?? null;
+}
+
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   if (action.type === 'open') {
     const { sessionId } = action.tab;

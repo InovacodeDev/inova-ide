@@ -25,6 +25,7 @@ import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
 import { RotateCcw } from 'pulsoicon-react/icons/rotate-ccw';
+import { Settings } from 'pulsoicon-react/icons/settings';
 import { Shield } from 'pulsoicon-react/icons/shield';
 import { ShieldAlert } from 'pulsoicon-react/icons/shield-alert';
 import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
@@ -202,6 +203,10 @@ export function ClockIcon({ size = 16 }: IconProps) {
 
 export function CompareIcon({ size = 16 }: IconProps) {
   return <GitCompare size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SettingsIcon({ size = 16 }: IconProps) {
+  return <Settings size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function SlidersIcon({ size = 16 }: IconProps) {

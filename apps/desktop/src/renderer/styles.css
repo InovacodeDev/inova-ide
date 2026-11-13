@@ -106,11 +106,17 @@ a:hover {
   color: var(--accent);
 }
 
+.app-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
 .app-running {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   font-size: 12px;
   color: var(--muted);
 }

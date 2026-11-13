@@ -88,9 +88,9 @@ export function summarizeWork(entries: readonly ChatEntry[]): string {
   return parts.join(' · ');
 }
 
-function groupTurn(entries: ChatEntry[], live: boolean): ChatBlock[] {
+function groupTurn(entries: ChatEntry[], expanded: boolean): ChatBlock[] {
   const asItems = (): ChatBlock[] => entries.map((entry) => ({ kind: 'item', ...entry }));
-  if (live) return asItems();
+  if (expanded) return asItems();
   const answer = entries.filter((entry) => entry.item.type === 'assistant').pop();
   if (!answer) return asItems();
   const work = entries.filter(
@@ -108,7 +108,11 @@ function groupTurn(entries: ChatEntry[], live: boolean): ChatBlock[] {
   });
 }
 
-export function groupChatItems(items: readonly ChatItem[], running: boolean): ChatBlock[] {
+export function groupChatItems(
+  items: readonly ChatItem[],
+  running: boolean,
+  collapseFinishedTurns = true,
+): ChatBlock[] {
   const turns: ChatEntry[][] = [];
   items.forEach((item, index) => {
     const current = turns[turns.length - 1];
@@ -116,6 +120,6 @@ export function groupChatItems(items: readonly ChatItem[], running: boolean): Ch
     else current.push({ item, index });
   });
   return turns.flatMap((turn, turnIndex) =>
-    groupTurn(turn, running && turnIndex === turns.length - 1),
+    groupTurn(turn, !collapseFinishedTurns || (running && turnIndex === turns.length - 1)),
   );
 }

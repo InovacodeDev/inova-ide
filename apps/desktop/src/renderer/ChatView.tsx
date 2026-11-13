@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -7,10 +8,17 @@ import {
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
+  type Ref,
 } from 'react';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ExecutionMode, ProviderId, QueuedTurn } from '@inova/core/types';
+import type {
+  EffortLevel,
+  ExecutionMode,
+  ProviderId,
+  QueuedTurn,
+  Settings,
+} from '@inova/core/types';
 import type { AccountView, ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
@@ -57,7 +65,13 @@ import {
 import { useDictation, type Dictation } from './useDictation';
 import './chat.css';
 
+export interface ChatViewHandle {
+  focusComposer: () => boolean;
+  toggleDictation: () => boolean;
+}
+
 export interface ChatViewProps {
+  ref?: Ref<ChatViewHandle>;
   sessionId?: string | null;
   projectId: string | null;
   state: ChatState;
@@ -71,6 +85,8 @@ export interface ChatViewProps {
   inWorktree?: boolean;
   workingDir?: string | null;
   voiceHints?: readonly string[];
+  dictationLanguage?: Settings['voice']['language'];
+  collapseFinishedTurns?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
@@ -461,6 +477,7 @@ const NO_VOICE_HINTS: readonly string[] = [];
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
+  ref,
   sessionId = null,
   projectId,
   state,
@@ -474,6 +491,8 @@ export function ChatView({
   inWorktree = false,
   workingDir = null,
   voiceHints = NO_VOICE_HINTS,
+  dictationLanguage,
+  collapseFinishedTurns = true,
   catalog,
   readOnly = false,
   queuedTurns = [],
@@ -499,6 +518,7 @@ export function ChatView({
   const [grantedDirs, setGrantedDirs] = useState<string[]>([]);
   const dictation = useDictation({
     hints: voiceHints,
+    language: dictationLanguage,
     onText: (text) => {
       setDraft((current) => appendDictation(current, text));
       inputRef.current?.focus();
@@ -530,7 +550,29 @@ export function ChatView({
       return counter;
     });
   }, [items]);
-  const blocks = useMemo(() => groupChatItems(items, running), [items, running]);
+  const blocks = useMemo(
+    () => groupChatItems(items, running, collapseFinishedTurns),
+    [items, running, collapseFinishedTurns],
+  );
+
+  const toggleDictation = dictation.toggle;
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusComposer: () => {
+        const input = inputRef.current;
+        if (readOnly || input === null) return false;
+        input.focus();
+        return true;
+      },
+      toggleDictation: () => {
+        if (readOnly) return false;
+        toggleDictation();
+        return true;
+      },
+    }),
+    [readOnly, toggleDictation],
+  );
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
 

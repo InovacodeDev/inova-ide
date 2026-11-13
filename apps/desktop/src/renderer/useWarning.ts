@@ -3,6 +3,10 @@ import type { Result } from '../shared/api';
 
 const WARNING_MS = 6000;
 
+export type WarningCall = <T>(
+  action: () => Promise<Result<T>>,
+) => Promise<{ value: T } | undefined>;
+
 export function useWarning() {
   const [current, setCurrent] = useState<{ id: number; message: string } | null>(null);
   const nextId = useRef(0);

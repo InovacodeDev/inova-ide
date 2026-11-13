@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type Ref } from 'react';
 import type { InboxAttentionKind, InboxItem } from '@inova/core/types';
 import { InboxIcon } from './icons';
 import { filterInbox, unreadInboxCount, type InboxFilter } from './inbox-state';
@@ -6,6 +6,7 @@ import { ProviderBadge } from './ProviderBadge';
 import { relativeTime } from './relative-time';
 
 interface InboxViewProps {
+  ref?: Ref<HTMLElement>;
   items: readonly InboxItem[];
   onOpenItem: (sessionId: string) => void;
   onClearRead: () => void;
@@ -23,7 +24,7 @@ const FILTER_OPTIONS: { id: InboxFilter; label: string }[] = [
   { id: 'waiting', label: 'Aguardando' },
 ];
 
-export function InboxView({ items, onOpenItem, onClearRead }: InboxViewProps) {
+export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProps) {
   const [filter, setFilter] = useState<InboxFilter>('all');
   const unread = unreadInboxCount(items);
   const visible = filterInbox(items, filter);
@@ -31,7 +32,7 @@ export function InboxView({ items, onOpenItem, onClearRead }: InboxViewProps) {
   const now = new Date();
 
   return (
-    <section className="inbox-section" aria-label="Caixa de entrada">
+    <section ref={ref} className="inbox-section" aria-label="Caixa de entrada" tabIndex={-1}>
       <div className="inbox-header">
         <span className="inbox-title-wrap">
           <InboxIcon size={14} />
