@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { isEffortLevel } from './models.js';
 import { isProviderId } from './providers.js';
 import type { Store } from './types.js';
 
@@ -55,12 +56,14 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId, archivedAt } = value;
+  const { id, parentId, providerSessionId, model, effort, archivedAt } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
     isStringOrNull(parentId) &&
     isStringOrNull(providerSessionId) &&
+    (model === undefined || isStringOrNull(model)) &&
+    (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
 }

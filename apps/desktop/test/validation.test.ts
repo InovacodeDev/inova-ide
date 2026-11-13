@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   parseBinding,
+  parseLoginCode,
   parseNewAccount,
   parseMessage,
   parseNewSession,
@@ -26,6 +27,7 @@ test('array and primitive inputs are rejected', () => {
     expect(parseWorkspace(input)).toBeUndefined();
     expect(parseMessage(input)).toBeUndefined();
     expect(parseUsageRequest(input)).toBeUndefined();
+    expect(parseLoginCode(input)).toBeUndefined();
   }
 });
 
@@ -86,10 +88,23 @@ test('session updates need a title or an archived flag of the right type', () =>
     title: 'a',
     archived: false,
   });
+  expect(parseSessionUpdate({ sessionId: 's', model: 'opus', effort: 'high' })).toEqual({
+    sessionId: 's',
+    model: 'opus',
+    effort: 'high',
+  });
+  expect(parseSessionUpdate({ sessionId: 's', model: null, effort: null })).toEqual({
+    sessionId: 's',
+    model: null,
+    effort: null,
+  });
   expect(parseSessionUpdate({ sessionId: 's' })).toBeUndefined();
   expect(parseSessionUpdate({ sessionId: 's', title: '' })).toBeUndefined();
   expect(parseSessionUpdate({ sessionId: 's', archived: 'yes' })).toBeUndefined();
   expect(parseSessionUpdate({ sessionId: 's', title: 3 })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', model: '   ' })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', model: 3 })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's', effort: 'turbo' })).toBeUndefined();
 });
 
 test('workspace needs safe ids and a null or string active id', () => {
@@ -134,4 +149,20 @@ test('paths must be absolute and at most 4096 characters', () => {
     path: '/abs',
     accountLabel: 'a',
   });
+});
+
+test('login code requires safe sessionId and trimmed non-empty code up to 512 chars', () => {
+  expect(parseLoginCode({ sessionId: 'sess-1', code: '  abc123  ' })).toEqual({
+    sessionId: 'sess-1',
+    code: 'abc123',
+  });
+  expect(parseLoginCode({ sessionId: 'sess-1', code: 'a'.repeat(512) })).toEqual({
+    sessionId: 'sess-1',
+    code: 'a'.repeat(512),
+  });
+  expect(parseLoginCode({ sessionId: 'sess-1', code: 'a'.repeat(513) })).toBeUndefined();
+  expect(parseLoginCode({ sessionId: 'sess-1', code: '   ' })).toBeUndefined();
+  expect(parseLoginCode({ sessionId: 'bad/id', code: 'abc' })).toBeUndefined();
+  expect(parseLoginCode({ sessionId: '..', code: 'abc' })).toBeUndefined();
+  expect(parseLoginCode({ sessionId: 'sess-1', code: 123 })).toBeUndefined();
 });

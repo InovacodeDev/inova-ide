@@ -61,44 +61,77 @@
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .sidebar .project-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
 }
 
 .sidebar .project-header {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 4px 0 10px;
+  padding: 4px 4px 6px 6px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .sidebar .project-toggle {
   flex: 1;
   min-width: 0;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
   border: none;
   background: transparent;
+  color: var(--text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.sidebar .project-toggle .section-label {
+.sidebar .project-chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--faint);
+  flex: none;
+}
+
+.sidebar .project-folder-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  flex: none;
+}
+
+.sidebar .project-toggle-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar .project-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .sidebar .project-account {
-  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: var(--faint);
 }
@@ -106,6 +139,7 @@
 .sidebar .project-actions {
   display: none;
   gap: 2px;
+  flex: none;
 }
 
 .sidebar .project-header:hover .project-actions,
@@ -124,8 +158,10 @@
 }
 
 .sidebar .session-children {
-  margin-top: 2px;
-  padding-left: 14px;
+  margin-top: 3px;
+  margin-left: 16px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-control);
 }
 
 .sidebar .session-node {
@@ -138,7 +174,17 @@
   display: flex;
   align-items: center;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
+}
+
+.sidebar .session-row-sub::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 8px;
+  height: 1px;
+  background: var(--border-control);
 }
 
 .sidebar .session-row:hover {
@@ -155,8 +201,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 7px 8px;
   border: none;
   background: transparent;
   color: var(--text);
@@ -165,12 +211,25 @@
   cursor: pointer;
 }
 
+.sidebar .session-row-sub .session-main {
+  padding: 5px 8px;
+  gap: 7px;
+}
+
 .sidebar .session-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+}
+
+.sidebar .session-kind-sub {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 
 .sidebar .session-title {
@@ -181,8 +240,14 @@
   white-space: nowrap;
 }
 
+.sidebar .session-row-sub .session-title {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 .sidebar .session-row.active .session-title {
   font-weight: 500;
+  color: var(--text);
 }
 
 .sidebar .session-status {
@@ -212,11 +277,14 @@
 
 .sidebar .session-actions {
   position: absolute;
-  right: 6px;
+  right: 4px;
   top: 50%;
   transform: translateY(-50%);
   display: none;
   gap: 2px;
+  padding: 2px 2px 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--row-selected);
 }
 
 .sidebar .session-row:hover .session-actions,

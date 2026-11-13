@@ -56,8 +56,8 @@ const sessions = createSessionManager({
   spawnPty,
   killTree: killProcessGroup,
   events: {
-    data: (sessionId, data) => sendToWindow(CHANNELS.ptyData, { sessionId, data }),
-    exit: (sessionId, exitCode) => sendToWindow(CHANNELS.ptyExit, { sessionId, exitCode }),
+    data: (sessionId, data) => handlers?.handlePtyData(sessionId, data),
+    exit: (sessionId, exitCode) => void handlers?.handlePtyExit(sessionId, exitCode),
   },
 });
 
@@ -164,11 +164,12 @@ void app.whenReady().then(async () => {
         now: () => new Date(),
       },
       emit: (sessionId, event) => sendToWindow(CHANNELS.chatEvent, { sessionId, event }),
+      emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
       baseEnv,
       pickFolder,
     });
     handlers = created;
-    registerIpc({ handlers: created, sessions, allowedOrigin: appUrl });
+    registerIpc({ handlers: created, allowedOrigin: appUrl });
     createWindow();
     return;
   }

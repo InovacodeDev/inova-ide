@@ -1,8 +1,6 @@
 import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { createHandlers } from './handlers.js';
-import type { SessionManager } from './sessions.js';
-import { isRecord } from './validation.js';
 
 type Handlers = ReturnType<typeof createHandlers>;
 type SenderEvent = { senderFrame?: { url: string } | null };
@@ -12,22 +10,8 @@ export function isAppUrl(url: string | undefined, appUrl: string): boolean {
   return url === appUrl || ['/', '?', '#'].some((separator) => url.startsWith(appUrl + separator));
 }
 
-function resizeRequest(
-  input: unknown,
-): { sessionId: string; cols: number; rows: number } | undefined {
-  if (!isRecord(input)) return undefined;
-  const { sessionId, cols, rows } = input;
-  if (typeof sessionId !== 'string') return undefined;
-  if (typeof cols !== 'number' || typeof rows !== 'number') return undefined;
-  return { sessionId, cols, rows };
-}
-
-export function registerIpc(deps: {
-  handlers: Handlers;
-  sessions: SessionManager;
-  allowedOrigin: string;
-}): void {
-  const { handlers, sessions, allowedOrigin } = deps;
+export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string }): void {
+  const { handlers, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -59,24 +43,14 @@ export function registerIpc(deps: {
   handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
   handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
-  handle(CHANNELS.openLogin, (input) => handlers.openLogin(input));
+  handle(CHANNELS.listModels, (input) => handlers.listModels(input));
+  handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
+  handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);
   });
-  listen(CHANNELS.ptyWrite, (sessionId, data) => {
-    if (typeof sessionId === 'string' && typeof data === 'string') sessions.write(sessionId, data);
-  });
-  listen(CHANNELS.ptyResize, (input) => {
-    const request = resizeRequest(input);
-    if (request) sessions.resize(request);
-  });
-  listen(CHANNELS.ptyClose, (sessionId) => {
-    if (typeof sessionId !== 'string') return;
-    try {
-      sessions.close(sessionId);
-    } catch (error: unknown) {
-      console.error(`inova: failed to close session ${sessionId}`, error);
-    }
+  listen(CHANNELS.cancelLogin, (sessionId) => {
+    if (typeof sessionId === 'string') handlers.cancelLogin(sessionId);
   });
 }

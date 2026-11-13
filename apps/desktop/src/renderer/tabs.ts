@@ -4,7 +4,7 @@ export interface Tab {
   sessionId: string;
   title: string;
   exited: boolean;
-  kind: 'chat' | 'login';
+  kind: 'chat';
   provider: ProviderId | null;
 }
 

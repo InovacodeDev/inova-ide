@@ -20,8 +20,9 @@ export async function accountAdd(ctx: Context, args: string[]): Promise<number> 
 export async function accountLogin(ctx: Context, args: string[]): Promise<number> {
   const account = await requireAccount(ctx, need(args[0]));
   if (account.provider === 'gemini') {
-    ctx.io.out('No gemini, escolha "Login with Google" e saia com /quit.');
+    ctx.io.out('No Antigravity (agy), conclua o login no navegador e saia com Ctrl+C.');
   }
+  await providers[account.provider].prepareLaunch(account.homeDir, ctx.env['HOME']);
   return launch(ctx, buildLogin({ account, baseEnv: ctx.env }));
 }
 

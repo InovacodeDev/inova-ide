@@ -259,7 +259,10 @@ test('close after exit finishes once and cancels the exit grace timer', () => {
 test('each turn gets distinct gemini block ids', () => {
   const first = setup();
   const second = setup();
-  const line = JSON.stringify({ type: 'message', role: 'assistant', content: 'x', delta: true });
+  const line = JSON.stringify({
+    event: 'step_update',
+    step_update: { step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'x' },
+  });
   for (const { runner, child } of [first, second]) {
     runner.send({ ...input(), provider: 'gemini' });
     child.stdout.write(`${line}\n`);

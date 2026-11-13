@@ -66,12 +66,6 @@
   font-weight: 600;
 }
 
-.accounts-binary {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted);
-}
-
 .accounts-health {
   display: inline-flex;
   align-items: center;
@@ -117,16 +111,48 @@
   color: var(--muted);
 }
 
-.account-ok {
+.account-status-head {
+  text-align: center;
+}
+
+.account-status-cell {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.account-status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.account-status-ok {
+  background: rgba(110, 231, 183, 0.1);
+  border-color: rgba(110, 231, 183, 0.25);
   color: var(--ok);
+}
+
+.account-status-bad {
+  background: rgba(240, 106, 134, 0.12);
+  border-color: rgba(240, 106, 134, 0.26);
+  color: var(--error);
+}
+
+.account-status-muted {
+  background: rgba(161, 169, 180, 0.12);
+  border-color: rgba(161, 169, 180, 0.24);
+  color: var(--muted);
 }
 
 .account-bad {
   color: var(--error);
-}
-
-.account-muted {
-  color: var(--muted);
 }
 
 .account-usage {
@@ -271,7 +297,12 @@
 }
 
 .new-session-footer kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: rgba(0, 0, 0, 0.22);
   font-family: var(--font-mono);
   font-size: 11px;
-  opacity: 0.8;
+  opacity: 0.9;
 }

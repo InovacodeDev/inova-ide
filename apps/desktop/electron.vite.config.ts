@@ -7,5 +7,5 @@ const alias = { '@inova': resolve(import.meta.dirname, '../../src') };
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin()], resolve: { alias } },
   preload: { plugins: [externalizeDepsPlugin()], resolve: { alias } },
-  renderer: { plugins: [react()] },
+  renderer: { plugins: [react()], resolve: { alias } },
 });

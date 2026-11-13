@@ -97,6 +97,35 @@ describe('sessions', () => {
     expect(await getSession({ root, sessionId: a.id })).toEqual(updated);
   });
 
+  it('updateSession stores and clears model and effort and rejects invalid values', async () => {
+    const a = await createSession({ root, projectId: 'p1' });
+    expect(a.model).toBeNull();
+    expect(a.effort).toBeNull();
+
+    const updated = await updateSession({
+      root,
+      sessionId: a.id,
+      patch: { model: '  opus  ', effort: 'high' },
+    });
+    expect(updated.model).toBe('opus');
+    expect(updated.effort).toBe('high');
+
+    const cleared = await updateSession({
+      root,
+      sessionId: a.id,
+      patch: { model: null, effort: null },
+    });
+    expect(cleared.model).toBeNull();
+    expect(cleared.effort).toBeNull();
+
+    expect(await codeOf(updateSession({ root, sessionId: a.id, patch: { model: '   ' } }))).toBe(
+      'invalid-model',
+    );
+    expect(
+      await codeOf(updateSession({ root, sessionId: a.id, patch: { effort: 'invalid' as never } })),
+    ).toBe('invalid-effort');
+  });
+
   it('updateSession rejects invalid titles and unknown sessions', async () => {
     const a = await createSession({ root, projectId: 'p1' });
     expect(await codeOf(updateSession({ root, sessionId: a.id, patch: { title: '   ' } }))).toBe(

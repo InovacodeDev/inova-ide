@@ -1,4 +1,7 @@
-export type ProviderId = 'claude' | 'codex' | 'gemini';
+export type ProviderId =
+  'claude' | 'codex' | 'gemini' | 'deepseek' | 'kimi' | 'grok' | 'qwen' | 'opencode';
+
+export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface Account {
   id: string;
@@ -20,6 +23,8 @@ export interface Session {
   parentId: string | null;
   title: string;
   providerSessionId: string | null;
+  model?: string | null;
+  effort?: EffortLevel | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;

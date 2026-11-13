@@ -4,11 +4,11 @@ import type { ProjectView } from '../src/shared/api';
 import type { Tab, TabsState } from '../src/renderer/tabs';
 import { restoreTabs, workspaceFromTabs } from '../src/renderer/workspace';
 
-const tab = (sessionId: string, kind: Tab['kind']): Tab => ({
+const tab = (sessionId: string): Tab => ({
   sessionId,
   title: sessionId,
   exited: false,
-  kind,
+  kind: 'chat',
   provider: 'claude',
 });
 
@@ -23,12 +23,18 @@ const session = (id: string): Session => ({
   archivedAt: null,
 });
 
-const project: ProjectView = { id: 'p', path: '/x', accountLabel: 'a', provider: 'claude' };
+const project: ProjectView = {
+  id: 'p',
+  path: '/x',
+  accountLabel: 'a',
+  accountEmail: null,
+  provider: 'claude',
+};
 
 describe('workspaceFromTabs', () => {
-  test('lists only chat tabs in order and the active chat', () => {
+  test('lists chat tabs in order and the active chat', () => {
     const state: TabsState = {
-      tabs: [tab('a', 'chat'), tab('l', 'login'), tab('b', 'chat')],
+      tabs: [tab('a'), tab('b')],
       active: 'b',
     };
     expect(workspaceFromTabs({ state, lastChatActive: null })).toEqual({
@@ -37,13 +43,13 @@ describe('workspaceFromTabs', () => {
     });
   });
 
-  test('falls back to the last active chat when a login tab is active', () => {
-    const state: TabsState = { tabs: [tab('a', 'chat'), tab('l', 'login')], active: 'l' };
+  test('falls back to the last active chat when active is null', () => {
+    const state: TabsState = { tabs: [tab('a'), tab('b')], active: null };
     expect(workspaceFromTabs({ state, lastChatActive: 'a' }).activeSessionId).toBe('a');
   });
 
   test('returns null active when no chat tab matches', () => {
-    const state: TabsState = { tabs: [tab('l', 'login')], active: 'l' };
+    const state: TabsState = { tabs: [], active: null };
     expect(workspaceFromTabs({ state, lastChatActive: 'gone' })).toEqual({
       openSessionIds: [],
       activeSessionId: null,

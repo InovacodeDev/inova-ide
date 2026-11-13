@@ -2,9 +2,16 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons';
-import { PROVIDER_ORDER, formatResetIn, groupByProvider, usageLevel } from './footer-state';
+import {
+  PROVIDER_ORDER,
+  formatResetIn,
+  groupByProvider,
+  orderedUsageWindows,
+  usageLevel,
+} from './footer-state';
+import { PlatformSelect } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
-import { PROVIDER_NAME } from './provider-meta';
+import { PROVIDER_BINARY, PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { STATUS_TEXT, type UsageState } from './UsageBar';
 import './views-forms.css';
 
@@ -12,18 +19,19 @@ export interface AccountsViewProps {
   accounts: AccountView[];
   projects: ProjectView[];
   usage: Record<string, UsageState>;
+  loggingInLabel?: string | null;
   onLoadUsage: (account: AccountView) => void;
   onLogin: (account: AccountView) => void;
   onRemove: (account: AccountView) => void;
   onAddAccount: (input: { provider: string; label: string }) => Promise<boolean>;
 }
 
-const WINDOW_LABEL = { session: 'sessão', weekly: 'semana' } as const;
+const WINDOW_LABEL = { session: 'sessão', weekly: 'semana', monthly: 'mês' } as const;
 
-function statusClass(status: AccountView['status']): string {
-  if (status === 'logged-in') return 'account-ok';
-  if (status === 'unknown') return 'account-muted';
-  return 'account-bad';
+function statusTagClass(status: AccountView['status']): string {
+  if (status === 'logged-in') return 'account-status-ok';
+  if (status === 'unknown') return 'account-status-muted';
+  return 'account-status-bad';
 }
 
 function NewAccountForm(props: {
@@ -50,24 +58,26 @@ function NewAccountForm(props: {
     }
   };
 
+  const providerOptions = PROVIDER_ORDER.map((id) => ({
+    value: id,
+    label: PROVIDER_NAME[id],
+    description: `CLI ${PROVIDER_BINARY[id]}`,
+    leading: <ProviderBadge provider={id} size={18} />,
+  }));
+
   return (
     <form className="accounts-new" onSubmit={(event) => void submit(event)}>
       <label>
         Provedor
-        <select
-          className="field"
+        <PlatformSelect
+          ariaLabel="Provedor"
           value={provider}
-          onChange={(e) => setProvider(e.target.value as ProviderId)}
-        >
-          {PROVIDER_ORDER.map((id) => (
-            <option key={id} value={id}>
-              {PROVIDER_NAME[id]}
-            </option>
-          ))}
-        </select>
+          options={providerOptions}
+          onChange={(next) => setProvider(next as ProviderId)}
+        />
       </label>
       <label>
-        Rótulo
+        Rótulo no terminal
         <input
           className="field"
           value={label}
@@ -90,9 +100,7 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
     return <span className="account-usage-text account-bad">{state.message}</span>;
   }
   const { snapshot } = state;
-  const windows = (['session', 'weekly'] as const).flatMap((kind) =>
-    snapshot.windows.filter((w) => w.kind === kind),
-  );
+  const windows = orderedUsageWindows(snapshot.windows);
   if (snapshot.source === 'unavailable' || windows.length === 0) {
     return <span className="account-usage-text">Consumo indisponível</span>;
   }
@@ -111,7 +119,7 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
             </div>
             <div className="account-usage-text">
               <span className="mono">{Math.round(percent)}%</span> {WINDOW_LABEL[w.kind]}
-              {reset ? ` · renova ${reset}` : ''}
+              {reset ? ` · renova ${reset === 'agora' ? 'agora' : `em ${reset}`}` : ''}
             </div>
           </div>
         );
@@ -121,7 +129,16 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
 }
 
 export function AccountsView(props: AccountsViewProps) {
-  const { accounts, projects, usage, onLoadUsage, onLogin, onRemove, onAddAccount } = props;
+  const {
+    accounts,
+    projects,
+    usage,
+    loggingInLabel = null,
+    onLoadUsage,
+    onLogin,
+    onRemove,
+    onAddAccount,
+  } = props;
   const [adding, setAdding] = useState(false);
   const loadRef = useRef(onLoadUsage);
   loadRef.current = onLoadUsage;
@@ -175,7 +192,6 @@ export function AccountsView(props: AccountsViewProps) {
               <div className="accounts-card-head">
                 <ProviderBadge provider={group.provider} size={28} />
                 <h2>{PROVIDER_NAME[group.provider]}</h2>
-                <span className="accounts-binary">binário {group.provider}</span>
                 {missingCli ? (
                   <span className="accounts-health accounts-health-bad">
                     <AlertIcon size={14} />
@@ -191,31 +207,40 @@ export function AccountsView(props: AccountsViewProps) {
               <div className="accounts-scroll">
                 <div className="account-row account-row-head section-label">
                   <span>Conta</span>
-                  <span>Status</span>
+                  <span className="account-status-head">Status</span>
                   <span>Uso</span>
                   <span />
                 </div>
                 {group.accounts.map((account) => {
                   const count = projects.filter((p) => p.accountLabel === account.label).length;
+                  const display = accountDisplayName(account);
                   return (
                     <div key={account.id} className="account-row">
                       <div>
-                        <div className="account-name">{account.label}</div>
+                        <div className="account-name">{display}</div>
                         <div className="account-sub">
                           {count} {count === 1 ? 'projeto' : 'projetos'}
                         </div>
                       </div>
-                      <span className={statusClass(account.status)}>
-                        {STATUS_TEXT[account.status]}
+                      <span className="account-status-cell">
+                        <span className={`account-status-tag ${statusTagClass(account.status)}`}>
+                          <span className="dot" aria-hidden="true" />
+                          {STATUS_TEXT[account.status]}
+                        </span>
                       </span>
                       <AccountUsage state={usage[account.label]} />
                       <div className="account-actions">
                         <button
                           type="button"
                           className="btn btn-sm"
+                          disabled={loggingInLabel === account.label}
                           onClick={() => onLogin(account)}
                         >
-                          {account.status === 'logged-in' ? 'Renovar login' : 'Entrar'}
+                          {loggingInLabel === account.label
+                            ? 'Conectando…'
+                            : account.status === 'logged-in'
+                              ? 'Renovar login'
+                              : 'Entrar'}
                         </button>
                         <button
                           type="button"
@@ -229,8 +254,8 @@ export function AccountsView(props: AccountsViewProps) {
                         <button
                           type="button"
                           className="icon-btn"
-                          aria-label={`Remover conta ${account.label}`}
-                          title="Remover conta"
+                          aria-label={`Deslogar e remover conta ${display}`}
+                          title="Deslogar e remover conta"
                           onClick={() => onRemove(account)}
                         >
                           <TrashIcon size={14} />

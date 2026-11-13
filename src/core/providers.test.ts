@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { isProviderId, providers } from './providers.js';
+import { isProviderId, providers, readAccountEmail } from './providers.js';
 import type { CommandRunner } from './providers.js';
 
 let homeDir: string;
@@ -70,17 +70,46 @@ describe('providers', () => {
     }
   });
 
-  it('gemini status is logged-in only when oauth_creds.json exists', async () => {
-    const { runner } = fakeRunner({ exitCode: 0, stdout: '' });
+  it('gemini status detects onboarding via jetski_state.pbtxt, onboarding.json or oauth token', async () => {
+    const { runner, envs } = fakeRunner({ exitCode: 0, stdout: '' });
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
-    await mkdir(join(homeDir, '.gemini'));
-    await writeFile(join(homeDir, '.gemini', 'oauth_creds.json'), '');
+    expect(envs[0]?.['HOME']).toBe(homeDir);
+    const stateDir = join(homeDir, '.gemini', 'antigravity-cli');
+    const cacheDir = join(stateDir, 'cache');
+    await mkdir(cacheDir, { recursive: true });
+    await writeFile(join(stateDir, 'jetski_state.pbtxt'), 'last_seen: 1\n');
+    await writeFile(
+      join(cacheDir, 'onboarding.json'),
+      JSON.stringify({ onboardingComplete: false }),
+    );
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
+
+    await writeFile(
+      join(cacheDir, 'onboarding.json'),
+      JSON.stringify({ onboardingComplete: true }),
+    );
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
+
+    await rm(join(cacheDir, 'onboarding.json'));
+    await writeFile(join(stateDir, 'antigravity-oauth-token'), 'tok-123');
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
+
+    await rm(join(stateDir, 'antigravity-oauth-token'));
+    await writeFile(
+      join(stateDir, 'jetski_state.pbtxt'),
+      'agent_onboarding_completed:  AGENT_ONBOARDING_STATE_COMPLETED\n',
+    );
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
   });
 
-  it('gemini status is unknown when access fails with a non-ENOENT error', async () => {
+  it('gemini status is unknown when state read fails with a non-ENOENT error', async () => {
     const { runner } = fakeRunner({ exitCode: 0, stdout: '' });
     await writeFile(join(homeDir, '.gemini'), '');
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('unknown');
+  });
+
+  it('gemini status is unknown when the runner reports exit code -1', async () => {
+    const { runner } = fakeRunner({ exitCode: -1, stdout: '' });
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('unknown');
   });
 
@@ -117,14 +146,157 @@ describe('providers', () => {
     expect(await readFile(file, 'utf8')).toBe(original);
   });
 
-  it('codex and gemini prepareLaunch do not touch the home', async () => {
+  it('codex prepareLaunch does not touch the home', async () => {
     await providers.codex.prepareLaunch(homeDir);
-    await providers.gemini.prepareLaunch(homeDir);
     await expect(readFile(join(homeDir, '.claude.json'))).rejects.toThrow(/ENOENT/);
   });
 
+  it('gemini prepareLaunch symlinks global configs without touching .gemini or removing targets', async () => {
+    const realHome = await mkdtemp(join(tmpdir(), 'inova-real-home-'));
+    await writeFile(join(realHome, '.gitconfig'), '[user]\nname = Test\n');
+    await mkdir(join(realHome, '.config', 'gh'), { recursive: true });
+    await writeFile(join(realHome, '.config', 'gh', 'hosts.yml'), 'github.com:\n');
+    await mkdir(join(realHome, '.gemini'), { recursive: true });
+    await writeFile(join(realHome, '.gemini', 'secret'), 'do-not-link');
+    await writeFile(join(homeDir, '.gitconfig'), 'account-override');
+
+    await providers.gemini.prepareLaunch(homeDir, realHome);
+
+    expect(await readFile(join(homeDir, '.gitconfig'), 'utf8')).toBe('account-override');
+    expect((await lstat(join(homeDir, '.gitconfig'))).isSymbolicLink()).toBe(false);
+    expect((await lstat(join(homeDir, '.config', 'gh'))).isSymbolicLink()).toBe(true);
+    expect(await readFile(join(homeDir, '.config', 'gh', 'hosts.yml'), 'utf8')).toBe(
+      'github.com:\n',
+    );
+    await expect(lstat(join(homeDir, '.npmrc'))).rejects.toThrow(/ENOENT/);
+    await expect(lstat(join(homeDir, '.gemini'))).rejects.toThrow(/ENOENT/);
+
+    await rm(homeDir, { recursive: true, force: true });
+    expect(await readFile(join(realHome, '.config', 'gh', 'hosts.yml'), 'utf8')).toBe(
+      'github.com:\n',
+    );
+  });
+
   it('isProviderId accepts only known providers', () => {
-    expect(isProviderId('claude')).toBe(true);
+    for (const id of [
+      'claude',
+      'codex',
+      'gemini',
+      'deepseek',
+      'kimi',
+      'grok',
+      'qwen',
+      'opencode',
+    ]) {
+      expect(isProviderId(id)).toBe(true);
+    }
     expect(isProviderId('other')).toBe(false);
+  });
+
+  it('file-backed adapters detect credentials and emails inside isolated homes', async () => {
+    const { runner } = fakeRunner({ exitCode: 0, stdout: '1.0.0' });
+    const home = async (id: string) => {
+      const dir = join(homeDir, id);
+      await mkdir(dir, { recursive: true });
+      return dir;
+    };
+
+    const dsHome = await home('deepseek');
+    expect(await providers.deepseek.checkStatus({ homeDir: dsHome, env: {}, runner })).toBe(
+      'logged-out',
+    );
+    await writeFile(join(dsHome, '.credentials.yaml'), 'token: ds-key\n');
+    expect(await providers.deepseek.checkStatus({ homeDir: dsHome, env: {}, runner })).toBe(
+      'logged-in',
+    );
+
+    const kmHome = await home('kimi');
+    expect(await providers.kimi.checkStatus({ homeDir: kmHome, env: {}, runner })).toBe(
+      'logged-out',
+    );
+    await mkdir(join(kmHome, 'credentials'), { recursive: true });
+    await writeFile(
+      join(kmHome, 'credentials', 'kimi-code.json'),
+      JSON.stringify({ access_token: 'km', email: 'kimi@example.com' }),
+    );
+    expect(await providers.kimi.checkStatus({ homeDir: kmHome, env: {}, runner })).toBe(
+      'logged-in',
+    );
+    expect(await readAccountEmail({ provider: 'kimi', homeDir: kmHome })).toBe('kimi@example.com');
+
+    const gkHome = await home('grok');
+    expect(await providers.grok.checkStatus({ homeDir: gkHome, env: {}, runner })).toBe(
+      'logged-out',
+    );
+    await writeFile(
+      join(gkHome, 'auth.json'),
+      JSON.stringify({ xai_token: 'gk', user: { email: 'grok@example.com' } }),
+    );
+    expect(await providers.grok.checkStatus({ homeDir: gkHome, env: {}, runner })).toBe(
+      'logged-in',
+    );
+    expect(await readAccountEmail({ provider: 'grok', homeDir: gkHome })).toBe('grok@example.com');
+
+    const qwHome = await home('qwen');
+    expect(await providers.qwen.checkStatus({ homeDir: qwHome, env: {}, runner })).toBe(
+      'logged-out',
+    );
+    await mkdir(join(qwHome, '.qwen'), { recursive: true });
+    await writeFile(
+      join(qwHome, '.qwen', 'oauth_creds.json'),
+      JSON.stringify({ access_token: 'qw', email: 'qwen@example.com' }),
+    );
+    expect(await providers.qwen.checkStatus({ homeDir: qwHome, env: {}, runner })).toBe(
+      'logged-in',
+    );
+    expect(await readAccountEmail({ provider: 'qwen', homeDir: qwHome })).toBe('qwen@example.com');
+
+    const ocHome = await home('opencode');
+    await mkdir(join(ocHome, 'opencode'), { recursive: true });
+    await writeFile(join(ocHome, 'opencode', 'auth.json'), JSON.stringify({}));
+    expect(await providers.opencode.checkStatus({ homeDir: ocHome, env: {}, runner })).toBe(
+      'logged-out',
+    );
+    await writeFile(
+      join(ocHome, 'opencode', 'auth.json'),
+      JSON.stringify({ anthropic: { type: 'oauth', email: 'oc@example.com' } }),
+    );
+    expect(await providers.opencode.checkStatus({ homeDir: ocHome, env: {}, runner })).toBe(
+      'logged-in',
+    );
+    expect(await readAccountEmail({ provider: 'opencode', homeDir: ocHome })).toBe(
+      'oc@example.com',
+    );
+  });
+
+  it('readAccountEmail extracts connected email for claude, codex, and gemini', async () => {
+    expect(await readAccountEmail({ provider: 'claude', homeDir })).toBeNull();
+    expect(await readAccountEmail({ provider: 'codex', homeDir })).toBeNull();
+    expect(await readAccountEmail({ provider: 'gemini', homeDir })).toBeNull();
+
+    await writeFile(
+      join(homeDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: ' claude@example.com ' } }),
+    );
+    expect(await readAccountEmail({ provider: 'claude', homeDir })).toBe('claude@example.com');
+
+    const jwtPayload = Buffer.from(JSON.stringify({ email: 'codex@example.com' })).toString(
+      'base64url',
+    );
+    await writeFile(
+      join(homeDir, 'auth.json'),
+      JSON.stringify({ tokens: { id_token: `hdr.${jwtPayload}.sig` } }),
+    );
+    expect(await readAccountEmail({ provider: 'codex', homeDir })).toBe('codex@example.com');
+
+    await mkdir(join(homeDir, '.gemini', 'antigravity-cli'), { recursive: true });
+    await writeFile(
+      join(homeDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token'),
+      JSON.stringify({ token: 'tok', auth_method: 'oauth', id_token_email: 'agy@example.com' }),
+    );
+    expect(await readAccountEmail({ provider: 'gemini', homeDir })).toBe('agy@example.com');
+
+    await writeFile(join(homeDir, '.claude.json'), '{broken-json');
+    expect(await readAccountEmail({ provider: 'claude', homeDir })).toBeNull();
   });
 });

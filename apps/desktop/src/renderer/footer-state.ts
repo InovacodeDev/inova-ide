@@ -1,3 +1,4 @@
+import type { UsageWindow } from '@inova/core/chat-types';
 import type { ProviderId } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
 
@@ -7,7 +8,22 @@ export interface ProviderGroup {
   connected: number;
 }
 
-export const PROVIDER_ORDER: readonly ProviderId[] = ['claude', 'codex', 'gemini'];
+export const PROVIDER_ORDER: readonly ProviderId[] = [
+  'claude',
+  'codex',
+  'gemini',
+  'deepseek',
+  'kimi',
+  'grok',
+  'qwen',
+  'opencode',
+];
+
+export const USAGE_WINDOW_ORDER: readonly UsageWindow['kind'][] = ['session', 'weekly', 'monthly'];
+
+export function orderedUsageWindows(windows: readonly UsageWindow[]): UsageWindow[] {
+  return USAGE_WINDOW_ORDER.flatMap((kind) => windows.filter((w) => w.kind === kind));
+}
 
 export function groupByProvider(accounts: readonly AccountView[]): ProviderGroup[] {
   return PROVIDER_ORDER.flatMap((provider) => {
@@ -34,17 +50,30 @@ export function highlightedProvider(input: {
   return groups[0]?.provider ?? null;
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
 export function formatResetIn(input: { resetsAt: string | null; now: Date }): string | null {
   if (input.resetsAt === null) return null;
   const target = Date.parse(input.resetsAt);
   if (Number.isNaN(target)) return null;
   const totalMinutes = Math.floor((target - input.now.getTime()) / 60_000);
   if (totalMinutes <= 0) return 'agora';
-  if (totalMinutes >= 24 * 60) return `em ${Math.floor(totalMinutes / (24 * 60))} d`;
-  if (totalMinutes < 60) return `em ${totalMinutes} min`;
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return minutes === 0 ? `em ${hours} h` : `em ${hours} h ${minutes} min`;
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const restMinutes = totalMinutes % (24 * 60);
+  const hours = Math.floor(restMinutes / 60);
+  const minutes = restMinutes % 60;
+  if (days > 0) return `${pad2(days)}d ${pad2(hours)}h ${pad2(minutes)}min`;
+  return `${pad2(hours)}h ${pad2(minutes)}min`;
+}
+
+export function formatResetDateTime(resetsAt: string | null): string | null {
+  if (resetsAt === null) return null;
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const date = new Date(target);
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 export function usageLevel(percent: number): 'ok' | 'warn' | 'critical' {

@@ -28,15 +28,22 @@ async function loadApi(): Promise<InovaApi> {
   return electron.exposed.get('inova') as InovaApi;
 }
 
-test('onPtyData delivers only the payload and unsubscribes the exact listener', async () => {
+test('onLoginEvent delivers only the payload and unsubscribes the exact listener', async () => {
   const api = await loadApi();
   const callback = vi.fn();
-  const unsubscribe = api.onPtyData(callback);
+  const unsubscribe = api.onLoginEvent(callback);
 
   const [channel, listener] = electron.on.mock.calls[0] ?? [];
-  expect(channel).toBe('inova:pty:data');
-  listener?.({ sender: 'secret' }, { sessionId: 's', data: 'x' });
-  expect(callback).toHaveBeenCalledWith({ sessionId: 's', data: 'x' });
+  expect(channel).toBe('inova:login:event');
+  const event = {
+    sessionId: 's',
+    stage: 'waiting-auth',
+    authUrl: 'https://example.com',
+    codePrompt: false,
+    message: null,
+  };
+  listener?.({ sender: 'secret' }, event);
+  expect(callback).toHaveBeenCalledWith(event);
 
   unsubscribe();
   expect(electron.removeListener).toHaveBeenCalledWith(channel, listener);
@@ -84,10 +91,25 @@ test('session update and workspace calls use their channels', async () => {
   expect('renameSession' in api).toBe(false);
 });
 
-test('pty calls go through send and invoke channels', async () => {
+test('login calls go through invoke and send channels and pty/openLogin are absent', async () => {
   const api = await loadApi();
-  api.ptyWrite('s', 'ls');
-  expect(electron.send).toHaveBeenCalledWith('inova:pty:write', 's', 'ls');
+  void api.startLogin({ accountLabel: 'pessoal' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:startLogin', { accountLabel: 'pessoal' });
+  void api.submitLoginCode({ sessionId: 's', code: 'abc' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:submitLoginCode', {
+    sessionId: 's',
+    code: 'abc',
+  });
+  api.cancelLogin('s');
+  expect(electron.send).toHaveBeenCalledWith('inova:cancelLogin', 's');
+  expect('openLogin' in api).toBe(false);
+  expect('ptyWrite' in api).toBe(false);
+  expect('ptyResize' in api).toBe(false);
+  expect('ptyClose' in api).toBe(false);
+  expect('onPtyData' in api).toBe(false);
+  expect('onPtyExit' in api).toBe(false);
   void api.listAccounts();
   expect(electron.invoke).toHaveBeenCalledWith('inova:listAccounts');
+  void api.listModels({ accountLabel: 'pessoal' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listModels', { accountLabel: 'pessoal' });
 });

@@ -3,8 +3,9 @@ import type { ProviderId } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { FolderIcon } from './icons';
 import { PROVIDER_ORDER } from './footer-state';
+import { PlatformSelect } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
-import { PROVIDER_NAME } from './provider-meta';
+import { PROVIDER_BINARY, PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import './views-forms.css';
 
 export type NewSessionTarget =
@@ -98,6 +99,36 @@ export function NewSessionView(props: NewSessionViewProps) {
     }
   };
 
+  const emailByLabel = new Map(accounts.map((a) => [a.label, a.email] as const));
+
+  const directoryOptions = [
+    ...projects.map((p) => {
+      const accountDisplay = accountDisplayName({
+        label: p.accountLabel,
+        email: emailByLabel.get(p.accountLabel) ?? p.accountEmail,
+      });
+      return {
+        value: p.id,
+        label: `${baseName(p.path)} — ${accountDisplay}`,
+        description: p.path,
+        leading: <ProviderBadge provider={p.provider} size={18} />,
+      };
+    }),
+    {
+      value: OTHER_FOLDER,
+      label: 'Outra pasta…',
+      description: 'Escolher um diretório no computador',
+      leading: <FolderIcon size={16} />,
+    },
+  ];
+
+  const accountOptions = providerAccounts.map((a) => ({
+    value: a.label,
+    label: accountDisplayName(a),
+    description: a.status === 'logged-in' ? 'Conectada' : 'Desconectada',
+    leading: <ProviderBadge provider={a.provider} size={18} />,
+  }));
+
   return (
     <div className="view-scroll">
       <form className="new-session" onSubmit={(event) => void submit(event)} onKeyDown={onKeyDown}>
@@ -110,19 +141,13 @@ export function NewSessionView(props: NewSessionViewProps) {
           <label htmlFor="new-session-dir" className="section-label">
             Diretório de trabalho
           </label>
-          <select
+          <PlatformSelect
             id="new-session-dir"
-            className="field"
+            ariaLabel="Diretório de trabalho"
             value={selectedChoice}
-            onChange={(e) => setChoice(e.target.value)}
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {baseName(p.path)} — {p.accountLabel}
-              </option>
-            ))}
-            <option value={OTHER_FOLDER}>Outra pasta…</option>
-          </select>
+            options={directoryOptions}
+            onChange={(value) => setChoice(value)}
+          />
           {project ? null : (
             <div className="new-session-folder">
               <div className="new-session-path">
@@ -158,7 +183,7 @@ export function NewSessionView(props: NewSessionViewProps) {
               >
                 <ProviderBadge provider={id} size={28} />
                 <span className="new-session-card-name">{PROVIDER_NAME[id]}</span>
-                <span className="new-session-card-bin">{id}</span>
+                <span className="new-session-card-bin">{PROVIDER_BINARY[id]}</span>
               </button>
             ))}
           </div>
@@ -168,20 +193,14 @@ export function NewSessionView(props: NewSessionViewProps) {
           <label htmlFor="new-session-account" className="section-label">
             Conta
           </label>
-          <select
+          <PlatformSelect
             id="new-session-account"
-            className="field"
+            ariaLabel="Conta"
             value={accountLabel ?? ''}
+            options={accountOptions}
             disabled={project !== null}
-            onChange={(e) => setPickedLabel(e.target.value)}
-          >
-            {providerAccounts.map((a) => (
-              <option key={a.id} value={a.label}>
-                {a.label}
-                {a.status === 'logged-in' ? '' : ' (desconectada)'}
-              </option>
-            ))}
-          </select>
+            onChange={(value) => setPickedLabel(value)}
+          />
         </div>
 
         <div className="new-session-group">

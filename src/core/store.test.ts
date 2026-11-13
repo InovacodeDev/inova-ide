@@ -159,6 +159,8 @@ describe('store', () => {
   });
 
   it.each([
+    ['a non-string model', { ...goodSession, model: 123 }],
+    ['an unknown effort', { ...goodSession, effort: 'turbo' }],
     ['a non-array sessions field', 'nope'],
     ['a null entry', null],
     ['an empty id', { ...goodSession, id: '' }],

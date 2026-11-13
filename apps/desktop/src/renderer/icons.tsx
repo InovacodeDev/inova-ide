@@ -1,16 +1,29 @@
-import type { ReactNode } from 'react';
+import { Archive } from 'pulsoicon-react/icons/archive';
+import { ArrowRight } from 'pulsoicon-react/icons/arrow-right';
+import { Check } from 'pulsoicon-react/icons/check';
+import { ChevronDown } from 'pulsoicon-react/icons/chevron-down';
+import { ChevronRight } from 'pulsoicon-react/icons/chevron-right';
+import { Copy } from 'pulsoicon-react/icons/copy';
+import { ExternalLink } from 'pulsoicon-react/icons/external-link';
+import { File } from 'pulsoicon-react/icons/file';
+import { Folder } from 'pulsoicon-react/icons/folder';
+import { Key } from 'pulsoicon-react/icons/key';
+import { LayoutGrid } from 'pulsoicon-react/icons/layout-grid';
+import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
+import { Pencil } from 'pulsoicon-react/icons/pencil';
+import { Plus } from 'pulsoicon-react/icons/plus';
+import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
+import { Square } from 'pulsoicon-react/icons/square';
+import { Terminal } from 'pulsoicon-react/icons/terminal';
+import { Trash } from 'pulsoicon-react/icons/trash';
+import { TriangleAlert } from 'pulsoicon-react/icons/triangle-alert';
+import { X } from 'pulsoicon-react/icons/x';
 
 interface IconProps {
   size?: number;
 }
 
-interface FrameProps extends IconProps {
-  strokeWidth?: number;
-  round?: boolean;
-  children: ReactNode;
-}
-
-function Frame({ size = 16, strokeWidth = 1.6, round = true, children }: FrameProps) {
+export function LogoIcon({ size = 18 }: IconProps) {
   return (
     <svg
       aria-hidden="true"
@@ -19,181 +32,92 @@ function Frame({ size = 16, strokeWidth = 1.6, round = true, children }: FramePr
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={strokeWidth}
-      strokeLinecap={round ? 'round' : undefined}
+      strokeWidth={2.2}
+      strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {children}
+      <path d="M3.5 7l5 5-5 5" />
+      <path d="M11.5 12h3M14.5 12l4.5-5.5M14.5 12h5.5M14.5 12l4.5 5.5" />
     </svg>
   );
 }
 
-export function LogoIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2.2}>
-      <path d="M3.5 7l5 5-5 5" />
-      <path d="M11.5 12h3M14.5 12l4.5-5.5M14.5 12h5.5M14.5 12l4.5 5.5" />
-    </Frame>
-  );
+export function PlusIcon({ size = 16 }: IconProps) {
+  return <Plus size={size} strokeWidth={2} aria-hidden="true" />;
 }
 
-export function PlusIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2}>
-      <path d="M12 5v14M5 12h14" />
-    </Frame>
-  );
+export function ChatIcon({ size = 16 }: IconProps) {
+  return <MessageCircle size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function ChatIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} round={false}>
-      <path d="M4 12a8 8 0 1 1 3.5 6.6L4 20l1.2-3.6A8 8 0 0 1 4 12z" />
-    </Frame>
-  );
+export function GridIcon({ size = 16 }: IconProps) {
+  return <LayoutGrid size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function GridIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} round={false}>
-      <rect x="4" y="4" width="7" height="7" rx="1.5" />
-      <rect x="13" y="4" width="7" height="7" rx="1.5" />
-      <rect x="4" y="13" width="7" height="7" rx="1.5" />
-      <rect x="13" y="13" width="7" height="7" rx="1.5" />
-    </Frame>
-  );
+export function KeyIcon({ size = 16 }: IconProps) {
+  return <Key size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function KeyIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <circle cx="8" cy="15" r="4" />
-      <path d="M11 12l8-8M16 7l2 2M14 9l2 2" />
-    </Frame>
-  );
+export function FolderIcon({ size = 16 }: IconProps) {
+  return <Folder size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function FolderIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} round={false}>
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-    </Frame>
-  );
+export function CheckIcon({ size = 16 }: IconProps) {
+  return <Check size={size} strokeWidth={2.2} aria-hidden="true" />;
 }
 
-export function CheckIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2.4}>
-      <path d="M5 12.5l4.5 4.5L19 7.5" />
-    </Frame>
-  );
+export function AlertIcon({ size = 16 }: IconProps) {
+  return <TriangleAlert size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
-export function AlertIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={1.8}>
-      <path d="M12 4l9 16H3z" />
-      <path d="M12 10v4M12 17v.5" />
-    </Frame>
-  );
+export function StopIcon({ size = 16 }: IconProps) {
+  return <Square size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
-export function StopIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} round={false}>
-      <rect x="6" y="6" width="12" height="12" rx="2" />
-    </Frame>
-  );
+export function SendIcon({ size = 16 }: IconProps) {
+  return <ArrowRight size={size} strokeWidth={2.1} aria-hidden="true" />;
 }
 
-export function SendIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2.2}>
-      <path d="M5 12h13M13 6l6 6-6 6" />
-    </Frame>
-  );
+export function TerminalIcon({ size = 16 }: IconProps) {
+  return <Terminal size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function TerminalIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <rect x="3" y="4.5" width="18" height="15" rx="2" />
-      <path d="M7 10l3 2.5L7 15M12.5 15H17" />
-    </Frame>
-  );
+export function CloseIcon({ size = 16 }: IconProps) {
+  return <X size={size} strokeWidth={2} aria-hidden="true" />;
 }
 
-export function CloseIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2}>
-      <path d="M6 6l12 12M18 6L6 18" />
-    </Frame>
-  );
+export function FileIcon({ size = 16 }: IconProps) {
+  return <File size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function FileIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} round={false}>
-      <path d="M7 3h7l5 5v13H7z" />
-      <path d="M14 3v5h5" />
-    </Frame>
-  );
+export function PencilIcon({ size = 16 }: IconProps) {
+  return <Pencil size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function PencilIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <path d="M4 20h4L19 9l-4-4L4 16z" />
-    </Frame>
-  );
+export function ChevronDownIcon({ size = 16 }: IconProps) {
+  return <ChevronDown size={size} strokeWidth={2} aria-hidden="true" />;
 }
 
-export function ChevronDownIcon({ size }: IconProps) {
-  return (
-    <Frame size={size} strokeWidth={2}>
-      <path d="M7 10l5 5 5-5" />
-    </Frame>
-  );
+export function ChevronRightIcon({ size = 16 }: IconProps) {
+  return <ChevronRight size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
-export function ChevronRightIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <path d="M10 7l5 5-5 5" />
-    </Frame>
-  );
+export function ArchiveIcon({ size = 16 }: IconProps) {
+  return <Archive size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function ArchiveIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <rect x="3" y="4" width="18" height="4" rx="1" />
-      <path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8M10 12h4" />
-    </Frame>
-  );
+export function TrashIcon({ size = 16 }: IconProps) {
+  return <Trash size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function TrashIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />
-    </Frame>
-  );
+export function RefreshIcon({ size = 16 }: IconProps) {
+  return <RefreshCw size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function RefreshIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v4h-4" />
-    </Frame>
-  );
+export function CopyIcon({ size = 16 }: IconProps) {
+  return <Copy size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
-export function CopyIcon({ size }: IconProps) {
-  return (
-    <Frame size={size}>
-      <rect x="8" y="8" width="12" height="12" rx="2" />
-      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
-    </Frame>
-  );
+export function ExternalLinkIcon({ size = 16 }: IconProps) {
+  return <ExternalLink size={size} strokeWidth={1.7} aria-hidden="true" />;
 }

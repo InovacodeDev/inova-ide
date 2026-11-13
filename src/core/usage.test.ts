@@ -167,6 +167,19 @@ describe('readUsage claude response', () => {
     expect(snapshot.windows).toEqual([{ kind: 'session', usedPercent: 100, resetsAt: null }]);
   });
 
+  it('includes monthly window when enabled in extra_usage', async () => {
+    const body = {
+      five_hour: { utilization: 10, resets_at: '2026-11-13T01:00:00Z' },
+      extra_usage: { is_enabled: true, utilization: 42.5, resets_at: '2026-12-01T00:00:00Z' },
+    };
+    const rec = recorder({ platform: 'linux', response: { ok: true, status: 200, body } });
+    const snapshot = await readUsage({ account: account('claude'), deps: rec.deps });
+    expect(snapshot.windows).toEqual([
+      { kind: 'session', usedPercent: 10, resetsAt: '2026-11-13T01:00:00.000Z' },
+      { kind: 'monthly', usedPercent: 42.5, resetsAt: '2026-12-01T00:00:00.000Z' },
+    ]);
+  });
+
   it('reports http errors with the status but never the token', async () => {
     const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
     const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
@@ -295,8 +308,75 @@ describe('readUsage codex', () => {
 });
 
 describe('readUsage gemini', () => {
-  it('is always unavailable', async () => {
+  async function markGeminiLoggedIn(): Promise<void> {
+    const dir = join(homeDir, '.gemini', 'antigravity-cli');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'jetski_state.pbtxt'),
+      'agent_onboarding_completed:  AGENT_ONBOARDING_STATE_COMPLETED\n',
+    );
+  }
+
+  it('throws no-credentials without invoking agy when logged out', async () => {
     const rec = recorder({ platform: 'darwin' });
+    const error = await captureError(readUsage({ account: account('gemini'), deps: rec.deps }));
+    expect(error.code).toBe('no-credentials');
+    expect(rec.commands).toEqual([]);
+    expect(rec.requests).toEqual([]);
+  });
+
+  it('parses session and weekly buckets from agy /usage json output', async () => {
+    await markGeminiLoggedIn();
+    const payload = {
+      conversation_id: '',
+      status: 'SUCCESS',
+      command: {
+        name: 'usage',
+        data: {
+          groups: [
+            {
+              name: 'Gemini Models',
+              buckets: [
+                {
+                  id: 'gemini-weekly',
+                  window: 'weekly',
+                  remaining_fraction: 0.33099,
+                  reset_time: '2026-11-14T06:00:10Z',
+                },
+                {
+                  id: 'gemini-5h',
+                  window: '5h',
+                  remaining_fraction: 0.84806,
+                  reset_time: '2026-11-13T02:23:20Z',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    const rec = recorder({
+      platform: 'darwin',
+      runResult: { exitCode: 0, stdout: JSON.stringify(payload) },
+    });
+    const snapshot = await readUsage({ account: account('gemini'), deps: rec.deps });
+    expect(rec.commands).toEqual([
+      { command: 'agy', args: ['-p', '/usage', '--output-format', 'json'] },
+    ]);
+    expect(snapshot).toEqual({
+      provider: 'gemini',
+      windows: [
+        { kind: 'session', usedPercent: 15.2, resetsAt: '2026-11-13T02:23:20.000Z' },
+        { kind: 'weekly', usedPercent: 66.9, resetsAt: '2026-11-14T06:00:10.000Z' },
+      ],
+      source: 'api',
+      fetchedAt: NOW.toISOString(),
+    });
+  });
+
+  it('returns unavailable when agy binary is missing', async () => {
+    await markGeminiLoggedIn();
+    const rec = recorder({ platform: 'darwin', runResult: { notFound: true } });
     const snapshot = await readUsage({ account: account('gemini'), deps: rec.deps });
     expect(snapshot).toEqual({
       provider: 'gemini',
@@ -304,7 +384,28 @@ describe('readUsage gemini', () => {
       source: 'unavailable',
       fetchedAt: NOW.toISOString(),
     });
-    expect(rec.commands).toEqual([]);
-    expect(rec.requests).toEqual([]);
+  });
+
+  it('throws bad-response when agy returns invalid output or non-zero exit', async () => {
+    await markGeminiLoggedIn();
+    const badExit = recorder({ platform: 'darwin', runResult: { exitCode: 1, stdout: '{}' } });
+    const badJson = recorder({ platform: 'darwin', runResult: { exitCode: 0, stdout: 'nope' } });
+    for (const rec of [badExit, badJson]) {
+      const error = await captureError(readUsage({ account: account('gemini'), deps: rec.deps }));
+      expect(error.code).toBe('bad-response');
+    }
+  });
+
+  it('returns unavailable usage for providers without quota endpoints', async () => {
+    for (const id of ['deepseek', 'kimi', 'grok', 'qwen', 'opencode'] as const) {
+      const rec = recorder({});
+      const snapshot = await readUsage({ account: account(id), deps: rec.deps });
+      expect(snapshot).toEqual({
+        provider: id,
+        windows: [],
+        source: 'unavailable',
+        fetchedAt: NOW.toISOString(),
+      });
+    }
   });
 });

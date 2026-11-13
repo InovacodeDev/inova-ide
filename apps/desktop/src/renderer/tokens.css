@@ -31,6 +31,16 @@
   --gemini-soft: rgba(126, 176, 255, 0.15);
   --codex: #6ee7b7;
   --codex-soft: rgba(110, 231, 183, 0.14);
+  --deepseek: #6ea8ff;
+  --deepseek-soft: rgba(110, 168, 255, 0.15);
+  --kimi: #b19dff;
+  --kimi-soft: rgba(177, 157, 255, 0.15);
+  --grok: #f0f1f4;
+  --grok-soft: rgba(240, 241, 244, 0.12);
+  --qwen: #9f8cff;
+  --qwen-soft: rgba(159, 140, 255, 0.15);
+  --opencode: #8de6c5;
+  --opencode-soft: rgba(141, 230, 197, 0.14);
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
   --radius-xs: 4px;
@@ -77,6 +87,7 @@
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   height: 36px;
   padding: 0 14px;
@@ -85,7 +96,17 @@
   background: var(--surface);
   color: var(--text);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 .btn-primary {
@@ -97,6 +118,17 @@
 
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+.btn-danger {
+  background: var(--error);
+  color: #19070c;
+  font-weight: 600;
+  border: none;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #f5889f;
 }
 
 .btn-sm {
@@ -118,6 +150,16 @@
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .btn:disabled,
@@ -186,6 +228,31 @@
 .provider-codex {
   background: var(--codex-soft);
   color: var(--codex);
+}
+
+.provider-deepseek {
+  background: var(--deepseek-soft);
+  color: var(--deepseek);
+}
+
+.provider-kimi {
+  background: var(--kimi-soft);
+  color: var(--kimi);
+}
+
+.provider-grok {
+  background: var(--grok-soft);
+  color: var(--grok);
+}
+
+.provider-qwen {
+  background: var(--qwen-soft);
+  color: var(--qwen);
+}
+
+.provider-opencode {
+  background: var(--opencode-soft);
+  color: var(--opencode);
 }
 
 .provider-none {
@@ -259,6 +326,16 @@
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
+  transition: border-color 0.12s ease;
+}
+
+.field:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--accent-border);
 }
 
 textarea.field {

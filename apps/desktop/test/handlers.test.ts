@@ -13,7 +13,7 @@ import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
-import type { Result } from '../src/shared/api.js';
+import type { LoginEvent, Result } from '../src/shared/api.js';
 
 const INVALID = { ok: false, message: 'Entrada inválida.' };
 const tmpDirs: string[] = [];
@@ -39,11 +39,13 @@ async function setup(options: { withBinary?: boolean } = {}) {
   if (options.withBinary ?? true) {
     await writeFile(join(bin, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     await writeFile(join(bin, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await writeFile(join(bin, 'agy'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   }
   const inUse = new Set<string>();
   const running = new Set<string>();
   const chatInUse = new Set<string>();
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
+  const loginEvents: LoginEvent[] = [];
   const send = vi.fn<ChatRunner['send']>();
   const cancel = vi.fn<ChatRunner['cancel']>();
   const chat: ChatRunner = {
@@ -59,11 +61,13 @@ async function setup(options: { withBinary?: boolean } = {}) {
     stdout: '{"loggedIn":true}',
   }));
   const open = vi.fn<SessionManager['open']>(() => 'sess-1');
+  const writePty = vi.fn<SessionManager['write']>();
+  const closePty = vi.fn<SessionManager['close']>();
   const sessions: SessionManager = {
     open,
-    write: vi.fn(),
+    write: writePty,
     resize: vi.fn(),
-    close: vi.fn(),
+    close: closePty,
     closeAll: vi.fn(),
     accountsInUse: () => inUse,
   };
@@ -80,6 +84,7 @@ async function setup(options: { withBinary?: boolean } = {}) {
       now: () => new Date('2026-01-01T00:00:00.000Z'),
     },
     emit: (sessionId, event) => emitted.push({ sessionId, event }),
+    emitLogin: (event) => loginEvents.push(event),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
   });
@@ -88,10 +93,13 @@ async function setup(options: { withBinary?: boolean } = {}) {
     bin,
     run,
     open,
+    writePty,
+    closePty,
     inUse,
     running,
     chatInUse,
     emitted,
+    loginEvents,
     send,
     cancel,
     fetch,
@@ -133,12 +141,31 @@ test('addAccount keeps the saved account and reports unknown status when the che
   expect((await loadStore(root)).accounts).toHaveLength(1);
 });
 
-test('listAccounts reports status with api keys stripped', async () => {
+test('listAccounts reports status and connected email with api keys stripped', async () => {
   const { root, run, handlers } = await setup();
-  const { account } = await seedProject(root);
+  const { account, project } = await seedProject(root);
+  await writeFile(
+    join(account.homeDir, '.claude.json'),
+    JSON.stringify({ oauthAccount: { emailAddress: 'dev@inova.test' } }),
+  );
   const views = unwrap(await handlers.listAccounts());
   expect(views).toEqual([
-    { id: account.id, label: 'pessoal', provider: 'claude', status: 'logged-in' },
+    {
+      id: account.id,
+      label: 'pessoal',
+      email: 'dev@inova.test',
+      provider: 'claude',
+      status: 'logged-in',
+    },
+  ]);
+  expect(unwrap(await handlers.listProjects())).toEqual([
+    {
+      id: project.id,
+      path: project.path,
+      accountLabel: 'pessoal',
+      accountEmail: 'dev@inova.test',
+      provider: 'claude',
+    },
   ]);
   const env = run.mock.calls[0]?.[0].env;
   expect(env?.['ANTHROPIC_API_KEY']).toBeUndefined();
@@ -154,8 +181,8 @@ test('listAccounts reports unknown for an account whose check throws and keeps t
     return { exitCode: 0, stdout: '{"loggedIn":true}' };
   });
   expect(unwrap(await handlers.listAccounts())).toEqual([
-    { id: broken.id, label: 'quebrada', provider: 'claude', status: 'unknown' },
-    { id: healthy.id, label: 'saudavel', provider: 'claude', status: 'logged-in' },
+    { id: broken.id, label: 'quebrada', email: null, provider: 'claude', status: 'unknown' },
+    { id: healthy.id, label: 'saudavel', email: null, provider: 'claude', status: 'logged-in' },
   ]);
 });
 
@@ -348,6 +375,23 @@ test('a codex turn stores the provider session only when the session event arriv
   await handlers.loadTranscript({ sessionId: session.id });
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBe('thread-9');
+});
+
+test('a gemini turn stores the provider session only when the session event arrives', async () => {
+  const { root, send, handlers } = await setup();
+  const account = await addAccount({ root, provider: 'gemini', label: 'gm' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'gm' });
+  const session = await createSession({ root, projectId: project.id });
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  const call = send.mock.calls[0]?.[0];
+  expect(call).toMatchObject({ provider: 'gemini', accountId: account.id });
+  expect(call?.spec.command).toBe('agy');
+  expect(call?.spec.args).not.toContain('--session-id');
+  expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBeNull();
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'conv-42' });
+  await vi.waitFor(async () => {
+    expect((await loadStore(root)).sessions?.[0]?.providerSessionId).toBe('conv-42');
+  });
 });
 
 test('sendMessage refuses while a turn is running', async () => {
@@ -625,14 +669,39 @@ test('unbindProject refuses while a project session is running', async () => {
   expect(await readdir(join(root, 'sessions'))).toEqual([]);
 });
 
-test('openLogin runs the login args in the account home', async () => {
-  const { root, open, handlers } = await setup();
+test('startLogin runs headless pty login, submits code, verifies exit, and supports cancel', async () => {
+  const { root, open, writePty, closePty, loginEvents, handlers } = await setup();
   const { account } = await seedProject(root);
-  const result = await handlers.openLogin({ accountLabel: 'pessoal', cols: 80, rows: 24 });
-  expect(unwrap(result).title).toBe('login · pessoal');
+  const result = await handlers.startLogin({ accountLabel: 'pessoal' });
+  expect(unwrap(result)).toEqual({
+    sessionId: 'sess-1',
+    accountLabel: 'pessoal',
+    provider: 'claude',
+  });
   const spec = open.mock.calls[0]?.[0].spec;
   expect(spec).toMatchObject({ args: ['auth', 'login'], cwd: account.homeDir });
-  const missing = await handlers.openLogin({ accountLabel: 'x', cols: 80, rows: 24 });
+  expect(loginEvents[0]).toMatchObject({ sessionId: 'sess-1', stage: 'starting' });
+
+  const submitted = await handlers.submitLoginCode({ sessionId: 'sess-1', code: 'auth-code' });
+  expect(submitted).toEqual({ ok: true, value: null });
+  expect(writePty).toHaveBeenCalledWith('sess-1', 'auth-code\r');
+
+  await handlers.handlePtyExit('sess-1', 0);
+  expect(loginEvents.map((item) => item.stage)).toContain('verifying');
+  expect(loginEvents.at(-1)).toMatchObject({ sessionId: 'sess-1', stage: 'succeeded' });
+
+  const missingCode = await handlers.submitLoginCode({ sessionId: 'sess-1', code: 'late' });
+  expect(missingCode).toEqual({
+    ok: false,
+    message: 'Sessão de login não encontrada ou já encerrada.',
+  });
+
+  await handlers.startLogin({ accountLabel: 'pessoal' });
+  handlers.cancelLogin('sess-1');
+  expect(closePty).toHaveBeenCalledWith('sess-1');
+  expect(loginEvents.at(-1)).toMatchObject({ sessionId: 'sess-1', stage: 'canceled' });
+
+  const missing = await handlers.startLogin({ accountLabel: 'x' });
   expect(missing).toEqual({ ok: false, message: 'Conta não encontrada: x.' });
 });
 
@@ -756,4 +825,69 @@ test('store and account path errors are reported in Portuguese', async () => {
     ok: false,
     message: 'Caminho da conta inválido; remoção recusada.',
   });
+});
+
+test('updateSession updates model and effort, validates provider effort, and passes flags on sendMessage', async () => {
+  const { root, send, handlers } = await setup();
+  const { session } = await seedSession(root);
+
+  const rejected = await handlers.updateSession({ sessionId: session.id, effort: 'minimal' });
+  expect(rejected).toEqual({
+    ok: false,
+    message: 'Nível de esforço não suportado por este provedor.',
+  });
+
+  const updated = unwrap(
+    await handlers.updateSession({ sessionId: session.id, model: 'opus', effort: 'max' }),
+  );
+  expect(updated.model).toBe('opus');
+  expect(updated.effort).toBe('max');
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'olá' }));
+  const args = send.mock.calls[0]?.[0]?.spec.args ?? [];
+  expect(args).toContain('--model');
+  expect(args[args.indexOf('--model') + 1]).toBe('opus');
+  expect(args).toContain('--effort');
+  expect(args[args.indexOf('--effort') + 1]).toBe('max');
+});
+
+test('listModels returns dynamic agy models for gemini, caches them, and falls back on error', async () => {
+  const { root, bin, run, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  await addAccount({ root, provider: 'gemini', label: 'gm' });
+
+  const claudeCatalog = unwrap(await handlers.listModels({ accountLabel: 'cl' }));
+  expect(claudeCatalog.models.some((m) => m.id === 'sonnet')).toBe(true);
+  expect(run).not.toHaveBeenCalled();
+
+  run.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: 'gemini-4-hydrogen-high          Gemini 4 Hydrogen (High)\n',
+  });
+  const geminiDynamic = unwrap(await handlers.listModels({ accountLabel: 'gm' }));
+  expect(geminiDynamic.models).toEqual([
+    { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
+  ]);
+  expect(run).toHaveBeenCalledTimes(1);
+
+  const cached = unwrap(await handlers.listModels({ accountLabel: 'gm' }));
+  expect(cached).toEqual(geminiDynamic);
+  expect(run).toHaveBeenCalledTimes(1);
+
+  await addAccount({ root, provider: 'gemini', label: 'gm-fail' });
+  run.mockResolvedValueOnce({ exitCode: 1, stdout: '' });
+  const fallback = unwrap(await handlers.listModels({ accountLabel: 'gm-fail' }));
+  expect(fallback.models.length).toBeGreaterThan(1);
+
+  await addAccount({ root, provider: 'opencode', label: 'oc' });
+  await writeFile(join(bin, 'opencode'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  run.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: 'deepseek/deepseek-reasoner\nopenai/gpt-5\n',
+  });
+  const opencodeDynamic = unwrap(await handlers.listModels({ accountLabel: 'oc' }));
+  expect(opencodeDynamic.models).toEqual([
+    { id: 'deepseek/deepseek-reasoner', label: 'deepseek-reasoner', description: 'deepseek' },
+    { id: 'openai/gpt-5', label: 'gpt-5', description: 'openai' },
+  ]);
 });

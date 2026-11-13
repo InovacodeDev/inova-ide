@@ -29,13 +29,12 @@ const api: InovaApi = {
   sendMessage: (input) => ipcRenderer.invoke(CHANNELS.sendMessage, input),
   cancelTurn: (sessionId) => ipcRenderer.send(CHANNELS.cancelTurn, sessionId),
   getUsage: (input) => ipcRenderer.invoke(CHANNELS.getUsage, input),
+  listModels: (input) => ipcRenderer.invoke(CHANNELS.listModels, input),
   onChatEvent: (callback) => subscribe(CHANNELS.chatEvent, callback),
-  openLogin: (input) => ipcRenderer.invoke(CHANNELS.openLogin, input),
-  ptyWrite: (sessionId, data) => ipcRenderer.send(CHANNELS.ptyWrite, sessionId, data),
-  ptyResize: (input) => ipcRenderer.send(CHANNELS.ptyResize, input),
-  ptyClose: (sessionId) => ipcRenderer.send(CHANNELS.ptyClose, sessionId),
-  onPtyData: (callback) => subscribe(CHANNELS.ptyData, callback),
-  onPtyExit: (callback) => subscribe(CHANNELS.ptyExit, callback),
+  startLogin: (input) => ipcRenderer.invoke(CHANNELS.startLogin, input),
+  submitLoginCode: (input) => ipcRenderer.invoke(CHANNELS.submitLoginCode, input),
+  cancelLogin: (sessionId) => ipcRenderer.send(CHANNELS.cancelLogin, sessionId),
+  onLoginEvent: (callback) => subscribe(CHANNELS.loginEvent, callback),
 };
 
 contextBridge.exposeInMainWorld('inova', api);

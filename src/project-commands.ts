@@ -35,6 +35,6 @@ export async function runProject(ctx: Context, args: string[]): Promise<number> 
     ctx.io.err(`Nenhum projeto vinculado a ${cwd}. Rode: inova project bind <label>`);
     return 2;
   }
-  await providers[account.provider].prepareLaunch(account.homeDir);
+  await providers[account.provider].prepareLaunch(account.homeDir, ctx.env['HOME']);
   return launch(ctx, buildLaunch({ account, cwd: ctx.cwd, args, baseEnv: ctx.env }));
 }

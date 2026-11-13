@@ -1,6 +1,6 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { UsageSnapshot, UsageWindow } from '@inova/core/chat-types';
-import { formatResetIn, usageLevel } from './footer-state';
+import { formatResetIn, orderedUsageWindows, usageLevel } from './footer-state';
 
 export type UsageState =
   | { status: 'loading' }
@@ -17,6 +17,7 @@ export const STATUS_TEXT: Record<AuthStatus, string> = {
 const WINDOW_TITLE: Record<UsageWindow['kind'], string> = {
   session: 'Sessão (5h)',
   weekly: 'Semanal',
+  monthly: 'Mensal',
 };
 
 export function UsageBar({ window: usageWindow }: { window: UsageWindow }) {
@@ -34,7 +35,9 @@ export function UsageBar({ window: usageWindow }: { window: UsageWindow }) {
           style={{ width: `${percent}%` }}
         />
       </div>
-      {reset ? <small className="usage-reset">renova {reset}</small> : null}
+      {reset ? (
+        <small className="usage-reset">renova {reset === 'agora' ? 'agora' : `em ${reset}`}</small>
+      ) : null}
     </div>
   );
 }
@@ -46,9 +49,7 @@ export function UsageSection({ state }: { state: UsageState | undefined }) {
     return <p className="usage-note usage-error">{state.message}</p>;
   }
   const { snapshot } = state;
-  const windows = (['session', 'weekly'] as const).flatMap((kind) =>
-    snapshot.windows.filter((w) => w.kind === kind),
-  );
+  const windows = orderedUsageWindows(snapshot.windows);
   if (snapshot.source === 'unavailable' || windows.length === 0) {
     return <p className="usage-note">Consumo indisponível para este provedor</p>;
   }

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageSnapshot, UsageWindow } from './chat-types.js';
+import { providers, readGeminiAuthState } from './providers.js';
 import type { CommandRunner } from './providers.js';
 import type { Account } from './types.js';
 
@@ -135,6 +136,18 @@ async function fetchClaudeBody(ctx: UsageContext, token: string): Promise<unknow
   }
 }
 
+function claudeExtraMonthlyWindow(extra: unknown): UsageWindow | null {
+  if (!isRecord(extra) || extra['is_enabled'] !== true) return null;
+  const utilization = finiteNumber(extra['utilization']);
+  if (utilization === null) return null;
+  const resetsAt = extra['resets_at'];
+  return {
+    kind: 'monthly',
+    usedPercent: clampPercent(utilization),
+    resetsAt: typeof resetsAt === 'string' ? toIsoOrNull(new Date(resetsAt)) : null,
+  };
+}
+
 async function readClaudeUsage(ctx: UsageContext): Promise<UsageWindow[]> {
   const body = await fetchClaudeBody(ctx, await claudeAccessToken(ctx));
   if (!isRecord(body))
@@ -142,6 +155,7 @@ async function readClaudeUsage(ctx: UsageContext): Promise<UsageWindow[]> {
   return [
     claudeWindow('session', body['five_hour']),
     claudeWindow('weekly', body['seven_day']),
+    claudeWindow('monthly', body['monthly']) ?? claudeExtraMonthlyWindow(body['extra_usage']),
   ].filter((window): window is UsageWindow => window !== null);
 }
 
@@ -179,6 +193,7 @@ function codexLineWindows(line: string, mtimeMs: number): UsageWindow[] {
   return [
     codexWindow('session', limits['primary'], baseMs),
     codexWindow('weekly', limits['secondary'], baseMs),
+    codexWindow('monthly', limits['monthly'], baseMs),
   ].filter((window): window is UsageWindow => window !== null);
 }
 
@@ -231,6 +246,75 @@ async function readCodexUsage(homeDir: string): Promise<UsageWindow[]> {
   return [];
 }
 
+function geminiUsageEnv(homeDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of providers.gemini.strippedEnvVars) delete env[key];
+  env[providers.gemini.homeEnvVar] = homeDir;
+  return env;
+}
+
+function agyBucketWindow(
+  kind: UsageWindow['kind'],
+  bucket: Record<string, unknown>,
+): UsageWindow | null {
+  const remaining = finiteNumber(bucket['remaining_fraction']);
+  if (remaining === null) return null;
+  const reset = bucket['reset_time'];
+  const resetsAt = typeof reset === 'string' ? toIsoOrNull(new Date(reset)) : null;
+  return {
+    kind,
+    usedPercent: clampPercent(Math.round((1 - remaining) * 1000) / 10),
+    resetsAt,
+  };
+}
+
+function parseAgyUsageBuckets(buckets: unknown[]): UsageWindow[] {
+  const records = buckets.filter(isRecord);
+  const fiveHour = records.find((b) => b['id'] === 'gemini-5h' || b['window'] === '5h');
+  const weekly = records.find((b) => b['id'] === 'gemini-weekly' || b['window'] === 'weekly');
+  const monthly = records.find((b) => b['id'] === 'gemini-monthly' || b['window'] === 'monthly');
+  return [
+    fiveHour !== undefined ? agyBucketWindow('session', fiveHour) : null,
+    weekly !== undefined ? agyBucketWindow('weekly', weekly) : null,
+    monthly !== undefined ? agyBucketWindow('monthly', monthly) : null,
+  ].filter((window): window is UsageWindow => window !== null);
+}
+
+async function readGeminiUsage(
+  ctx: UsageContext,
+): Promise<{ windows: UsageWindow[]; source: UsageSnapshot['source'] }> {
+  const auth = await readGeminiAuthState(ctx.account.homeDir);
+  if (auth !== 'logged-in') {
+    throw new UsageError('no-credentials', 'No Antigravity CLI onboarding found for this account');
+  }
+  const result = await ctx.deps.runner.run({
+    command: providers.gemini.binary,
+    args: ['-p', '/usage', '--output-format', 'json'],
+    env: geminiUsageEnv(ctx.account.homeDir),
+  });
+  if ('notFound' in result) return { windows: [], source: 'unavailable' };
+  if (result.exitCode !== 0) {
+    throw new UsageError(
+      'bad-response',
+      `Gemini usage command failed with exit ${result.exitCode}`,
+    );
+  }
+  const body = parseJson(result.stdout);
+  if (!isRecord(body) || body['status'] !== 'SUCCESS') {
+    throw new UsageError('bad-response', 'Gemini usage response is not valid');
+  }
+  const command = body['command'];
+  const data = isRecord(command) ? command['data'] : undefined;
+  const groups = isRecord(data) && Array.isArray(data['groups']) ? data['groups'] : null;
+  if (groups === null) {
+    throw new UsageError('bad-response', 'Gemini usage response missing groups');
+  }
+  const group =
+    groups.find((g) => isRecord(g) && g['name'] === 'Gemini Models') ?? groups.find(isRecord);
+  const buckets = isRecord(group) && Array.isArray(group['buckets']) ? group['buckets'] : [];
+  return { windows: parseAgyUsageBuckets(buckets), source: 'api' };
+}
+
 export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
   const provider = ctx.account.provider;
   const fetchedAt = ctx.deps.now().toISOString();
@@ -246,7 +330,15 @@ export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
         fetchedAt,
       };
     }
-    case 'gemini':
+    case 'gemini': {
+      const { windows, source } = await readGeminiUsage(ctx);
+      return { provider, windows, source, fetchedAt };
+    }
+    case 'deepseek':
+    case 'kimi':
+    case 'grok':
+    case 'qwen':
+    case 'opencode':
       return { provider, windows: [], source: 'unavailable', fetchedAt };
   }
 }

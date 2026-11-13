@@ -46,7 +46,9 @@ describe('inova account commands', () => {
     const h = makeHarness();
     await tmp.run(h, ['account', 'add', 'gemini', 'g']);
     await tmp.run(h, ['account', 'login', 'g']);
-    expect(h.out).toContain('No gemini, escolha "Login with Google" e saia com /quit.');
+    expect(h.out).toContain(
+      'No Antigravity (agy), conclua o login no navegador e saia com Ctrl+C.',
+    );
   });
 
   it('login of a missing account exits 1', async () => {
@@ -94,7 +96,9 @@ describe('inova account commands', () => {
   it('unknown provider exits 1 listing valid providers', async () => {
     const h = makeHarness();
     expect(await tmp.run(h, ['account', 'add', 'foo', 'x'])).toBe(1);
-    expect(h.err).toEqual(['Provedor inválido: foo. Use: claude, codex, gemini']);
+    expect(h.err).toEqual([
+      'Provedor inválido: foo. Use: claude, codex, gemini, deepseek, kimi, grok, qwen, opencode',
+    ]);
   });
 
   it('unknown command exits 1 with usage', async () => {

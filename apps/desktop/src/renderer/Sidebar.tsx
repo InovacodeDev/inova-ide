@@ -1,15 +1,19 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@inova/core/types';
-import type { ProjectView } from '../shared/api';
+import type { AccountView, ProjectView } from '../shared/api';
+import { ConfirmModal } from './ConfirmModal';
+import { accountDisplayName } from './provider-meta';
 import {
   ArchiveIcon,
   ChatIcon,
   CheckIcon,
-  CloseIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  FolderIcon,
   GridIcon,
   KeyIcon,
+  PencilIcon,
   PlusIcon,
-  TerminalIcon,
   TrashIcon,
 } from './icons';
 import { ProviderBadge } from './ProviderBadge';
@@ -22,7 +26,6 @@ import {
   visibleRoots,
   type SessionNode,
 } from './session-tree';
-import type { Tab } from './tabs';
 import './sidebar.css';
 
 export type View = 'workspace' | 'agents' | 'accounts' | 'new-session';
@@ -30,12 +33,11 @@ export type View = 'workspace' | 'agents' | 'accounts' | 'new-session';
 export interface SidebarProps {
   view: View;
   onNavigate: (view: View) => void;
+  accounts: AccountView[];
   projects: ProjectView[];
   sessions: Record<string, Session[]>;
   activeSessionId: string | null;
   statusOf: (sessionId: string) => SessionStatus;
-  loginTabs: Tab[];
-  onActivateLogin: (sessionId: string) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
   onUnbind: (project: ProjectView) => void;
@@ -44,6 +46,11 @@ export interface SidebarProps {
   onArchiveSession: (session: Session) => void;
   onUnarchiveSession: (session: Session) => void;
 }
+
+type PendingConfirm =
+  | { kind: 'delete-session'; session: Session }
+  | { kind: 'archive-session'; session: Session }
+  | { kind: 'unbind-project'; project: ProjectView };
 
 type SessionActions = Pick<
   SidebarProps,
@@ -54,7 +61,10 @@ type SessionActions = Pick<
   | 'onArchiveSession'
   | 'onUnarchiveSession'
   | 'statusOf'
->;
+> & {
+  onRequestDelete: (session: Session) => void;
+  onRequestArchive: (session: Session) => void;
+};
 
 const NAV_ITEMS: { view: Exclude<View, 'new-session'>; label: string; icon: ReactNode }[] = [
   { view: 'workspace', label: 'Workspace', icon: <ChatIcon size={16} /> },
@@ -127,21 +137,31 @@ interface SessionRowProps extends SessionActions {
 
 function SessionRow(props: SessionRowProps) {
   const { node, project, activeSessionId, ...actions } = props;
-  const { onOpenSession, onNewSession, onRenameSession, onDeleteSession, statusOf } = actions;
+  const {
+    onOpenSession,
+    onNewSession,
+    onRenameSession,
+    onRequestDelete,
+    onRequestArchive,
+    statusOf,
+  } = actions;
   const { session, children } = node;
   const [editing, setEditing] = useState(false);
   const archived = session.archivedAt !== null;
+  const isSubsession = session.parentId !== null;
+  const rowClasses = ['session-row', isSubsession ? 'session-row-sub' : 'session-row-root'];
+  if (session.id === activeSessionId) rowClasses.push('active');
 
   const remove = () => {
-    if (confirm(`Apagar a sessão "${session.title}" e suas subsessões?`)) onDeleteSession(session);
+    onRequestDelete(session);
   };
 
   return (
     <li className="session-node">
-      <div className={session.id === activeSessionId ? 'session-row active' : 'session-row'}>
+      <div className={rowClasses.join(' ')}>
         {editing ? (
           <div className="session-main">
-            <ProviderBadge provider={project.provider} size={20} />
+            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
             <TitleEditor
               initial={session.title}
               onSave={(title) => {
@@ -153,13 +173,15 @@ function SessionRow(props: SessionRowProps) {
           </div>
         ) : (
           <button
+            type="button"
             className="session-main"
             title={session.title}
             onClick={() => onOpenSession(session)}
             onDoubleClick={() => setEditing(true)}
           >
-            <ProviderBadge provider={project.provider} size={20} />
+            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
             <span className="session-text">
+              {isSubsession ? <span className="session-kind-sub">Subsessão</span> : null}
               <span className="session-title">{session.title}</span>
               <StatusLine status={statusOf(session.id)} />
             </span>
@@ -170,10 +192,20 @@ function SessionRow(props: SessionRowProps) {
         )}
         {!editing && (
           <div className="session-actions">
+            <button
+              type="button"
+              className="session-action"
+              aria-label={isSubsession ? 'Renomear subsessão' : 'Renomear sessão'}
+              title="Renomear"
+              onClick={() => setEditing(true)}
+            >
+              <PencilIcon size={14} />
+            </button>
             {archived ? (
               <button
+                type="button"
                 className="session-action"
-                aria-label="Desarquivar sessão"
+                aria-label={isSubsession ? 'Desarquivar subsessão' : 'Desarquivar sessão'}
                 title="Desarquivar"
                 onClick={() => actions.onUnarchiveSession(session)}
               >
@@ -182,6 +214,7 @@ function SessionRow(props: SessionRowProps) {
             ) : (
               <>
                 <button
+                  type="button"
                   className="session-action"
                   aria-label="Nova subsessão"
                   title="Nova subsessão"
@@ -190,19 +223,21 @@ function SessionRow(props: SessionRowProps) {
                   <PlusIcon size={14} />
                 </button>
                 <button
+                  type="button"
                   className="session-action"
-                  aria-label="Arquivar sessão"
+                  aria-label={isSubsession ? 'Arquivar subsessão' : 'Arquivar sessão'}
                   title="Arquivar"
-                  onClick={() => actions.onArchiveSession(session)}
+                  onClick={() => onRequestArchive(session)}
                 >
                   <ArchiveIcon size={14} />
                 </button>
               </>
             )}
             <button
+              type="button"
               className="session-action session-action-danger"
-              aria-label={archived ? 'Excluir sessão' : 'Apagar sessão'}
-              title={archived ? 'Excluir' : 'Apagar'}
+              aria-label={isSubsession ? 'Excluir subsessão' : 'Excluir sessão'}
+              title="Excluir"
               onClick={remove}
             >
               <TrashIcon size={14} />
@@ -229,13 +264,15 @@ function SessionRow(props: SessionRowProps) {
 
 interface ProjectSectionProps extends SessionActions {
   project: ProjectView;
+  accountLabelText: string;
   sessions: Session[];
   activeSessionId: string | null;
-  onUnbind: SidebarProps['onUnbind'];
+  onRequestUnbind: (project: ProjectView) => void;
 }
 
 function ProjectSection(props: ProjectSectionProps) {
-  const { project, sessions, activeSessionId, onUnbind, ...actions } = props;
+  const { project, accountLabelText, sessions, activeSessionId, onRequestUnbind, ...actions } =
+    props;
   const { onNewSession } = actions;
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -254,33 +291,43 @@ function ProjectSection(props: ProjectSectionProps) {
     <section className="project-section">
       <div className="project-header">
         <button
+          type="button"
           className="project-toggle"
           title={project.path}
           aria-expanded={!collapsed}
           onClick={() => setCollapsed((value) => !value)}
         >
-          <span className="section-label">{folderName(project.path)}</span>
-          <span className="project-account">{project.accountLabel}</span>
+          <span className="project-chevron">
+            {collapsed ? <ChevronRightIcon size={13} /> : <ChevronDownIcon size={13} />}
+          </span>
+          <span className="project-folder-icon">
+            <FolderIcon size={14} />
+          </span>
+          <span className="project-toggle-text">
+            <span className="project-name">{folderName(project.path)}</span>
+            <span className="project-account" title={accountLabelText}>
+              {accountLabelText}
+            </span>
+          </span>
         </button>
         <div className="project-actions">
           <button
+            type="button"
             className="session-action"
-            aria-label="Nova sessão"
+            aria-label="Nova sessão na seção"
             title="Nova sessão"
             onClick={() => onNewSession({ project, parent: null })}
           >
             <PlusIcon size={14} />
           </button>
           <button
-            className="session-action"
-            aria-label="Desvincular projeto"
-            title="Desvincular projeto"
-            onClick={() => {
-              const message = `Desvincular o projeto "${folderName(project.path)}"? As sessões dele serão apagadas.`;
-              if (confirm(message)) onUnbind(project);
-            }}
+            type="button"
+            className="session-action session-action-danger"
+            aria-label="Excluir seção"
+            title="Excluir seção"
+            onClick={() => onRequestUnbind(project)}
           >
-            <CloseIcon size={14} />
+            <TrashIcon size={14} />
           </button>
         </div>
       </div>
@@ -341,78 +388,122 @@ function ProjectSection(props: ProjectSectionProps) {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { view, onNavigate, projects, sessions, activeSessionId, loginTabs } = props;
+  const { view, onNavigate, accounts, projects, sessions, activeSessionId } = props;
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const emailByLabel = useMemo(
+    () => new Map(accounts.map((account) => [account.label, account.email] as const)),
+    [accounts],
+  );
+
   return (
-    <nav className="sidebar" aria-label="Principal">
-      <button className="btn btn-primary sidebar-new" onClick={() => onNavigate('new-session')}>
-        <PlusIcon size={16} />
-        Nova sessão
-      </button>
-      <ul className="sidebar-nav">
-        {NAV_ITEMS.map((item) => (
-          <li key={item.view}>
-            <button
-              className={view === item.view ? 'sidebar-nav-item active' : 'sidebar-nav-item'}
-              aria-current={view === item.view ? 'page' : undefined}
-              onClick={() => onNavigate(item.view)}
-            >
-              {item.icon}
-              {item.label}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="sidebar-projects">
-        {projects.length === 0 && (
-          <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>
-        )}
-        {projects.map((project) => (
-          <ProjectSection
-            key={project.id}
-            project={project}
-            sessions={sessions[project.id] ?? []}
-            activeSessionId={activeSessionId}
-            statusOf={props.statusOf}
-            onOpenSession={props.onOpenSession}
-            onNewSession={props.onNewSession}
-            onRenameSession={props.onRenameSession}
-            onDeleteSession={props.onDeleteSession}
-            onArchiveSession={props.onArchiveSession}
-            onUnarchiveSession={props.onUnarchiveSession}
-            onUnbind={props.onUnbind}
-          />
-        ))}
-        {loginTabs.length > 0 && (
-          <section className="project-section">
-            <div className="project-header">
-              <span className="section-label">Logins</span>
-            </div>
-            <ul className="session-tree">
-              {loginTabs.map((tab) => (
-                <li key={tab.sessionId} className="session-node">
-                  <div
-                    className={
-                      tab.sessionId === activeSessionId ? 'session-row active' : 'session-row'
-                    }
-                  >
-                    <button
-                      className="session-main"
-                      onClick={() => props.onActivateLogin(tab.sessionId)}
-                    >
-                      <TerminalIcon size={16} />
-                      <span className="session-text">
-                        <span className="session-title">
-                          {tab.exited ? `${tab.title} (encerrado)` : tab.title}
-                        </span>
-                      </span>
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
-    </nav>
+    <>
+      <nav className="sidebar" aria-label="Principal">
+        <button className="btn btn-primary sidebar-new" onClick={() => onNavigate('new-session')}>
+          <PlusIcon size={16} />
+          Nova sessão
+        </button>
+        <ul className="sidebar-nav">
+          {NAV_ITEMS.map((item) => (
+            <li key={item.view}>
+              <button
+                className={view === item.view ? 'sidebar-nav-item active' : 'sidebar-nav-item'}
+                aria-current={view === item.view ? 'page' : undefined}
+                onClick={() => onNavigate(item.view)}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+        <div className="sidebar-projects">
+          {projects.length === 0 && (
+            <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>
+          )}
+          {projects.map((project) => (
+            <ProjectSection
+              key={project.id}
+              project={project}
+              accountLabelText={accountDisplayName({
+                label: project.accountLabel,
+                email: emailByLabel.get(project.accountLabel) ?? project.accountEmail,
+              })}
+              sessions={sessions[project.id] ?? []}
+              activeSessionId={activeSessionId}
+              statusOf={props.statusOf}
+              onOpenSession={props.onOpenSession}
+              onNewSession={props.onNewSession}
+              onRenameSession={props.onRenameSession}
+              onDeleteSession={props.onDeleteSession}
+              onArchiveSession={props.onArchiveSession}
+              onUnarchiveSession={props.onUnarchiveSession}
+              onRequestDelete={(session) => setPendingConfirm({ kind: 'delete-session', session })}
+              onRequestArchive={(session) =>
+                setPendingConfirm({ kind: 'archive-session', session })
+              }
+              onRequestUnbind={(target) =>
+                setPendingConfirm({ kind: 'unbind-project', project: target })
+              }
+            />
+          ))}
+        </div>
+      </nav>
+      {pendingConfirm?.kind === 'delete-session' && (
+        <ConfirmModal
+          title={pendingConfirm.session.parentId !== null ? 'Excluir subsessão' : 'Excluir sessão'}
+          description={
+            pendingConfirm.session.parentId !== null
+              ? `Excluir a subsessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas?`
+              : `Excluir a sessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas?`
+          }
+          confirmLabel={
+            pendingConfirm.session.parentId !== null ? 'Excluir subsessão' : 'Excluir sessão'
+          }
+          danger
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const target = pendingConfirm.session;
+            setPendingConfirm(null);
+            props.onDeleteSession(target);
+          }}
+        />
+      )}
+      {pendingConfirm?.kind === 'archive-session' && (
+        <ConfirmModal
+          title={
+            pendingConfirm.session.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'
+          }
+          description={
+            pendingConfirm.session.parentId !== null
+              ? `Arquivar a subsessão "${pendingConfirm.session.title}" e suas subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
+              : `Arquivar a sessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
+          }
+          confirmLabel={
+            pendingConfirm.session.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'
+          }
+          danger
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const target = pendingConfirm.session;
+            setPendingConfirm(null);
+            props.onArchiveSession(target);
+          }}
+        />
+      )}
+      {pendingConfirm?.kind === 'unbind-project' && (
+        <ConfirmModal
+          title="Excluir seção"
+          description={`Excluir a seção "${folderName(pendingConfirm.project.path)}"? Todas as sessões e subsessões vinculadas a ela serão excluídas da IDE.`}
+          confirmLabel="Excluir seção"
+          danger
+          onCancel={() => setPendingConfirm(null)}
+          onConfirm={() => {
+            const target = pendingConfirm.project;
+            setPendingConfirm(null);
+            props.onUnbind(target);
+          }}
+        />
+      )}
+    </>
   );
 }

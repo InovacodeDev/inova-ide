@@ -1,7 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
-import type { SessionManager } from '../src/main/sessions.js';
 
 type Listener = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -35,20 +34,21 @@ function setup() {
       'loadTranscript',
       'sendMessage',
       'getUsage',
-      'openLogin',
+      'listModels',
+      'startLogin',
+      'submitLoginCode',
       'listAccounts',
       'listProjects',
       'pickFolder',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
-  const sessions = { write: vi.fn(), resize: vi.fn(), close: vi.fn() };
+  handlers['cancelLogin'] = vi.fn();
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
-    sessions: sessions as unknown as SessionManager,
     allowedOrigin: APP,
   });
-  return { handlers, sessions };
+  return { handlers };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -88,55 +88,26 @@ test('invokes from a foreign or unknown sender are rejected', async () => {
   for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
 });
 
-test('pty messages from a foreign sender are ignored', () => {
-  const { sessions } = setup();
-  send('inova:pty:write', foreign, 's', 'ls');
-  send('inova:pty:resize', { senderFrame: null }, { sessionId: 's', cols: 80, rows: 24 });
-  send('inova:pty:close', {}, 's');
-  expect(sessions.write).not.toHaveBeenCalled();
-  expect(sessions.resize).not.toHaveBeenCalled();
-  expect(sessions.close).not.toHaveBeenCalled();
+test('terminal pty and openLogin channels are not registered', () => {
+  setup();
+  expect(electron.invokes.has('inova:openLogin')).toBe(false);
+  expect(electron.sends.has('inova:pty:write')).toBe(false);
+  expect(electron.sends.has('inova:pty:resize')).toBe(false);
+  expect(electron.sends.has('inova:pty:close')).toBe(false);
 });
 
-test('valid pty payloads are forwarded', () => {
-  const { sessions } = setup();
-  send('inova:pty:write', trusted, 's', 'ls');
-  send('inova:pty:resize', trusted, { sessionId: 's', cols: 80, rows: 24 });
-  send('inova:pty:close', trusted, 's');
-  expect(sessions.write).toHaveBeenCalledWith('s', 'ls');
-  expect(sessions.resize).toHaveBeenCalledWith({ sessionId: 's', cols: 80, rows: 24 });
-  expect(sessions.close).toHaveBeenCalledWith('s');
-});
+test('login invokes and cancelLogin enforce trusted sender and input types', async () => {
+  const { handlers } = setup();
+  await invoke('inova:startLogin', trusted, { accountLabel: 'pessoal' });
+  expect(handlers['startLogin']).toHaveBeenCalledWith({ accountLabel: 'pessoal' });
+  await invoke('inova:submitLoginCode', trusted, { sessionId: 's', code: 'abc' });
+  expect(handlers['submitLoginCode']).toHaveBeenCalledWith({ sessionId: 's', code: 'abc' });
 
-test('a failing pty close is logged, not thrown into the main process', () => {
-  const { sessions } = setup();
-  const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-  sessions.close.mockImplementationOnce(() => {
-    throw new Error('EPERM');
-  });
-  expect(() => send('inova:pty:close', trusted, 's')).not.toThrow();
-  expect(log).toHaveBeenCalledTimes(1);
-  log.mockRestore();
-});
-
-test('wrong-typed pty payloads are dropped', () => {
-  const { sessions } = setup();
-  send('inova:pty:write', trusted, 1, 'x');
-  send('inova:pty:write', trusted, 's', 5);
-  send('inova:pty:write', trusted);
-  send('inova:pty:close', trusted, 42);
-  for (const input of [
-    null,
-    'x',
-    [],
-    { sessionId: 's', cols: '80', rows: 24 },
-    { cols: 1, rows: 1 },
-  ]) {
-    send('inova:pty:resize', trusted, input);
-  }
-  expect(sessions.write).not.toHaveBeenCalled();
-  expect(sessions.close).not.toHaveBeenCalled();
-  expect(sessions.resize).not.toHaveBeenCalled();
+  send('inova:cancelLogin', foreign, 's');
+  send('inova:cancelLogin', trusted, 42);
+  expect(handlers['cancelLogin']).not.toHaveBeenCalled();
+  send('inova:cancelLogin', trusted, 's');
+  expect(handlers['cancelLogin']).toHaveBeenCalledWith('s');
 });
 
 test('chat invokes reach their handlers and openProject is gone', async () => {
@@ -155,8 +126,10 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   expect(electron.invokes.has('inova:renameSession')).toBe(false);
   await invoke('inova:loadTranscript', trusted, input);
   await invoke('inova:getUsage', trusted, input);
+  await invoke('inova:listModels', trusted, input);
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
+  expect(handlers['listModels']).toHaveBeenCalledWith(input);
   expect(electron.invokes.has('inova:openProject')).toBe(false);
 });
 

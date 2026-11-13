@@ -55,11 +55,11 @@ describe('buildChatTurn', () => {
   ];
   const geminiBase = [
     '--prompt=hi',
-    '-o',
+    '--output-format',
     'stream-json',
-    '--approval-mode',
-    'auto_edit',
-    '--skip-trust',
+    '--mode',
+    'accept-edits',
+    '--dangerously-skip-permissions',
   ];
   const codexFlags = ['--json', '--sandbox', 'workspace-write', '--skip-git-repo-check'];
   const geminiAccount: Account = { ...claudeAccount, provider: 'gemini', homeDir: '/h/gemini' };
@@ -99,19 +99,15 @@ describe('buildChatTurn', () => {
   });
 
   it('builds gemini args for each mode', () => {
-    expect(argsFor(geminiAccount, { mode: 'new', sessionId: 's1' })).toEqual([
-      ...geminiBase,
-      '--session-id',
-      's1',
-    ]);
+    expect(argsFor(geminiAccount, { mode: 'new', sessionId: 's1' })).toEqual(geminiBase);
     expect(argsFor(geminiAccount, { mode: 'resume', providerSessionId: 'p1' })).toEqual([
       ...geminiBase,
-      '--resume',
+      '--conversation',
       'p1',
     ]);
     expect(
       argsFor(geminiAccount, { mode: 'fork', parentProviderSessionId: 'p1', sessionId: 's2' }),
-    ).toEqual([...geminiBase, '--session-id', 's2']);
+    ).toEqual(geminiBase);
   });
 
   it('builds codex args for each mode', () => {
@@ -154,7 +150,7 @@ describe('buildChatTurn', () => {
     expect(args[0]).toBe('-p');
   });
 
-  it.each(['--version', '-y', 'a=b', 'line1\n--flag\nline3', ''])(
+  it.each(['-y', '--print', 'a=b', 'line1\n--flag\nline3', ''])(
     'binds the gemini prompt %j inside one --prompt= argument',
     (prompt) => {
       const args = argsFor(geminiAccount, { mode: 'new', sessionId: 's1' }, prompt);
@@ -162,6 +158,89 @@ describe('buildChatTurn', () => {
       expect(args.filter((arg) => arg === prompt && prompt !== '')).toEqual([]);
     },
   );
+
+  it('isolates gemini with HOME and strips Google keys', () => {
+    const spec = buildChatTurn({
+      account: geminiAccount,
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'new', sessionId: 's1' },
+      baseEnv: {
+        HOME: '/real/home',
+        GEMINI_API_KEY: 'gk',
+        GOOGLE_API_KEY: 'ak',
+        GOOGLE_GENAI_USE_VERTEXAI: 'true',
+        GOOGLE_CLOUD_PROJECT: 'proj',
+        GOOGLE_CLOUD_PROJECT_ID: 'proj-id',
+        PATH: '/bin',
+      },
+    });
+    expect(spec.command).toBe('agy');
+    expect(spec.env).toEqual({ HOME: '/h/gemini', PATH: '/bin' });
+  });
+
+  it('passes model and effort flags for claude, gemini, and codex', () => {
+    const claudeArgs = buildChatTurn({
+      account: claudeAccount,
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'new', sessionId: 's1' },
+      baseEnv,
+      model: 'opus',
+      effort: 'max',
+    }).args;
+    expect(claudeArgs).toEqual([
+      ...claudeBase,
+      '--model',
+      'opus',
+      '--effort',
+      'max',
+      '--session-id',
+      's1',
+      '--',
+      'hi',
+    ]);
+
+    const geminiArgs = buildChatTurn({
+      account: geminiAccount,
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p1' },
+      baseEnv,
+      model: 'gemini-4-hydrogen-high',
+      effort: 'xhigh',
+    }).args;
+    expect(geminiArgs).toEqual([
+      ...geminiBase,
+      '--model',
+      'gemini-4-hydrogen-high',
+      '--effort',
+      'xhigh',
+      '--conversation',
+      'p1',
+    ]);
+
+    const codexArgs = buildChatTurn({
+      account: codexAccount,
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p1' },
+      baseEnv,
+      model: 'gpt-5.3-codex',
+      effort: 'high',
+    }).args;
+    expect(codexArgs).toEqual([
+      'exec',
+      'resume',
+      'p1',
+      ...codexFlags,
+      '--model',
+      'gpt-5.3-codex',
+      '-c',
+      'model_reasoning_effort="high"',
+      'hi',
+    ]);
+  });
 
   it('keeps env isolation and cwd', () => {
     const spec = buildChatTurn({
@@ -174,6 +253,91 @@ describe('buildChatTurn', () => {
     expect(spec.command).toBe('claude');
     expect(spec.cwd).toBe('/proj');
     expect(spec.env).toEqual({ CLAUDE_CONFIG_DIR: '/h/claude', PATH: '/bin' });
+  });
+
+  it('builds args and isolated env for deepseek, kimi, grok, qwen, and opencode', () => {
+    const extraBase = {
+      DEEPSEEK_API_KEY: 'ds',
+      MOONSHOT_API_KEY: 'km',
+      XAI_API_KEY: 'gk',
+      DASHSCOPE_API_KEY: 'qw',
+      OPENCODE_API_KEY: 'oc',
+      PATH: '/bin',
+    };
+    const ds = buildChatTurn({
+      account: { ...claudeAccount, provider: 'deepseek', homeDir: '/h/ds' },
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'new', sessionId: 's1' },
+      baseEnv: extraBase,
+      model: 'deepseek-reasoner',
+    });
+    expect(ds.command).toBe('dsh');
+    expect(ds.env['DSH_HOME']).toBe('/h/ds');
+    expect(ds.env['DEEPSEEK_API_KEY']).toBeUndefined();
+    expect(ds.args).toContain('--profile');
+    expect(ds.args).toContain('--jsonl');
+
+    const km = buildChatTurn({
+      account: { ...claudeAccount, provider: 'kimi', homeDir: '/h/km' },
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p-km' },
+      baseEnv: extraBase,
+      model: 'kimi-k2.5',
+    });
+    expect(km.command).toBe('kimi');
+    expect(km.env['KIMI_CODE_HOME']).toBe('/h/km');
+    expect(km.args).toEqual([
+      '--print',
+      '--prompt',
+      'hi',
+      '--output-format',
+      'stream-json',
+      '--yolo',
+      '-m',
+      'kimi-k2.5',
+      '-S',
+      'p-km',
+    ]);
+
+    const gk = buildChatTurn({
+      account: { ...claudeAccount, provider: 'grok', homeDir: '/h/gk' },
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p-gk' },
+      baseEnv: extraBase,
+      model: 'grok-4',
+    });
+    expect(gk.command).toBe('grok');
+    expect(gk.env['GROK_HOME']).toBe('/h/gk');
+    expect(gk.args).toContain('streaming-json');
+    expect(gk.args).toContain('-r');
+
+    const qw = buildChatTurn({
+      account: { ...claudeAccount, provider: 'qwen', homeDir: '/h/qw' },
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p-qw' },
+      baseEnv: extraBase,
+      model: 'qwen3-coder-plus',
+    });
+    expect(qw.command).toBe('qwen');
+    expect(qw.env['HOME']).toBe('/h/qw');
+    expect(qw.args).toContain('--approval-mode');
+    expect(qw.args).toContain('--resume');
+
+    const oc = buildChatTurn({
+      account: { ...claudeAccount, provider: 'opencode', homeDir: '/h/oc' },
+      cwd: '/proj',
+      prompt: 'hi',
+      turn: { mode: 'resume', providerSessionId: 'p-oc' },
+      baseEnv: extraBase,
+      model: 'openai/gpt-5',
+    });
+    expect(oc.command).toBe('opencode');
+    expect(oc.env['XDG_DATA_HOME']).toBe('/h/oc');
+    expect(oc.args).toEqual(['run', '--format', 'json', '-m', 'openai/gpt-5', '-s', 'p-oc', 'hi']);
   });
 });
 

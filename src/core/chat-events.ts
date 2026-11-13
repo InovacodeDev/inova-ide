@@ -57,6 +57,7 @@ function claudeUsage(info: unknown): ChatEvent[] {
   const kinds = [
     ['five_hour', 'session'],
     ['seven_day', 'weekly'],
+    ['monthly', 'monthly'],
   ] as const;
   for (const [key, kind] of kinds) {
     const entry = info['unifiedWindows'][key];
@@ -66,6 +67,23 @@ function claudeUsage(info: unknown): ChatEvent[] {
     windows.push({ kind, usedPercent: utilization * 100, resetsAt: epochToIso(entry['resetsAt']) });
   }
   return windows.length > 0 ? [{ kind: 'usage-limits', windows }] : [];
+}
+
+function extractToolResults(message: unknown): ChatEvent[] {
+  if (!isRecord(message) || !Array.isArray(message['content'])) return [];
+  const events: ChatEvent[] = [];
+  for (const block of message['content']) {
+    if (!isRecord(block) || block['type'] !== 'tool_result') continue;
+    const toolId = str(block['tool_use_id']);
+    if (toolId === null) continue;
+    events.push({
+      kind: 'tool-result',
+      toolId,
+      output: toolOutput(block['content']),
+      isError: block['is_error'] === true,
+    });
+  }
+  return events;
 }
 
 function createClaudeParser(): ChatParser {
@@ -103,23 +121,6 @@ function createClaudeParser(): ChatParser {
     return events;
   }
 
-  function fromUser(message: unknown): ChatEvent[] {
-    if (!isRecord(message) || !Array.isArray(message['content'])) return [];
-    const events: ChatEvent[] = [];
-    for (const block of message['content']) {
-      if (!isRecord(block) || block['type'] !== 'tool_result') continue;
-      const toolId = str(block['tool_use_id']);
-      if (toolId === null) continue;
-      events.push({
-        kind: 'tool-result',
-        toolId,
-        output: toolOutput(block['content']),
-        isError: block['is_error'] === true,
-      });
-    }
-    return events;
-  }
-
   return {
     parse(line) {
       const data = decodeLine(line);
@@ -138,7 +139,7 @@ function createClaudeParser(): ChatParser {
         case 'assistant':
           return fromAssistant(data['message']);
         case 'user':
-          return fromUser(data['message']);
+          return extractToolResults(data['message']);
         case 'result': {
           const isError = data['is_error'] === true;
           const done: ChatEvent = {
@@ -168,86 +169,125 @@ function createGeminiParser(prefix: string): ChatParser {
   let block = 0;
   let open = false;
   let buffer = '';
+  let sawText = false;
+  let emittedError = false;
+  let fallbackToolId = 0;
+  const startedTools = new Set<string>();
 
   function flush(): ChatEvent[] {
     if (!open) return [];
     open = false;
     const text = buffer;
     buffer = '';
+    if (text !== '') sawText = true;
     return [{ kind: 'text', blockId: `${prefix}gemini-${block}`, text }];
   }
 
   function errorMessage(value: unknown): string {
-    if (typeof value === 'string') return value;
-    if (isRecord(value)) return str(value['message']) ?? 'Gemini failed';
+    if (typeof value === 'string' && value !== '') return value;
+    if (isRecord(value)) {
+      return (
+        str(value['short_error']) ?? str(value['message']) ?? str(value['error']) ?? 'Gemini failed'
+      );
+    }
     return 'Gemini failed';
+  }
+
+  function appendDelta(text: string): ChatEvent[] {
+    if (text === '') return [];
+    if (!open) {
+      block += 1;
+      open = true;
+    }
+    buffer += text;
+    sawText = true;
+    return [{ kind: 'text-delta', blockId: `${prefix}gemini-${block}`, text }];
+  }
+
+  function parseToolStep(step: Json): ChatEvent[] {
+    const info = isRecord(step['tool_info']) ? step['tool_info'] : null;
+    const name = str(step['tool_name']) ?? str(info?.['name']);
+    if (name === null) return [];
+    const stepIndex = num(step['step_index']);
+    const rawId = stepIndex !== null ? `step-${stepIndex}` : `tool-${++fallbackToolId}`;
+    const toolId = `${prefix}${rawId}`;
+    const events: ChatEvent[] = [...flush()];
+    if (!startedTools.has(rawId)) {
+      startedTools.add(rawId);
+      events.push({ kind: 'tool-use', toolId, name, input: prettyJson(info?.['parameters']) });
+    }
+    if (step['state'] !== 'DONE') return events;
+    const rawError = info?.['error'] ?? step['error'];
+    const failed =
+      rawError !== undefined || step['status'] === 'ERROR' || info?.['is_error'] === true;
+    const output = failed ? errorMessage(rawError) : (str(info?.['output']) ?? '');
+    events.push({ kind: 'tool-result', toolId, output, isError: failed });
+    return events;
+  }
+
+  function parseStepUpdate(step: Json): ChatEvent[] {
+    switch (step['step_type']) {
+      case 'agent_response': {
+        const delta = str(step['text_delta']);
+        const events = delta === null ? [] : appendDelta(delta);
+        if (step['state'] === 'DONE') return [...events, ...flush()];
+        return events;
+      }
+      case 'tool':
+        return parseToolStep(step);
+      case 'error_message': {
+        const rawError = step['error'] ?? step['message'] ?? step['text'];
+        if (rawError === undefined) return [];
+        emittedError = true;
+        return [...flush(), { kind: 'error', message: errorMessage(rawError) }];
+      }
+      default:
+        return [];
+    }
+  }
+
+  function parseAgyErrorLine(trimmed: string): ChatEvent[] {
+    const raw = trimmed.slice('AGY_ERROR:'.length).trim();
+    const parsed = decodeLine(raw);
+    const message = parsed !== null ? errorMessage(parsed) : raw !== '' ? raw : 'Gemini failed';
+    emittedError = true;
+    return [...flush(), { kind: 'error', message }];
   }
 
   return {
     parse(line) {
-      const data = decodeLine(line);
+      const trimmed = line.trim();
+      if (trimmed === '') return [];
+      if (trimmed.startsWith('AGY_ERROR:')) return parseAgyErrorLine(trimmed);
+      const data = decodeLine(trimmed);
       if (data === null) return [];
-      switch (data['type']) {
+      switch (data['event']) {
         case 'init': {
-          const sessionId = str(data['session_id']);
+          const sessionId = str(data['conversation_id']);
           return sessionId === null ? [] : [{ kind: 'session', providerSessionId: sessionId }];
         }
-        case 'message': {
-          const text = str(data['content']);
-          if (data['role'] !== 'assistant' || text === null) return [];
-          if (data['delta'] === true) {
-            if (!open) {
-              block += 1;
-              open = true;
-            }
-            buffer += text;
-            return [{ kind: 'text-delta', blockId: `${prefix}gemini-${block}`, text }];
-          }
-          const closed = flush();
-          block += 1;
-          return [...closed, { kind: 'text', blockId: `${prefix}gemini-${block}`, text }];
-        }
-        case 'tool_use': {
-          const toolId = str(data['tool_id']);
-          const name = str(data['tool_name']);
-          if (toolId === null || name === null) return [];
-          const closed = flush();
-          block += 1;
-          return [
-            ...closed,
-            {
-              kind: 'tool-use',
-              toolId: `${prefix}${toolId}`,
-              name,
-              input: prettyJson(data['parameters']),
-            },
-          ];
-        }
-        case 'tool_result': {
-          const toolId = str(data['tool_id']);
-          if (toolId === null) return [];
-          const failed = data['status'] === 'error' || isRecord(data['error']);
-          const output = failed ? errorMessage(data['error']) : (str(data['output']) ?? '');
-          return [
-            ...flush(),
-            { kind: 'tool-result', toolId: `${prefix}${toolId}`, output, isError: failed },
-          ];
-        }
-        case 'error':
-          return [...flush(), { kind: 'error', message: errorMessage(data) }];
+        case 'step_update':
+          return isRecord(data['step_update']) ? parseStepUpdate(data['step_update']) : [];
         case 'result': {
-          const stats = isRecord(data['stats']) ? data['stats'] : {};
-          const failed = data['status'] !== 'success';
-          const done: ChatEvent = {
-            kind: 'done',
-            isError: failed,
-            costUsd: null,
-            durationMs: num(stats['duration_ms']),
-          };
-          const tail: ChatEvent[] = failed
-            ? [{ kind: 'error', message: errorMessage(data['error']) }, done]
-            : [done];
-          return [...flush(), ...tail];
+          const res = isRecord(data['result']) ? data['result'] : null;
+          if (res === null) return flush();
+          const events: ChatEvent[] = [...flush()];
+          const failed = res['status'] !== 'SUCCESS';
+          const fallbackText = str(res['response']);
+          if (!sawText && !failed && fallbackText !== null && fallbackText !== '') {
+            block += 1;
+            sawText = true;
+            events.push({ kind: 'text', blockId: `${prefix}gemini-${block}`, text: fallbackText });
+          }
+          const durationSec = num(res['duration_seconds']);
+          const durationMs = durationSec === null ? null : Math.round(durationSec * 1000);
+          const done: ChatEvent = { kind: 'done', isError: failed, costUsd: null, durationMs };
+          if (failed && !emittedError) {
+            emittedError = true;
+            events.push({ kind: 'error', message: errorMessage(res['error'] ?? res['message']) });
+          }
+          events.push(done);
+          return events;
         }
         default:
           return [];
@@ -319,6 +359,180 @@ function createCodexParser(prefix: string): ChatParser {
   };
 }
 
+function createStreamAgentParser(
+  prefix: string,
+  options: { fallbackLabel: string; initialBlockPrefix: string },
+): ChatParser {
+  let messageId = '';
+  let fallbackCounter = 0;
+  let emittedDone = false;
+  let sawOpenCodeSession = false;
+  const codexParser = createCodexParser(prefix);
+
+  function nextBlockId(rawId: string | null): string {
+    if (rawId !== null && rawId !== '') return rawId;
+    fallbackCounter += 1;
+    return `${prefix}${options.initialBlockPrefix}-${fallbackCounter}`;
+  }
+
+  function extractOpenCodeEvents(data: Json): ChatEvent[] | null {
+    const type = str(data['type']);
+    if (type === null || !isRecord(data['part'])) return null;
+    const part = data['part'];
+    const events: ChatEvent[] = [];
+    const sessionId = str(data['sessionID']) ?? str(data['session_id']);
+    if (!sawOpenCodeSession && sessionId !== null) {
+      sawOpenCodeSession = true;
+      events.push({ kind: 'session', providerSessionId: sessionId });
+    }
+    if (type === 'text') {
+      const text = str(part['text']);
+      if (text !== null && text !== '') {
+        events.push({ kind: 'text', blockId: nextBlockId(str(part['id'])), text });
+      }
+      return events;
+    }
+    if (type === 'tool_use') {
+      const toolId = str(part['callID']) ?? nextBlockId(str(part['id']));
+      const name = str(part['tool']) ?? 'tool';
+      const state = isRecord(part['state']) ? part['state'] : null;
+      events.push({ kind: 'tool-use', toolId, name, input: prettyJson(state?.['input']) });
+      if (state && (state['status'] === 'completed' || state['status'] === 'error')) {
+        const isError = state['status'] === 'error';
+        events.push({
+          kind: 'tool-result',
+          toolId,
+          output: isError ? (str(state['error']) ?? 'Erro') : (str(state['output']) ?? ''),
+          isError,
+        });
+      }
+      return events;
+    }
+    if (type === 'step_finish') {
+      const reason = str(part['reason']);
+      if (reason === 'stop' || reason === null) {
+        emittedDone = true;
+        events.push({ kind: 'done', isError: false, costUsd: num(part['cost']), durationMs: null });
+      }
+      return events;
+    }
+    return events;
+  }
+
+  function fromMessage(message: Json): ChatEvent[] {
+    const events: ChatEvent[] = [];
+    messageId = str(message['id']) ?? messageId;
+    const content = message['content'];
+    if (typeof content === 'string' && content !== '') {
+      events.push({ kind: 'text', blockId: nextBlockId(messageId), text: content });
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (!isRecord(block)) continue;
+        const text = str(block['text']);
+        if (block['type'] === 'text' && text !== null && text !== '') {
+          events.push({ kind: 'text', blockId: nextBlockId(messageId), text });
+        } else if (block['type'] === 'tool_use') {
+          const toolId = str(block['id']) ?? nextBlockId(null);
+          const name = str(block['name']);
+          if (name !== null) {
+            events.push({ kind: 'tool-use', toolId, name, input: prettyJson(block['input']) });
+          }
+        }
+      }
+    }
+    if (Array.isArray(message['tool_calls'])) {
+      for (const call of message['tool_calls']) {
+        if (!isRecord(call)) continue;
+        const fn = isRecord(call['function']) ? call['function'] : null;
+        const name = str(fn?.['name']) ?? str(call['name']);
+        if (name === null) continue;
+        const toolId = str(call['id']) ?? nextBlockId(null);
+        const argsRaw = fn?.['arguments'] ?? call['arguments'];
+        const input = typeof argsRaw === 'string' ? argsRaw : prettyJson(argsRaw);
+        events.push({ kind: 'tool-use', toolId, name, input });
+      }
+    }
+    return events;
+  }
+
+  function fromToolRole(data: Json): ChatEvent[] {
+    const toolId = str(data['tool_call_id']) ?? str(data['tool_use_id']);
+    if (toolId === null) return [];
+    return [
+      {
+        kind: 'tool-result',
+        toolId,
+        output: toolOutput(data['content'] ?? data['output']),
+        isError: data['is_error'] === true,
+      },
+    ];
+  }
+
+  return {
+    parse(line) {
+      const data = decodeLine(line);
+      if (data === null) return [];
+      if (isRecord(data['part'])) return extractOpenCodeEvents(data) ?? [];
+      if (data['role'] === 'assistant') return fromMessage(data);
+      if (data['role'] === 'tool') return fromToolRole(data);
+
+      const sessionId =
+        str(data['session_id']) ?? str(data['conversation_id']) ?? str(data['thread_id']);
+      switch (data['type']) {
+        case 'system':
+          return sessionId !== null ? [{ kind: 'session', providerSessionId: sessionId }] : [];
+        case 'thread.started':
+          return sessionId !== null ? [{ kind: 'session', providerSessionId: sessionId }] : [];
+        case 'stream_event': {
+          const event = data['event'];
+          if (!isRecord(event)) return [];
+          if (event['type'] === 'message_start' && isRecord(event['message'])) {
+            messageId = str(event['message']['id']) ?? messageId;
+            return [];
+          }
+          if (event['type'] !== 'content_block_delta' || !isRecord(event['delta'])) return [];
+          const text = str(event['delta']['text']);
+          if (event['delta']['type'] !== 'text_delta' || text === null) return [];
+          return [{ kind: 'text-delta', blockId: nextBlockId(messageId), text }];
+        }
+        case 'assistant':
+          return isRecord(data['message']) ? fromMessage(data['message']) : fromMessage(data);
+        case 'user':
+          return extractToolResults(isRecord(data['message']) ? data['message'] : data);
+        case 'item.started':
+        case 'item.completed':
+          return codexParser.parse(line);
+        case 'result': {
+          if (emittedDone) return [];
+          emittedDone = true;
+          const isError = data['is_error'] === true;
+          const done: ChatEvent = {
+            kind: 'done',
+            isError,
+            costUsd: num(data['total_cost_usd']),
+            durationMs: num(data['duration_ms']),
+          };
+          const errMsg =
+            str(data['result']) ?? str(data['error']) ?? `${options.fallbackLabel} failed`;
+          return isError ? [{ kind: 'error', message: errMsg }, done] : [done];
+        }
+        case 'error': {
+          const err = isRecord(data['error']) ? data['error'] : null;
+          const message =
+            str(err?.['message']) ?? str(data['message']) ?? `${options.fallbackLabel} failed`;
+          return [{ kind: 'error', message }];
+        }
+        default: {
+          if (sessionId !== null && data['event'] === 'init') {
+            return [{ kind: 'session', providerSessionId: sessionId }];
+          }
+          return [];
+        }
+      }
+    },
+  };
+}
+
 export function createChatParser(provider: ProviderId, options: { turnId: string }): ChatParser {
   const prefix = `${options.turnId}:`;
   switch (provider) {
@@ -328,5 +542,21 @@ export function createChatParser(provider: ProviderId, options: { turnId: string
       return createGeminiParser(prefix);
     case 'codex':
       return createCodexParser(prefix);
+    case 'deepseek':
+      return createStreamAgentParser(prefix, {
+        fallbackLabel: 'DeepSeek',
+        initialBlockPrefix: 'deepseek',
+      });
+    case 'kimi':
+      return createStreamAgentParser(prefix, { fallbackLabel: 'Kimi', initialBlockPrefix: 'kimi' });
+    case 'grok':
+      return createStreamAgentParser(prefix, { fallbackLabel: 'Grok', initialBlockPrefix: 'grok' });
+    case 'qwen':
+      return createStreamAgentParser(prefix, { fallbackLabel: 'Qwen', initialBlockPrefix: 'qwen' });
+    case 'opencode':
+      return createStreamAgentParser(prefix, {
+        fallbackLabel: 'OpenCode',
+        initialBlockPrefix: 'opencode',
+      });
   }
 }

@@ -148,17 +148,28 @@ a:hover {
 
 .warning {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  text-align: center;
-  background: color-mix(in srgb, var(--error) 12%, transparent);
-  border: 1px solid var(--error);
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--error) 55%, var(--border));
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   color: var(--text);
-  border-radius: 8px;
-  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 13px;
   cursor: pointer;
+}
+
+.warning-icon {
+  flex: none;
+  display: inline-flex;
+  color: var(--error);
 }
 
 .hint {
@@ -166,11 +177,4 @@ a:hover {
   color: var(--muted);
   padding: 8px 24px;
   margin: 0;
-}
-
-.terminal-host {
-  flex: 1;
-  min-height: 0;
-  padding: 12px 16px;
-  background: var(--code-bg);
 }

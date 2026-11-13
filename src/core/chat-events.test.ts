@@ -132,83 +132,132 @@ describe('claude parser', () => {
 });
 
 describe('gemini parser', () => {
-  it('maps the fixture', () => {
-    const events = parseFixture('gemini', 'gemini-stream.jsonl');
+  it('maps the agy fixture', () => {
+    const events = parseFixture('gemini', 'agy-stream.jsonl');
     expect(events).toEqual([
       { kind: 'session', providerSessionId: '00000000-0000-4000-8000-000000000001' },
       { kind: 'text-delta', blockId: 't1:gemini-1', text: 'Here is a **short** ' },
-      { kind: 'text', blockId: 't1:gemini-1', text: 'Here is a **short** ' },
+      { kind: 'text-delta', blockId: 't1:gemini-1', text: 'answer.' },
+      { kind: 'text', blockId: 't1:gemini-1', text: 'Here is a **short** answer.' },
       {
         kind: 'tool-use',
-        toolId: 't1:run_shell_command-1',
-        name: 'run_shell_command',
-        input: JSON.stringify({ command: 'ls' }, null, 2),
+        toolId: 't1:step-2',
+        name: 'run_command',
+        input: JSON.stringify({ CommandLine: 'ls' }, null, 2),
       },
       {
         kind: 'tool-result',
-        toolId: 't1:run_shell_command-1',
+        toolId: 't1:step-2',
         output: 'README.md',
         isError: false,
       },
-      { kind: 'error', message: 'example warning' },
-      { kind: 'done', isError: false, costUsd: null, durationMs: null },
+      { kind: 'done', isError: false, costUsd: null, durationMs: 2500 },
     ]);
   });
 
-  it('emits text for non-delta assistant messages and failures for error results', () => {
+  it('emits fallback response text when result arrives without streamed deltas and handles error results', () => {
     const parser = createChatParser('gemini', { turnId: 't1' });
     expect(
-      parser.parse(JSON.stringify({ type: 'message', role: 'assistant', content: 'hi' })),
-    ).toEqual([{ kind: 'text', blockId: 't1:gemini-1', text: 'hi' }]);
+      parser.parse(
+        JSON.stringify({
+          event: 'result',
+          result: { status: 'SUCCESS', response: 'hi', duration_seconds: 0.42 },
+        }),
+      ),
+    ).toEqual([
+      { kind: 'text', blockId: 't1:gemini-1', text: 'hi' },
+      { kind: 'done', isError: false, costUsd: null, durationMs: 420 },
+    ]);
+    const failing = createChatParser('gemini', { turnId: 't2' });
     expect(
-      parser.parse(JSON.stringify({ type: 'result', status: 'error', error: { message: 'bad' } })),
+      failing.parse(
+        JSON.stringify({
+          event: 'result',
+          result: { status: 'ERROR', error: 'bad', duration_seconds: 1.5 },
+        }),
+      ),
     ).toEqual([
       { kind: 'error', message: 'bad' },
-      { kind: 'done', isError: true, costUsd: null, durationMs: null },
+      { kind: 'done', isError: true, costUsd: null, durationMs: 1500 },
     ]);
   });
 
-  it('buffers deltas and emits the full text when the block ends', () => {
+  it('buffers deltas and flushes the full text when result arrives without DONE step_update', () => {
     const parser = createChatParser('gemini', { turnId: 't1' });
-    const delta = (content: string): string =>
-      JSON.stringify({ type: 'message', role: 'assistant', content, delta: true });
+    const delta = (text_delta: string): string =>
+      JSON.stringify({
+        event: 'step_update',
+        step_update: { step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta },
+      });
     expect(parser.parse(delta('Hel'))).toEqual([
       { kind: 'text-delta', blockId: 't1:gemini-1', text: 'Hel' },
     ]);
     expect(parser.parse(delta('lo'))).toEqual([
       { kind: 'text-delta', blockId: 't1:gemini-1', text: 'lo' },
     ]);
-    const result = parser.parse(JSON.stringify({ type: 'result', status: 'success', stats: {} }));
-    expect(result).toEqual([
+    expect(
+      parser.parse(JSON.stringify({ event: 'result', result: { status: 'SUCCESS' } })),
+    ).toEqual([
       { kind: 'text', blockId: 't1:gemini-1', text: 'Hello' },
       { kind: 'done', isError: false, costUsd: null, durationMs: null },
     ]);
   });
 
-  it('flushes buffered text before a following error', () => {
+  it('flushes buffered text before AGY_ERROR and avoids duplicating on trailing error result', () => {
     const parser = createChatParser('gemini', { turnId: 't1' });
-    parser.parse(JSON.stringify({ type: 'message', role: 'assistant', content: 'a', delta: true }));
-    expect(parser.parse(JSON.stringify({ type: 'error', message: 'x' }))).toEqual([
+    parser.parse(
+      JSON.stringify({
+        event: 'step_update',
+        step_update: {
+          step_index: 1,
+          state: 'ACTIVE',
+          step_type: 'agent_response',
+          text_delta: 'a',
+        },
+      }),
+    );
+    expect(parser.parse('AGY_ERROR: {"short_error":"RESOURCE_EXHAUSTED (code 429)"}')).toEqual([
       { kind: 'text', blockId: 't1:gemini-1', text: 'a' },
-      { kind: 'error', message: 'x' },
+      { kind: 'error', message: 'RESOURCE_EXHAUSTED (code 429)' },
     ]);
+    expect(
+      parser.parse(
+        JSON.stringify({ event: 'result', result: { status: 'ERROR', error: 'ignored-dup' } }),
+      ),
+    ).toEqual([{ kind: 'done', isError: true, costUsd: null, durationMs: null }]);
   });
 
   it('starts a new block after a tool call', () => {
     const parser = createChatParser('gemini', { turnId: 't1' });
-    const delta = (content: string): string =>
-      JSON.stringify({ type: 'message', role: 'assistant', content, delta: true });
-    parser.parse(delta('a'));
-    parser.parse(JSON.stringify({ type: 'tool_use', tool_id: 'x', tool_name: 'n' }));
-    expect(parser.parse(delta('b'))).toEqual([
-      { kind: 'text-delta', blockId: 't1:gemini-3', text: 'b' },
+    const delta = (step_index: number, text_delta: string): string =>
+      JSON.stringify({
+        event: 'step_update',
+        step_update: { step_index, state: 'ACTIVE', step_type: 'agent_response', text_delta },
+      });
+    parser.parse(delta(1, 'a'));
+    parser.parse(
+      JSON.stringify({
+        event: 'step_update',
+        step_update: {
+          step_index: 2,
+          state: 'ACTIVE',
+          step_type: 'tool',
+          tool_name: 'run_command',
+        },
+      }),
+    );
+    expect(parser.parse(delta(3, 'b'))).toEqual([
+      { kind: 'text-delta', blockId: 't1:gemini-2', text: 'b' },
     ]);
   });
 
   it('keeps block ids distinct across turns', () => {
     const first = createChatParser('gemini', { turnId: 'a' });
     const second = createChatParser('gemini', { turnId: 'b' });
-    const line = JSON.stringify({ type: 'message', role: 'assistant', content: 'x' });
+    const line = JSON.stringify({
+      event: 'step_update',
+      step_update: { step_index: 1, state: 'ACTIVE', step_type: 'agent_response', text_delta: 'x' },
+    });
     expect(first.parse(line)).not.toEqual(second.parse(line));
   });
 });
@@ -250,11 +299,74 @@ describe('codex parser', () => {
   });
 });
 
-describe('garbage input', () => {
-  it.each(['claude', 'codex', 'gemini'] as const)('returns [] for %s', (provider) => {
-    const parser = createChatParser(provider, { turnId: 't1' });
-    for (const line of ['', '   ', 'not json', '[]', '42', 'null', '{"type":"nope"}', '{"a":1}']) {
-      expect(parser.parse(line)).toEqual([]);
-    }
+describe('extra providers parsers', () => {
+  it('parses kimi, grok, qwen, deepseek, and opencode streams', () => {
+    const kimi = createChatParser('kimi', { turnId: 't1' });
+    expect(
+      kimi.parse(
+        JSON.stringify({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Oi' }],
+          tool_calls: [{ id: 'c1', function: { name: 'Bash', arguments: '{"cmd":"ls"}' } }],
+        }),
+      ),
+    ).toEqual([
+      { kind: 'text', blockId: 't1:kimi-1', text: 'Oi' },
+      { kind: 'tool-use', toolId: 'c1', name: 'Bash', input: '{"cmd":"ls"}' },
+    ]);
+    expect(kimi.parse(JSON.stringify({ role: 'tool', tool_call_id: 'c1', content: 'ok' }))).toEqual(
+      [{ kind: 'tool-result', toolId: 'c1', output: 'ok', isError: false }],
+    );
+
+    const oc = createChatParser('opencode', { turnId: 't2' });
+    expect(
+      oc.parse(JSON.stringify({ type: 'text', sessionID: 's-oc', part: { id: 'p1', text: 'Hi' } })),
+    ).toEqual([
+      { kind: 'session', providerSessionId: 's-oc' },
+      { kind: 'text', blockId: 'p1', text: 'Hi' },
+    ]);
+    expect(
+      oc.parse(
+        JSON.stringify({
+          type: 'step_finish',
+          sessionID: 's-oc',
+          part: { reason: 'stop', cost: 0.02 },
+        }),
+      ),
+    ).toEqual([{ kind: 'done', isError: false, costUsd: 0.02, durationMs: null }]);
+
+    const ds = createChatParser('deepseek', { turnId: 't3' });
+    expect(ds.parse(JSON.stringify({ type: 'thread.started', thread_id: 'th1' }))).toEqual([
+      { kind: 'session', providerSessionId: 'th1' },
+    ]);
+    expect(
+      ds.parse(
+        JSON.stringify({
+          type: 'item.completed',
+          item: { id: 'm1', type: 'agent_message', text: 'Pronto' },
+        }),
+      ),
+    ).toEqual([{ kind: 'text', blockId: 't3:m1', text: 'Pronto' }]);
   });
+});
+
+describe('garbage input', () => {
+  it.each(['claude', 'codex', 'gemini', 'deepseek', 'kimi', 'grok', 'qwen', 'opencode'] as const)(
+    'returns [] for %s',
+    (provider) => {
+      const parser = createChatParser(provider, { turnId: 't1' });
+      for (const line of [
+        '',
+        '   ',
+        'not json',
+        '[]',
+        '42',
+        'null',
+        '{"type":"nope"}',
+        '{"a":1}',
+      ]) {
+        expect(parser.parse(line)).toEqual([]);
+      }
+    },
+  );
 });

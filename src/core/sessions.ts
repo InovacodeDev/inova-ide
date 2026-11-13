@@ -1,11 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { isEffortLevel } from './models.js';
 import { loadStore, saveStore } from './store.js';
 import type { Session, Store, Workspace } from './types.js';
 
 type SessionErrorCode =
-  'project-not-found' | 'parent-not-found' | 'not-found' | 'invalid-title' | 'invalid-workspace';
+  | 'project-not-found'
+  | 'parent-not-found'
+  | 'not-found'
+  | 'invalid-title'
+  | 'invalid-model'
+  | 'invalid-effort'
+  | 'invalid-workspace';
 
 const MAX_TITLE_LENGTH = 200;
+const MAX_MODEL_LENGTH = 200;
 const MAX_OPEN_SESSIONS = 50;
 
 export class SessionError extends Error {
@@ -111,6 +119,15 @@ function normalizeTitle(title: string): string {
   return trimmed;
 }
 
+function normalizeModel(model: string | null): string | null {
+  if (model === null) return null;
+  const trimmed = model.trim();
+  if (trimmed === '' || trimmed.length > MAX_MODEL_LENGTH) {
+    throw new SessionError('invalid-model', `Model must have 1 to ${MAX_MODEL_LENGTH} characters`);
+  }
+  return trimmed;
+}
+
 export async function createSession(ctx: {
   root: string;
   projectId: string;
@@ -136,6 +153,8 @@ export async function createSession(ctx: {
     parentId,
     title: ctx.title ?? (parentId === null ? 'Nova sessão' : 'Subsessão'),
     providerSessionId: null,
+    model: null,
+    effort: null,
     createdAt: timestamp,
     updatedAt: timestamp,
     archivedAt: null,
@@ -157,15 +176,24 @@ export async function getSession(ctx: { root: string; sessionId: string }): Prom
 export async function updateSession(ctx: {
   root: string;
   sessionId: string;
-  patch: Partial<Pick<Session, 'title' | 'providerSessionId'>> & { archived?: boolean };
+  patch: Partial<Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort'>> & {
+    archived?: boolean;
+  };
   now?: () => Date;
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
   const session = requireSession(store, ctx.sessionId);
-  const { title, providerSessionId, archived } = ctx.patch;
+  const { title, providerSessionId, model, effort, archived } = ctx.patch;
   const timestamp = (ctx.now?.() ?? new Date()).toISOString();
   if (title !== undefined) session.title = normalizeTitle(title);
   if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
+  if (model !== undefined) session.model = normalizeModel(model);
+  if (effort !== undefined) {
+    if (effort !== null && !isEffortLevel(effort)) {
+      throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);
+    }
+    session.effort = effort;
+  }
   if (archived !== undefined) {
     const affected = descendantIds(store, session.id);
     for (const item of sessionsOf(store)) {

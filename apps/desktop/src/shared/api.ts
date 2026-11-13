@@ -1,6 +1,7 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
-import type { ProviderId, Session, Workspace } from '@inova/core/types';
+import type { ProviderModels } from '@inova/core/models';
+import type { EffortLevel, ProviderId, Session, Workspace } from '@inova/core/types';
 
 export type SessionView = Session;
 
@@ -11,6 +12,7 @@ export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 export interface AccountView {
   id: string;
   label: string;
+  email: string | null;
   provider: ProviderId;
   status: AuthStatus;
 }
@@ -19,12 +21,25 @@ export interface ProjectView {
   id: string;
   path: string;
   accountLabel: string;
+  accountEmail: string | null;
   provider: ProviderId;
 }
 
-export interface OpenedSession {
+export type LoginStage =
+  'starting' | 'waiting-auth' | 'verifying' | 'succeeded' | 'failed' | 'canceled';
+
+export interface LoginEvent {
   sessionId: string;
-  title: string;
+  stage: LoginStage;
+  authUrl: string | null;
+  codePrompt: boolean;
+  message: string | null;
+}
+
+export interface StartedLogin {
+  sessionId: string;
+  accountLabel: string;
+  provider: ProviderId;
 }
 
 export interface InovaApi {
@@ -44,6 +59,8 @@ export interface InovaApi {
     sessionId: string;
     title?: string;
     archived?: boolean;
+    model?: string | null;
+    effort?: EffortLevel | null;
   }): Promise<Result<SessionView>>;
   deleteSession(input: { sessionId: string }): Promise<Result<null>>;
   getWorkspace(): Promise<Result<WorkspaceView>>;
@@ -52,17 +69,12 @@ export interface InovaApi {
   sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
+  listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
-  openLogin(input: {
-    accountLabel: string;
-    cols: number;
-    rows: number;
-  }): Promise<Result<OpenedSession>>;
-  ptyWrite(sessionId: string, data: string): void;
-  ptyResize(input: { sessionId: string; cols: number; rows: number }): void;
-  ptyClose(sessionId: string): void;
-  onPtyData(cb: (e: { sessionId: string; data: string }) => void): () => void;
-  onPtyExit(cb: (e: { sessionId: string; exitCode: number }) => void): () => void;
+  startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
+  submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
+  cancelLogin(sessionId: string): void;
+  onLoginEvent(cb: (e: LoginEvent) => void): () => void;
 }
 
 export const CHANNELS = {
@@ -83,13 +95,12 @@ export const CHANNELS = {
   sendMessage: 'inova:sendMessage',
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
+  listModels: 'inova:listModels',
   chatEvent: 'inova:chat:event',
-  openLogin: 'inova:openLogin',
-  ptyWrite: 'inova:pty:write',
-  ptyResize: 'inova:pty:resize',
-  ptyClose: 'inova:pty:close',
-  ptyData: 'inova:pty:data',
-  ptyExit: 'inova:pty:exit',
+  startLogin: 'inova:startLogin',
+  submitLoginCode: 'inova:submitLoginCode',
+  cancelLogin: 'inova:cancelLogin',
+  loginEvent: 'inova:login:event',
 } as const;
 
 declare global {

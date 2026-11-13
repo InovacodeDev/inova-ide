@@ -1,5 +1,6 @@
+import { useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
-import { CloseIcon, FolderIcon } from './icons';
+import { CloseIcon, FolderIcon, PencilIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import { STATUS_LABEL, type SessionStatus } from './session-status';
@@ -7,26 +8,109 @@ import './session.css';
 
 interface SessionHeaderProps {
   title: string;
+  kind?: 'session' | 'subsession';
+  sectionName?: string | null;
+  parentTitle?: string | null;
   provider: ProviderId | null;
-  accountLabel: string | null;
+  accountDisplay: string | null;
   path: string | null;
   status: SessionStatus | null;
   exited?: boolean;
+  onRename?: (title: string) => void;
   onClose: () => void;
 }
 
 export function SessionHeader(props: SessionHeaderProps) {
-  const { title, provider, accountLabel, path, status, exited, onClose } = props;
+  const {
+    title,
+    kind = 'session',
+    sectionName = null,
+    parentTitle = null,
+    provider,
+    accountDisplay,
+    path,
+    status,
+    exited,
+    onRename,
+    onClose,
+  } = props;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const settledRef = useRef(false);
+
+  const startEdit = () => {
+    settledRef.current = false;
+    setDraft(title);
+    setEditing(true);
+  };
+
+  const finishEdit = (save: boolean) => {
+    if (settledRef.current) return;
+    settledRef.current = true;
+    const next = draft.trim();
+    setEditing(false);
+    if (save && next !== '' && next !== title) onRename?.(next);
+  };
+
   return (
     <div className="session-header">
       <div className="session-header-main">
-        <h1 className="session-header-title">{title}</h1>
+        <div className="session-header-hierarchy">
+          <span
+            className={
+              kind === 'subsession'
+                ? 'session-kind-pill session-kind-pill-sub'
+                : 'session-kind-pill'
+            }
+          >
+            {kind === 'subsession' ? 'Subsessão' : 'Sessão'}
+          </span>
+          {sectionName ? <span className="session-header-crumb">Seção: {sectionName}</span> : null}
+          {kind === 'subsession' && parentTitle ? (
+            <span className="session-header-crumb">Sessão pai: {parentTitle}</span>
+          ) : null}
+        </div>
+        {editing ? (
+          <input
+            className="session-header-rename"
+            aria-label={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
+            value={draft}
+            autoFocus
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => finishEdit(true)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') finishEdit(true);
+              if (event.key === 'Escape') finishEdit(false);
+            }}
+          />
+        ) : (
+          <div className="session-header-title-row">
+            <h1
+              className="session-header-title"
+              onDoubleClick={onRename ? startEdit : undefined}
+              title={onRename ? 'Clique duas vezes para renomear' : undefined}
+            >
+              {title}
+            </h1>
+            {onRename ? (
+              <button
+                type="button"
+                className="session-header-edit"
+                aria-label={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
+                title="Renomear"
+                onClick={startEdit}
+              >
+                <PencilIcon size={14} />
+              </button>
+            ) : null}
+          </div>
+        )}
         <div className="session-header-meta">
           {provider ? (
             <span className="session-header-item">
               <ProviderBadge provider={provider} size={18} />
               {PROVIDER_NAME[provider]}
-              {accountLabel !== null ? ` · ${accountLabel}` : ''}
+              {accountDisplay !== null ? ` · ${accountDisplay}` : ''}
             </span>
           ) : null}
           {path ? (
@@ -51,8 +135,8 @@ export function SessionHeader(props: SessionHeaderProps) {
       <button
         type="button"
         className="icon-btn"
-        aria-label="Fechar sessão"
-        title="Fechar sessão"
+        aria-label={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+        title={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
         onClick={onClose}
       >
         <CloseIcon />

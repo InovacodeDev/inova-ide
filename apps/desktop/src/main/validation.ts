@@ -1,20 +1,17 @@
 import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
+import { isEffortLevel } from '@inova/core/models';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
 import { SessionError } from '@inova/core/sessions';
 import { StoreCorruptError } from '@inova/core/store';
-import type { Account, ProviderId, Store } from '@inova/core/types';
+import type { Account, EffortLevel, ProviderId, Store } from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
 import type { Result } from '../shared/api.js';
 
-export interface Size {
-  cols: number;
-  rows: number;
-}
-
 const MAX_TEXT = 255;
 const MAX_PATH = 4096;
+const MAX_LOGIN_CODE = 512;
 const MAX_PROMPT = 100_000;
 const MAX_WORKSPACE_INPUT = 1000;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
@@ -41,11 +38,6 @@ function isText(value: unknown): value is string {
 
 function isPath(value: unknown): value is string {
   return isBoundedString(value, MAX_PATH) && isAbsolute(value);
-}
-
-function parseSize(input: Record<string, unknown>): Size | undefined {
-  const { cols, rows } = input;
-  return typeof cols === 'number' && typeof rows === 'number' ? { cols, rows } : undefined;
 }
 
 export function parseNewAccount(
@@ -106,18 +98,37 @@ export function parseSessionRef(input: unknown): { sessionId: string } | undefin
     : undefined;
 }
 
-export function parseSessionUpdate(
-  input: unknown,
-): { sessionId: string; title?: string; archived?: boolean } | undefined {
+export interface SessionUpdateInput {
+  sessionId: string;
+  title?: string;
+  archived?: boolean;
+  model?: string | null;
+  effort?: EffortLevel | null;
+}
+
+export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
-  const { sessionId, title, archived } = input;
-  if (title === undefined && archived === undefined) return undefined;
+  const { sessionId, title, archived, model, effort } = input;
+  if (
+    title === undefined &&
+    archived === undefined &&
+    model === undefined &&
+    effort === undefined
+  ) {
+    return undefined;
+  }
   if (title !== undefined && !isText(title)) return undefined;
   if (archived !== undefined && typeof archived !== 'boolean') return undefined;
+  if (model !== undefined && model !== null) {
+    if (!isText(model) || model.trim() === '') return undefined;
+  }
+  if (effort !== undefined && effort !== null && !isEffortLevel(effort)) return undefined;
   return {
     sessionId,
     ...(title === undefined ? {} : { title }),
     ...(archived === undefined ? {} : { archived }),
+    ...(model === undefined ? {} : { model }),
+    ...(effort === undefined ? {} : { effort }),
   };
 }
 
@@ -147,10 +158,11 @@ export function parseUsageRequest(input: unknown): { accountLabel: string } | un
     : undefined;
 }
 
-export function parseLoginLaunch(input: unknown): ({ accountLabel: string } & Size) | undefined {
-  if (!isRecord(input) || !isText(input['accountLabel'])) return undefined;
-  const size = parseSize(input);
-  return size && { accountLabel: input['accountLabel'], ...size };
+export function parseLoginCode(input: unknown): { sessionId: string; code: string } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const code = typeof input['code'] === 'string' ? input['code'].trim() : '';
+  if (code === '' || code.length > MAX_LOGIN_CODE) return undefined;
+  return { sessionId: input['sessionId'], code };
 }
 
 export function requireAccount(store: Store, label: string): Account {
@@ -182,6 +194,10 @@ function sessionMessage(error: SessionError): string {
       return 'Sessão não encontrada.';
     case 'invalid-title':
       return 'O título deve ter de 1 a 200 caracteres.';
+    case 'invalid-model':
+      return 'O modelo deve ter de 1 a 200 caracteres.';
+    case 'invalid-effort':
+      return 'Nível de esforço inválido.';
     case 'invalid-workspace':
       return 'Área de trabalho inválida.';
   }

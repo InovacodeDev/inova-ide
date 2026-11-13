@@ -88,7 +88,7 @@ function windowsOf(value: unknown): UsageWindow[] | undefined {
   for (const item of value as unknown[]) {
     if (!isJson(item)) return undefined;
     const { kind, usedPercent, resetsAt } = item;
-    if (kind !== 'session' && kind !== 'weekly') return undefined;
+    if (kind !== 'session' && kind !== 'weekly' && kind !== 'monthly') return undefined;
     if (typeof usedPercent !== 'number') return undefined;
     if (resetsAt !== null && typeof resetsAt !== 'string') return undefined;
     windows.push({ kind, usedPercent, resetsAt });

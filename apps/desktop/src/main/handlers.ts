@@ -5,8 +5,15 @@ import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
 import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
+import {
+  PROVIDER_MODELS,
+  isEffortSupported,
+  parseAgyModelsOutput,
+  parseOpenCodeModelsOutput,
+} from '@inova/core/models';
+import type { ProviderModels } from '@inova/core/models';
 import { PathNotFoundError, bindProject, realPathOf, unbindProject } from '@inova/core/projects';
-import { providers } from '@inova/core/providers';
+import { providers, readAccountEmail } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
 import {
   SessionError,
@@ -21,9 +28,10 @@ import { loadStore } from '@inova/core/store';
 import type { Account, ProviderId, Session, Store, Workspace } from '@inova/core/types';
 import { UsageError, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
-import type { OpenedSession, ProjectView, AccountView, Result } from '../shared/api.js';
+import type { AccountView, LoginEvent, ProjectView, Result, StartedLogin } from '../shared/api.js';
 import { parseTranscriptLine } from './chat.js';
 import type { ChatRunner } from './chat.js';
+import { createLoginFlowManager } from './login-flow.js';
 import type { SessionManager } from './sessions.js';
 import { findBinary } from './shell-env.js';
 import {
@@ -31,7 +39,7 @@ import {
   guarded,
   ok,
   parseBinding,
-  parseLoginLaunch,
+  parseLoginCode,
   parseMessage,
   parseNewAccount,
   parseNewSession,
@@ -45,7 +53,6 @@ import {
   requireAccount,
   validated,
 } from './validation.js';
-import type { Size } from './validation.js';
 
 export interface HandlerDeps {
   root: string;
@@ -54,6 +61,7 @@ export interface HandlerDeps {
   chat: ChatRunner;
   usageDeps: UsageDeps;
   emit: (sessionId: string, event: ChatEvent) => void;
+  emitLogin?: (event: LoginEvent) => void;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
   pickFolder: () => Promise<string | null>;
 }
@@ -72,11 +80,15 @@ export function isExternalWebUrl(url: string): boolean {
   }
 }
 
-function projectView(project: { id: string; path: string }, account: Account): ProjectView {
+async function projectView(
+  project: { id: string; path: string },
+  account: Account,
+): Promise<ProjectView> {
   return {
     id: project.id,
     path: project.path,
     accountLabel: account.label,
+    accountEmail: await readAccountEmail(account),
     provider: account.provider,
   };
 }
@@ -126,6 +138,7 @@ export function createHandlers(deps: HandlerDeps) {
   const transcriptDir = join(deps.root, 'sessions');
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
+  const modelsCache = new Map<string, ProviderModels>();
   const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
   const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
   let storeQueue: Promise<unknown> = Promise.resolve();
@@ -227,12 +240,15 @@ export function createHandlers(deps: HandlerDeps) {
   async function accountView(account: Account): Promise<AccountView> {
     const baseEnv = await deps.baseEnv();
     const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
-    const status = await providers[account.provider].checkStatus({
-      homeDir: account.homeDir,
-      env,
-      runner: deps.runner,
-    });
-    return { id: account.id, label: account.label, provider: account.provider, status };
+    const [status, email] = await Promise.all([
+      providers[account.provider].checkStatus({
+        homeDir: account.homeDir,
+        env,
+        runner: deps.runner,
+      }),
+      readAccountEmail(account),
+    ]);
+    return { id: account.id, label: account.label, email, provider: account.provider, status };
   }
 
   async function savedAccountView(account: Account): Promise<AccountView> {
@@ -243,6 +259,7 @@ export function createHandlers(deps: HandlerDeps) {
         return {
           id: account.id,
           label: account.label,
+          email: await readAccountEmail(account),
           provider: account.provider,
           status: 'unknown',
         };
@@ -251,24 +268,38 @@ export function createHandlers(deps: HandlerDeps) {
     }
   }
 
-  async function startLogin(input: {
-    account: Account;
-    size: Size;
-  }): Promise<Result<OpenedSession>> {
-    const adapter = providers[input.account.provider];
+  const loginFlow = createLoginFlowManager({
+    sessions: deps.sessions,
+    emit: (event) => deps.emitLogin?.(event),
+    onAuthenticated: (accountId) => {
+      modelsCache.delete(accountId);
+    },
+    checkStatus: async ({ account, baseEnv }) => {
+      const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
+      try {
+        return await providers[account.provider].checkStatus({
+          homeDir: account.homeDir,
+          env,
+          runner: deps.runner,
+        });
+      } catch (error: unknown) {
+        if (error instanceof Error) return 'unknown';
+        throw error;
+      }
+    },
+  });
+
+  async function startAccountLogin(account: Account): Promise<Result<StartedLogin>> {
+    const adapter = providers[account.provider];
     const baseEnv = await deps.baseEnv();
     const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
     if (file === undefined) {
       return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
     }
-    const spec: LaunchSpec = buildLogin({ account: input.account, baseEnv });
-    const sessionId = deps.sessions.open({
-      spec,
-      file,
-      accountId: input.account.id,
-      ...input.size,
-    });
-    return ok({ sessionId, title: `login · ${input.account.label}` });
+    const spec: LaunchSpec = buildLogin({ account, baseEnv });
+    await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
+    const started = await loginFlow.start({ account, spec, file, baseEnv });
+    return ok(started);
   }
 
   async function runTurn(input: {
@@ -289,7 +320,7 @@ export function createHandlers(deps: HandlerDeps) {
       parent,
       claude: account.provider === 'claude',
     });
-    const persistNow = account.provider !== 'codex' && newId !== null;
+    const persistNow = account.provider === 'claude' && newId !== null;
     await updateSession({
       root: deps.root,
       sessionId,
@@ -304,6 +335,8 @@ export function createHandlers(deps: HandlerDeps) {
       prompt,
       turn,
       baseEnv: input.baseEnv,
+      model: session.model ?? null,
+      effort: session.effort ?? null,
     });
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
@@ -355,12 +388,13 @@ export function createHandlers(deps: HandlerDeps) {
     listProjects: (): Promise<Result<ProjectView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
-        return ok(
+        const views = await Promise.all(
           store.projects.flatMap((project) => {
             const account = store.accounts.find((item) => item.id === project.accountId);
             return account ? [projectView(project, account)] : [];
           }),
         );
+        return ok(views);
       }),
     pickFolder: (): Promise<string | null> => deps.pickFolder(),
     bindProject: (input: unknown): Promise<Result<ProjectView>> =>
@@ -368,7 +402,7 @@ export function createHandlers(deps: HandlerDeps) {
         serialized(async () => {
           const project = await bindProject({ root: deps.root, path, accountLabel });
           const account = requireAccount(await loadStore(deps.root), accountLabel);
-          return ok(projectView(project, account));
+          return ok(await projectView(project, account));
         }),
       ),
     unbindProject: (input: unknown): Promise<Result<null>> =>
@@ -401,18 +435,27 @@ export function createHandlers(deps: HandlerDeps) {
         serialized(async () => ok(await createSession({ root: deps.root, projectId, parentId }))),
       ),
     updateSession: (input: unknown): Promise<Result<Session>> =>
-      validated(input, parseSessionUpdate, ({ sessionId, title, archived }) =>
+      validated(input, parseSessionUpdate, ({ sessionId, title, archived, model, effort }) =>
         serialized(async () => {
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
           if (archived === true) {
-            const store = await loadStore(deps.root);
-            requireSession(store, sessionId);
             if ([...descendantIds(store, sessionId)].some((id) => deps.chat.isRunning(id))) {
               return fail('Pare o turno em andamento antes de arquivar.');
+            }
+          }
+          if (effort !== undefined && effort !== null) {
+            const project = store.projects.find((item) => item.id === session.projectId);
+            const account = store.accounts.find((item) => item.id === project?.accountId);
+            if (account && !isEffortSupported(account.provider, effort)) {
+              return fail('Nível de esforço não suportado por este provedor.');
             }
           }
           const patch = {
             ...(title === undefined ? {} : { title }),
             ...(archived === undefined ? {} : { archived }),
+            ...(model === undefined ? {} : { model }),
+            ...(effort === undefined ? {} : { effort }),
           };
           return ok(await updateSession({ root: deps.root, sessionId, patch }));
         }),
@@ -468,7 +511,7 @@ export function createHandlers(deps: HandlerDeps) {
         if (file === undefined) {
           return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
         }
-        await adapter.prepareLaunch(account.homeDir);
+        await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
         return serialized(async () => {
           if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
           return runTurn({
@@ -495,10 +538,53 @@ export function createHandlers(deps: HandlerDeps) {
           return fail('Não foi possível ler o consumo.');
         }
       }),
-    openLogin: (input: unknown): Promise<Result<OpenedSession>> =>
-      validated(input, parseLoginLaunch, async ({ accountLabel, ...size }) => {
+    listModels: (input: unknown): Promise<Result<ProviderModels>> =>
+      validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
-        return startLogin({ account, size });
+        const cached = modelsCache.get(account.id);
+        if (cached) return ok(cached);
+        const fallback = PROVIDER_MODELS[account.provider];
+        if (account.provider !== 'gemini' && account.provider !== 'opencode') {
+          modelsCache.set(account.id, fallback);
+          return ok(fallback);
+        }
+        const baseEnv = await deps.baseEnv();
+        const adapter = providers[account.provider];
+        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        if (file === undefined) return ok(fallback);
+        await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
+        const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
+        try {
+          const result = await deps.runner.run({ command: file, args: ['models'], env });
+          if ('notFound' in result || result.exitCode !== 0) return ok(fallback);
+          const parsed =
+            account.provider === 'gemini'
+              ? parseAgyModelsOutput(result.stdout)
+              : parseOpenCodeModelsOutput(result.stdout);
+          if (parsed.length === 0) return ok(fallback);
+          const dynamicCatalog: ProviderModels = { ...fallback, models: parsed };
+          modelsCache.set(account.id, dynamicCatalog);
+          return ok(dynamicCatalog);
+        } catch (error: unknown) {
+          if (error instanceof Error) return ok(fallback);
+          throw error;
+        }
       }),
+    handlePtyData: (sessionId: string, chunk: string): void =>
+      loginFlow.handlePtyData(sessionId, chunk),
+    handlePtyExit: (sessionId: string, exitCode: number): Promise<void> =>
+      loginFlow.handlePtyExit(sessionId, exitCode),
+    startLogin: (input: unknown): Promise<Result<StartedLogin>> =>
+      validated(input, parseUsageRequest, async ({ accountLabel }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        return startAccountLogin(account);
+      }),
+    submitLoginCode: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseLoginCode, async ({ sessionId, code }) =>
+        loginFlow.submitCode({ sessionId, code })
+          ? ok(null)
+          : fail('Sessão de login não encontrada ou já encerrada.'),
+      ),
+    cancelLogin: (sessionId: string): void => loginFlow.cancel(sessionId),
   };
 }

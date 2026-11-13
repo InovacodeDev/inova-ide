@@ -1,29 +1,30 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import type { Session } from '@inova/core/types';
+import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
+import type { EffortLevel, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
 import { ChatView } from './ChatView';
+import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
 import { Footer, type UsageState } from './Footer';
 import { Header } from './Header';
+import { AlertIcon } from './icons';
+import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
-import { createPtyRouter } from './pty-buffer';
+import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
 import { sessionStatus } from './session-status';
 import { Sidebar, type View } from './Sidebar';
-import { TerminalView, type TerminalSize } from './TerminalView';
 import { tabsReducer, type Tab } from './tabs';
 import { useWarning } from './useWarning';
 import { restoreTabs, workspaceFromTabs, workspaceKey } from './workspace';
 
 const SAVE_DEBOUNCE_MS = 300;
-const DEFAULT_SIZE: TerminalSize = { cols: 120, rows: 32 };
-const GEMINI_HINT = 'No Gemini, escolha "Sign in with Google" e saia com /quit.';
 
 function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -49,12 +50,15 @@ export function App() {
   const [projects, setProjects] = useState<ProjectView[]>([]);
   const [sessions, setSessions] = useState<Record<string, Session[]>>({});
   const [usage, setUsage] = useState<Record<string, UsageState>>({});
+  const [modelsByAccount, setModelsByAccount] = useState<Record<string, ProviderModels>>({});
+  const loadingModelsRef = useRef<Set<string>>(new Set());
   const [view, setView] = useState<View>('workspace');
+  const [loginModal, setLoginModal] = useState<LoginModalState | null>(null);
+  const [pendingRemoveAccount, setPendingRemoveAccount] = useState<AccountView | null>(null);
+  const [pendingCloseTab, setPendingCloseTab] = useState<Tab | null>(null);
   const { warning, dismiss, guard, call } = useWarning();
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
-  const sizeRef = useRef<TerminalSize>(DEFAULT_SIZE);
-  const [router] = useState(createPtyRouter);
 
   const latest = useRef({ accounts, projects, sessions, chats });
   useEffect(() => {
@@ -110,6 +114,21 @@ export function App() {
     setUsage((current) => ({ ...current, [accountLabel]: next }));
   }, []);
 
+  const loadModels = useCallback(async (accountLabel: string) => {
+    if (loadingModelsRef.current.has(accountLabel)) return;
+    loadingModelsRef.current.add(accountLabel);
+    try {
+      const result = await window.inova.listModels({ accountLabel });
+      if (result.ok) {
+        setModelsByAccount((current) => ({ ...current, [accountLabel]: result.value }));
+      }
+    } catch (error: unknown) {
+      console.error('inova: unexpected renderer error', error);
+    } finally {
+      loadingModelsRef.current.delete(accountLabel);
+    }
+  }, []);
+
   const loadChat = useCallback(
     async (sessionId: string) => {
       const result = await call(() => window.inova.loadTranscript({ sessionId }));
@@ -147,12 +166,7 @@ export function App() {
   }, [reloadAccounts, reloadProjects, call, loadChat]);
 
   useEffect(() => {
-    if (
-      tabs.active !== null &&
-      tabs.tabs.some((t) => t.sessionId === tabs.active && t.kind === 'chat')
-    ) {
-      lastChatActive.current = tabs.active;
-    }
+    if (tabs.active !== null) lastChatActive.current = tabs.active;
     if (!persisting) return;
     const snapshot = workspaceFromTabs({ state: tabs, lastChatActive: lastChatActive.current });
     const key = workspaceKey(snapshot);
@@ -175,22 +189,30 @@ export function App() {
       if (!projectId) return;
       void reloadSessions(projectId);
       const project = knownProjects.find((candidate) => candidate.id === projectId);
-      if (project && project.provider !== 'gemini') void loadUsage(project.accountLabel);
+      if (project) void loadUsage(project.accountLabel);
     });
   }, [reloadSessions, loadUsage]);
 
   useEffect(() => {
-    const offData = window.inova.onPtyData(({ sessionId, data }) => router.data(sessionId, data));
-    const offExit = window.inova.onPtyExit(({ sessionId }) => {
-      router.exit(sessionId);
-      dispatch({ type: 'exited', sessionId });
-      void reloadAccounts();
+    return window.inova.onLoginEvent((event) => {
+      setLoginModal((current) => {
+        if (!current) return current;
+        if (current.sessionId !== null && current.sessionId !== event.sessionId) return current;
+        return {
+          ...current,
+          sessionId: event.sessionId,
+          stage: event.stage,
+          authUrl: event.authUrl ?? current.authUrl,
+          codePrompt: current.codePrompt || event.codePrompt,
+          message: event.message,
+        };
+      });
+      if (event.stage === 'succeeded') {
+        void reloadAccounts();
+        void reloadProjects();
+      }
     });
-    return () => {
-      offData();
-      offExit();
-    };
-  }, [router, reloadAccounts]);
+  }, [reloadAccounts, reloadProjects]);
 
   const openChatTab = async (session: Session, knownProject?: ProjectView) => {
     const project =
@@ -237,33 +259,48 @@ export function App() {
     }
   };
 
-  const openLogin = async (account: AccountView) => {
-    const result = await call(() =>
-      window.inova.openLogin({ accountLabel: account.label, ...sizeRef.current }),
-    );
-    if (!result) return;
-    const { sessionId, title } = result.value;
-    setView('workspace');
-    dispatch({
-      type: 'open',
-      tab: { sessionId, title, kind: 'login', provider: account.provider },
+  const startAccountLogin = async (account: AccountView) => {
+    setLoginModal({
+      sessionId: null,
+      provider: account.provider,
+      accountLabel: account.label,
+      accountEmail: account.email,
+      stage: 'starting',
+      authUrl: null,
+      codePrompt: false,
+      message: null,
     });
-    if (router.consumeExit(sessionId)) {
-      dispatch({ type: 'exited', sessionId });
-      void reloadAccounts();
+    let started: Awaited<ReturnType<typeof window.inova.startLogin>>;
+    try {
+      started = await window.inova.startLogin({ accountLabel: account.label });
+    } catch (error: unknown) {
+      console.error('inova: startLogin failed', error);
+      setLoginModal((current) =>
+        current?.accountLabel === account.label
+          ? { ...current, stage: 'failed', message: 'Erro inesperado ao iniciar autenticação.' }
+          : current,
+      );
+      return;
     }
+    if (!started.ok) {
+      setLoginModal((current) =>
+        current?.accountLabel === account.label
+          ? { ...current, stage: 'failed', message: started.message }
+          : current,
+      );
+      return;
+    }
+    const { sessionId } = started.value;
+    setLoginModal((current) =>
+      current && current.accountLabel === account.label && current.sessionId === null
+        ? { ...current, sessionId }
+        : current,
+    );
   };
 
   const closeTab = (tab: Tab) => {
-    if (tab.kind === 'chat') {
-      if (latest.current.chats[tab.sessionId]?.running) window.inova.cancelTurn(tab.sessionId);
-      dispatch({ type: 'close', sessionId: tab.sessionId });
-      return;
-    }
-    void guard(async () => window.inova.ptyClose(tab.sessionId));
-    router.close(tab.sessionId);
+    if (latest.current.chats[tab.sessionId]?.running) window.inova.cancelTurn(tab.sessionId);
     dispatch({ type: 'close', sessionId: tab.sessionId });
-    void reloadAccounts();
   };
 
   const dropSessions = (sessionIds: string[]) => {
@@ -294,6 +331,23 @@ export function App() {
     dispatch({ type: 'rename', sessionId: input.session.id, title: result.value.title });
   };
 
+  const updateSessionModelConfig = async (input: {
+    sessionId: string;
+    patch: { model?: string | null; effort?: EffortLevel | null };
+  }) => {
+    const result = await call(() =>
+      window.inova.updateSession({ sessionId: input.sessionId, ...input.patch }),
+    );
+    if (!result) return;
+    const updated = result.value;
+    setSessions((current) => ({
+      ...current,
+      [updated.projectId]: (current[updated.projectId] ?? []).map((item) =>
+        item.id === updated.id ? updated : item,
+      ),
+    }));
+  };
+
   const setArchived = async (input: { session: Session; archived: boolean }) => {
     const known = latest.current.sessions[input.session.projectId] ?? [];
     const result = await call(() =>
@@ -321,9 +375,7 @@ export function App() {
     if (session && input.prompt !== '') await sendMessage(session.id, input.prompt);
   };
 
-  const removeAccount = async (account: AccountView) => {
-    const message = `Remover a conta ${account.label}? Os projetos vinculados a ela serão desvinculados.`;
-    if (!confirm(message)) return;
+  const confirmRemoveAccount = async (account: AccountView) => {
     const result = await call(() =>
       window.inova.removeAccount({ label: account.label, force: true }),
     );
@@ -333,6 +385,15 @@ export function App() {
       .map((project) => project.id);
     dropSessions(sessionIdsOf(removedProjectIds));
     await Promise.all([reloadAccounts(), reloadProjects()]);
+  };
+
+  const accountDisplayOf = (project: ProjectView | undefined): string | null => {
+    if (!project) return null;
+    const matched = accounts.find((candidate) => candidate.label === project.accountLabel);
+    return accountDisplayName({
+      label: project.accountLabel,
+      email: matched?.email ?? project.accountEmail,
+    });
   };
 
   const archivedIds = new Set(
@@ -356,14 +417,27 @@ export function App() {
   };
 
   const activeSession = activeTab?.kind === 'chat' ? sessionById.get(activeTab.sessionId) : null;
+  const activeParentTitle = activeSession?.parentId
+    ? (sessionById.get(activeSession.parentId)?.title ?? null)
+    : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
+  const activeAccountLabel = activeProject?.accountLabel ?? null;
+
+  useEffect(() => {
+    if (activeAccountLabel && !modelsByAccount[activeAccountLabel]) {
+      void loadModels(activeAccountLabel);
+    }
+  }, [activeAccountLabel, modelsByAccount, loadModels]);
 
   return (
     <div className="app">
       {warning && (
         <div className="warning" role="alert" onClick={dismiss}>
-          {warning}
+          <span className="warning-icon" aria-hidden="true">
+            <AlertIcon size={16} />
+          </span>
+          <span>{warning}</span>
         </div>
       )}
       <Header runningCount={Object.values(chats).filter((chat) => chat.running).length} />
@@ -371,15 +445,11 @@ export function App() {
         <Sidebar
           view={view}
           onNavigate={setView}
+          accounts={accounts}
           projects={projects}
           sessions={sessions}
           activeSessionId={inWorkspace ? tabs.active : null}
           statusOf={(sessionId) => sessionStatus(chats[sessionId])}
-          loginTabs={tabs.tabs.filter((tab) => tab.kind === 'login')}
-          onActivateLogin={(sessionId) => {
-            setView('workspace');
-            dispatch({ type: 'activate', sessionId });
-          }}
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
           onUnbind={async (project) => {
@@ -402,7 +472,9 @@ export function App() {
                   sessionId: tab.sessionId,
                   title: tab.title,
                   provider: tab.provider,
-                  where: project ? `${folderName(project.path)} · ${project.accountLabel}` : '',
+                  where: project
+                    ? `${folderName(project.path)} · ${accountDisplayOf(project)}`
+                    : '',
                   status: sessionStatus(chats[tab.sessionId]),
                   tail: agentTail({ items: chats[tab.sessionId]?.items ?? [], lines: 3 }),
                 };
@@ -419,9 +491,17 @@ export function App() {
               accounts={accounts}
               projects={projects}
               usage={usage}
+              loggingInLabel={
+                loginModal &&
+                (loginModal.stage === 'starting' ||
+                  loginModal.stage === 'waiting-auth' ||
+                  loginModal.stage === 'verifying')
+                  ? loginModal.accountLabel
+                  : null
+              }
               onLoadUsage={(account) => void loadUsage(account.label)}
-              onLogin={(account) => void openLogin(account)}
-              onRemove={(account) => void removeAccount(account)}
+              onLogin={(account) => void startAccountLogin(account)}
+              onRemove={(account) => setPendingRemoveAccount(account)}
               onAddAccount={async (input) => {
                 const result = await call(() => window.inova.addAccount(input));
                 if (!result) return false;
@@ -443,52 +523,62 @@ export function App() {
           <div className="main-content" style={inWorkspace ? undefined : { display: 'none' }}>
             {activeTab ? (
               <SessionHeader
+                key={activeTab.sessionId}
                 title={activeTab.title}
+                kind={activeSession?.parentId ? 'subsession' : 'session'}
+                sectionName={activeProject ? folderName(activeProject.path) : null}
+                parentTitle={activeParentTitle}
                 provider={activeTab.provider}
-                accountLabel={activeProject?.accountLabel ?? null}
+                accountDisplay={accountDisplayOf(activeProject)}
                 path={activeProject?.path ?? null}
                 status={
                   activeTab.kind === 'chat' ? sessionStatus(chats[activeTab.sessionId]) : null
                 }
                 exited={activeTab.exited}
-                onClose={() => closeTab(activeTab)}
+                onRename={
+                  activeSession
+                    ? (title) => void renameSession({ session: activeSession, title })
+                    : undefined
+                }
+                onClose={() => {
+                  if (chats[activeTab.sessionId]?.running) setPendingCloseTab(activeTab);
+                  else closeTab(activeTab);
+                }}
               />
             ) : (
               <p className="hint">Nenhuma sessão aberta. Escolha uma sessão ou crie uma nova.</p>
             )}
-            {activeTab?.kind === 'login' &&
-              activeTab.provider === 'gemini' &&
-              !activeTab.exited && <p className="hint">{GEMINI_HINT}</p>}
-            {tabs.tabs.map((tab) =>
-              tab.kind === 'chat' ? (
+            {tabs.tabs.map((tab) => {
+              const tabSession = sessionById.get(tab.sessionId);
+              const tabProject = projectOf(tab.sessionId);
+              const tabCatalog =
+                (tabProject ? modelsByAccount[tabProject.accountLabel] : undefined) ??
+                PROVIDER_MODELS[tab.provider ?? 'claude'];
+              return (
                 <ChatView
                   key={tab.sessionId}
                   state={chats[tab.sessionId] ?? initialChatState}
                   visible={inWorkspace && tab.sessionId === tabs.active}
                   provider={tab.provider}
-                  accountLabel={projectOf(tab.sessionId)?.accountLabel ?? null}
+                  accountDisplay={accountDisplayOf(tabProject)}
+                  model={tabSession?.model ?? null}
+                  effort={tabSession?.effort ?? null}
+                  catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
+                  onChangeModelConfig={(patch) =>
+                    void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
+                  }
                   onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
-              ) : (
-                <TerminalView
-                  key={tab.sessionId}
-                  sessionId={tab.sessionId}
-                  visible={inWorkspace && tab.sessionId === tabs.active}
-                  exited={tab.exited}
-                  attach={router.attach}
-                  onSize={(size) => {
-                    sizeRef.current = size;
-                  }}
-                />
-              ),
-            )}
+              );
+            })}
           </div>
         </main>
         {inWorkspace && activeSession && activeProject && (
           <SessionDetails
             session={activeSession}
+            parentTitle={activeParentTitle}
             project={activeProject}
             account={accounts.find((account) => account.label === activeProject.accountLabel)}
             usage={usage[activeProject.accountLabel]}
@@ -502,6 +592,56 @@ export function App() {
         onLoadUsage={(account) => void loadUsage(account.label)}
         onManageAccounts={() => setView('accounts')}
       />
+      {loginModal && (
+        <LoginModal
+          key={loginModal.sessionId ?? loginModal.accountLabel}
+          state={{
+            ...loginModal,
+            accountEmail:
+              accounts.find((candidate) => candidate.label === loginModal.accountLabel)?.email ??
+              loginModal.accountEmail,
+          }}
+          onCancel={(sessionId) => window.inova.cancelLogin(sessionId)}
+          onClose={() => setLoginModal(null)}
+          onRetry={() => {
+            const target = accounts.find((account) => account.label === loginModal.accountLabel);
+            if (target) void startAccountLogin(target);
+            else setLoginModal(null);
+          }}
+          onSubmitCode={async (input) => {
+            const res = await call(() => window.inova.submitLoginCode(input));
+            return res !== undefined;
+          }}
+        />
+      )}
+      {pendingRemoveAccount && (
+        <ConfirmModal
+          title="Deslogar e remover conta"
+          description={`Deslogar e remover a conta ${accountDisplayName(pendingRemoveAccount)}? As seções e sessões vinculadas a ela serão removidas.`}
+          confirmLabel="Deslogar e remover"
+          danger
+          onCancel={() => setPendingRemoveAccount(null)}
+          onConfirm={() => {
+            const target = pendingRemoveAccount;
+            setPendingRemoveAccount(null);
+            void confirmRemoveAccount(target);
+          }}
+        />
+      )}
+      {pendingCloseTab && (
+        <ConfirmModal
+          title="Encerrar sessão em andamento"
+          description={`A sessão "${pendingCloseTab.title}" ainda está executando uma resposta. Fechar a aba encerrará o turno atual.`}
+          confirmLabel="Encerrar e fechar"
+          danger
+          onCancel={() => setPendingCloseTab(null)}
+          onConfirm={() => {
+            const target = pendingCloseTab;
+            setPendingCloseTab(null);
+            closeTab(target);
+          }}
+        />
+      )}
     </div>
   );
 }

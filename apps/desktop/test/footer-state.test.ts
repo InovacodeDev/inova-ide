@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { AccountView } from '../src/shared/api';
 import {
+  formatResetDateTime,
   formatResetIn,
   groupByProvider,
   highlightedProvider,
+  orderedUsageWindows,
   usageLevel,
 } from '../src/renderer/footer-state';
 
@@ -11,7 +13,7 @@ const account = (
   label: string,
   provider: AccountView['provider'],
   status: AccountView['status'] = 'logged-in',
-): AccountView => ({ id: label, label, provider, status });
+): AccountView => ({ id: label, label, email: null, provider, status });
 
 describe('groupByProvider', () => {
   test('orders groups claude, codex, gemini and omits empty providers', () => {
@@ -60,17 +62,15 @@ describe('formatResetIn', () => {
   const at = (ms: number) => new Date(now.getTime() + ms).toISOString();
   const min = 60_000;
 
-  test('formats minutes', () => {
-    expect(formatResetIn({ resetsAt: at(45 * min), now })).toBe('em 45 min');
+  test('omits days and formats hh"h" mm"min" when under 24 hours', () => {
+    expect(formatResetIn({ resetsAt: at(45 * min), now })).toBe('00h 45min');
+    expect(formatResetIn({ resetsAt: at(135 * min), now })).toBe('02h 15min');
+    expect(formatResetIn({ resetsAt: at(120 * min), now })).toBe('02h 00min');
   });
 
-  test('formats hours and minutes', () => {
-    expect(formatResetIn({ resetsAt: at(135 * min), now })).toBe('em 2 h 15 min');
-    expect(formatResetIn({ resetsAt: at(120 * min), now })).toBe('em 2 h');
-  });
-
-  test('formats days', () => {
-    expect(formatResetIn({ resetsAt: at(3 * 24 * 60 * min + 5 * min), now })).toBe('em 3 d');
+  test('formats dd"d" hh"h" mm"min" when 1 day or more remains', () => {
+    expect(formatResetIn({ resetsAt: at(27 * 60 * min), now })).toBe('01d 03h 00min');
+    expect(formatResetIn({ resetsAt: at(3 * 24 * 60 * min + 5 * min), now })).toBe('03d 00h 05min');
   });
 
   test('returns agora for past or current instants', () => {
@@ -81,6 +81,26 @@ describe('formatResetIn', () => {
   test('returns null for null or invalid dates', () => {
     expect(formatResetIn({ resetsAt: null, now })).toBeNull();
     expect(formatResetIn({ resetsAt: 'nope', now })).toBeNull();
+  });
+});
+
+describe('formatResetDateTime', () => {
+  test('formats valid ISO instants as DD/MM HH:mm and returns null for invalid inputs', () => {
+    const sample = new Date(2026, 10, 12, 9, 5, 0).toISOString();
+    expect(formatResetDateTime(sample)).toBe('12/11 09:05');
+    expect(formatResetDateTime(null)).toBeNull();
+    expect(formatResetDateTime('invalid')).toBeNull();
+  });
+});
+
+describe('orderedUsageWindows', () => {
+  test('orders windows as session, weekly, monthly', () => {
+    const result = orderedUsageWindows([
+      { kind: 'monthly', usedPercent: 40, resetsAt: null },
+      { kind: 'session', usedPercent: 10, resetsAt: null },
+      { kind: 'weekly', usedPercent: 25, resetsAt: null },
+    ]);
+    expect(result.map((w) => w.kind)).toEqual(['session', 'weekly', 'monthly']);
   });
 });
 

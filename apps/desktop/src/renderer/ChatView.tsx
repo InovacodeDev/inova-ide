@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { ProviderId } from '@inova/core/types';
+import type { ProviderModels } from '@inova/core/models';
+import type { EffortLevel, ProviderId } from '@inova/core/types';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
 import { Markdown } from './Markdown';
+import { ModelEffortPicker } from './ModelEffortPicker';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
@@ -11,8 +13,12 @@ export interface ChatViewProps {
   state: ChatState;
   visible: boolean;
   provider: ProviderId | null;
-  accountLabel: string | null;
+  accountDisplay: string | null;
+  model: string | null;
+  effort: EffortLevel | null;
+  catalog: ProviderModels;
   readOnly?: boolean;
+  onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onSend: (prompt: string) => void;
   onCancel: () => void;
 }
@@ -124,8 +130,12 @@ export function ChatView({
   state,
   visible,
   provider,
-  accountLabel,
+  accountDisplay,
+  model,
+  effort,
+  catalog,
   readOnly = false,
+  onChangeModelConfig,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -218,11 +228,29 @@ export function ChatView({
           />
           <div className="chat-composer-bar">
             {provider ? (
-              <span className="chat-chip">
-                <ProviderBadge provider={provider} size={16} />
-                {PROVIDER_NAME[provider]}
-                {accountLabel !== null ? ` · ${accountLabel}` : ''}
-              </span>
+              <>
+                <span
+                  className="chat-chip"
+                  title={
+                    accountDisplay !== null
+                      ? `${PROVIDER_NAME[provider]} · ${accountDisplay}`
+                      : PROVIDER_NAME[provider]
+                  }
+                >
+                  <ProviderBadge provider={provider} size={16} />
+                  <span className="chat-chip-text">
+                    {PROVIDER_NAME[provider]}
+                    {accountDisplay !== null ? ` · ${accountDisplay}` : ''}
+                  </span>
+                </span>
+                <ModelEffortPicker
+                  model={model}
+                  effort={effort}
+                  catalog={catalog}
+                  disabled={readOnly || running}
+                  onChange={onChangeModelConfig}
+                />
+              </>
             ) : null}
             {running ? (
               <button

@@ -1,7 +1,7 @@
 import type { ProviderId } from './types.js';
 
 export interface UsageWindow {
-  kind: 'session' | 'weekly';
+  kind: 'session' | 'weekly' | 'monthly';
   usedPercent: number;
   resetsAt: string | null;
 }
