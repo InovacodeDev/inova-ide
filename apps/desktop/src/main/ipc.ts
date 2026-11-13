@@ -56,6 +56,8 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.switchSessionAccount, (input) => handlers.switchSessionAccount(input));
   handle(CHANNELS.handoffSession, (input) => handlers.handoffSession(input));
   handle(CHANNELS.forkSession, (input) => handlers.forkSession(input));
+  handle(CHANNELS.listExternalSessions, (input) => handlers.listExternalSessions(input));
+  handle(CHANNELS.importSessions, (input) => handlers.importSessions(input));
   handle(CHANNELS.listInbox, () => handlers.listInbox());
   handle(CHANNELS.markInboxRead, (input) => handlers.markInboxRead(input));
   handle(CHANNELS.clearReadInbox, () => handlers.clearReadInbox());

@@ -8,6 +8,7 @@ import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
+import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
 import type { Store } from '@inova/core/types';
@@ -35,7 +36,7 @@ function unwrap<T>(result: Result<T>): T {
   return result.value;
 }
 
-async function setup(options: { withBinary?: boolean } = {}) {
+async function setup(options: { withBinary?: boolean; home?: string } = {}) {
   const root = await tmp();
   const bin = await tmp();
   if (options.withBinary ?? true) {
@@ -73,7 +74,12 @@ async function setup(options: { withBinary?: boolean } = {}) {
     closeAll: vi.fn(),
     accountsInUse: () => inUse,
   };
-  const baseEnv = { PATH: bin, TERM: 'xterm-256color', ANTHROPIC_API_KEY: 'fake-key' };
+  const baseEnv = {
+    PATH: bin,
+    TERM: 'xterm-256color',
+    ANTHROPIC_API_KEY: 'fake-key',
+    ...(options.home === undefined ? {} : { HOME: options.home }),
+  };
   const handlers = createHandlers({
     root,
     runner: { run },
@@ -1285,4 +1291,91 @@ test('startComparison rejects unsupported effort without leaving orphan sessions
   });
   expect(res.ok).toBe(false);
   expect(unwrap(await handlers.listSessions({ projectId: project.id }))).toHaveLength(0);
+});
+
+const EXTERNAL_ID = '11111111-1111-4111-8111-111111111111';
+
+async function seedExternalClaudeSession(input: { home: string; projectPath: string }) {
+  const dir = join(input.home, '.claude', 'projects', claudeProjectDirName(input.projectPath));
+  await mkdir(dir, { recursive: true });
+  const lines = [
+    {
+      type: 'user',
+      cwd: input.projectPath,
+      timestamp: '2026-11-01T10:00:00.000Z',
+      message: { role: 'user', content: 'Corrija o login' },
+    },
+    { type: 'assistant', message: { id: 'm1', content: [{ type: 'text', text: 'Corrigido.' }] } },
+  ];
+  await writeFile(
+    join(dir, `${EXTERNAL_ID}.jsonl`),
+    `${lines.map((line) => JSON.stringify(line)).join('\n')}\n`,
+  );
+}
+
+test('importSessions copies the external session into the account and resumes it', async () => {
+  const home = await tmp();
+  const { root, handlers, send } = await setup({ home });
+  const { account, project } = await seedProject(root);
+  await seedExternalClaudeSession({ home, projectPath: project.path });
+
+  const listed = unwrap(await handlers.listExternalSessions({ projectId: project.id }));
+  expect(listed).toMatchObject([
+    { provider: 'claude', id: EXTERNAL_ID, title: 'Corrija o login', imported: false },
+  ]);
+
+  const [session] = unwrap(
+    await handlers.importSessions({
+      projectId: project.id,
+      provider: 'claude',
+      accountId: account.id,
+      sessionIds: [EXTERNAL_ID],
+    }),
+  );
+  expect(session).toMatchObject({ title: 'Corrija o login', providerSessionId: EXTERNAL_ID });
+  expect(session?.accountIdOverride).toBeUndefined();
+  const copied = join(
+    account.homeDir,
+    'projects',
+    claudeProjectDirName(project.path),
+    `${EXTERNAL_ID}.jsonl`,
+  );
+  expect(await readFile(copied, 'utf8')).toContain('Corrija o login');
+  const transcript = unwrap(await handlers.loadTranscript({ sessionId: session?.id }));
+  expect(transcript.map((event) => event.kind)).toEqual(['user', 'text', 'done']);
+
+  unwrap(await handlers.sendMessage({ sessionId: session?.id, prompt: 'continue' }));
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 2)).toEqual([
+    '--resume',
+    EXTERNAL_ID,
+  ]);
+
+  const relisted = unwrap(await handlers.listExternalSessions({ projectId: project.id }));
+  expect(relisted[0]?.imported).toBe(true);
+  const again = await handlers.importSessions({
+    projectId: project.id,
+    provider: 'claude',
+    accountId: account.id,
+    sessionIds: [EXTERNAL_ID],
+  });
+  expect(again.ok).toBe(false);
+});
+
+test('importSessions targets another account of the same provider and rejects other providers', async () => {
+  const home = await tmp();
+  const { root, handlers } = await setup({ home });
+  const { project } = await seedProject(root);
+  const other = await addAccount({ root, provider: 'claude', label: 'trabalho' });
+  const codex = await addAccount({ root, provider: 'codex', label: 'cx' });
+  await seedExternalClaudeSession({ home, projectPath: project.path });
+  const base = { projectId: project.id, provider: 'claude', sessionIds: [EXTERNAL_ID] };
+
+  expect((await handlers.importSessions({ ...base, accountId: codex.id })).ok).toBe(false);
+  expect((await handlers.importSessions({ ...base, accountId: 'missing' })).ok).toBe(false);
+  expect(await handlers.importSessions({ ...base, sessionIds: ['../x'] })).toEqual(INVALID);
+  expect(unwrap(await handlers.listSessions({ projectId: project.id }))).toHaveLength(0);
+
+  const [session] = unwrap(await handlers.importSessions({ ...base, accountId: other.id }));
+  expect(session?.accountIdOverride).toBe(other.id);
 });

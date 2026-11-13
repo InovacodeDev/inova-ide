@@ -47,6 +47,8 @@ function setup() {
       'switchSessionAccount',
       'handoffSession',
       'forkSession',
+      'listExternalSessions',
+      'importSessions',
       'listInbox',
       'markInboxRead',
       'clearReadInbox',

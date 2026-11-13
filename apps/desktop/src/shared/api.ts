@@ -23,6 +23,7 @@ export type {
   RulesFile,
   RulesStrategy,
 } from '@inova/core/profile-sync';
+import type { ExternalSession, ImportProvider } from '@inova/core/session-import';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -50,6 +51,12 @@ export interface WorktreeStatusView {
 }
 
 export type SessionView = Session;
+
+export type { ImportProvider } from '@inova/core/session-import';
+
+export interface ExternalSessionView extends ExternalSession {
+  imported: boolean;
+}
 
 export type WorkspaceView = Workspace;
 
@@ -157,6 +164,13 @@ export interface InovaApi {
     targetAccountId?: string;
     copyWorktreeFiles?: boolean;
   }): Promise<Result<{ session: SessionView; strategy: 'native-claude' | 'summary-handoff' }>>;
+  listExternalSessions(input: { projectId: string }): Promise<Result<ExternalSessionView[]>>;
+  importSessions(input: {
+    projectId: string;
+    provider: ImportProvider;
+    accountId: string;
+    sessionIds: string[];
+  }): Promise<Result<SessionView[]>>;
   listInbox(): Promise<Result<InboxItem[]>>;
   markInboxRead(input: { sessionId: string }): Promise<Result<InboxItem[]>>;
   clearReadInbox(): Promise<Result<InboxItem[]>>;
@@ -242,6 +256,8 @@ export const CHANNELS = {
   switchSessionAccount: 'inova:switchSessionAccount',
   handoffSession: 'inova:handoffSession',
   forkSession: 'inova:forkSession',
+  listExternalSessions: 'inova:listExternalSessions',
+  importSessions: 'inova:importSessions',
   listInbox: 'inova:listInbox',
   markInboxRead: 'inova:markInboxRead',
   clearReadInbox: 'inova:clearReadInbox',

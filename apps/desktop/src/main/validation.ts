@@ -5,6 +5,12 @@ import { isExecutionMode } from '@inova/core/modes';
 import { WorktreeError } from '@inova/core/git-worktree';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
+import {
+  SessionImportError,
+  isExternalSessionId,
+  isImportProvider,
+} from '@inova/core/session-import';
+import type { ImportProvider } from '@inova/core/session-import';
 import { SessionError } from '@inova/core/sessions';
 import { StoreCorruptError } from '@inova/core/store';
 import type {
@@ -23,6 +29,7 @@ const MAX_PATH = 4096;
 const MAX_LOGIN_CODE = 512;
 const MAX_PROMPT = 100_000;
 const MAX_WORKSPACE_INPUT = 1000;
+const MAX_IMPORT_SESSIONS = 50;
 const INVALID: Result<never> = { ok: false, message: 'Entrada inválida.' };
 
 export function ok<T>(value: T): Result<T> {
@@ -298,6 +305,26 @@ export function parseForkSession(
   };
 }
 
+export function parseImportSessions(
+  input: unknown,
+):
+  | { projectId: string; provider: ImportProvider; accountId: string; sessionIds: string[] }
+  | undefined {
+  if (!isRecord(input)) return undefined;
+  const { projectId, provider, accountId, sessionIds } = input;
+  if (!isText(projectId) || !isImportProvider(provider) || !isSafeId(accountId)) return undefined;
+  if (
+    !Array.isArray(sessionIds) ||
+    sessionIds.length === 0 ||
+    sessionIds.length > MAX_IMPORT_SESSIONS ||
+    !sessionIds.every(isExternalSessionId) ||
+    new Set(sessionIds).size !== sessionIds.length
+  ) {
+    return undefined;
+  }
+  return { projectId, provider, accountId, sessionIds };
+}
+
 export function parseUiFocus(
   input: unknown,
 ): { activeSessionId: string | null; windowFocused: boolean } | undefined {
@@ -559,6 +586,7 @@ export async function guarded<T>(work: () => Promise<Result<T>>, label = ''): Pr
     if (error instanceof AccountError) return fail(accountMessage(error, label));
     if (error instanceof SessionError) return fail(sessionMessage(error));
     if (error instanceof WorktreeError) return fail(error.message);
+    if (error instanceof SessionImportError) return fail(error.message);
     if (error instanceof UsageError) return fail(usageMessage(error));
     if (error instanceof StoreCorruptError)
       return fail(`Arquivo de dados corrompido: ${error.path}.`);

@@ -49,6 +49,12 @@ import {
 import { providers, readAccountEmail } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
 import {
+  IMPORT_PROVIDERS,
+  defaultCliHome,
+  importExternalSession,
+  listExternalSessions,
+} from '@inova/core/session-import';
+import {
   SessionError,
   createSession,
   deleteSession,
@@ -80,6 +86,7 @@ import type { UsageDeps } from '@inova/core/usage';
 import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
 import type {
   AccountView,
+  ExternalSessionView,
   LoginEvent,
   ProjectView,
   Result,
@@ -103,6 +110,7 @@ import {
   parseFileSearch,
   parseForkSession,
   parseHandoffSession,
+  parseImportSessions,
   parseLoginCode,
   parseMessage,
   parseNewAccount,
@@ -178,6 +186,14 @@ function sessionIdsOfProjects(store: Store, projectIds: ReadonlySet<string>): st
   return sessionsOf(store)
     .filter((session) => projectIds.has(session.projectId))
     .map((session) => session.id);
+}
+
+function importedProviderSessionIds(store: Store, projectId: string): Set<string> {
+  return new Set(
+    sessionsOf(store)
+      .filter((session) => session.projectId === projectId)
+      .flatMap((session) => session.providerSessionId ?? []),
+  );
 }
 
 function titleFromPrompt(prompt: string): string {
@@ -1414,6 +1430,64 @@ export function createHandlers(deps: HandlerDeps) {
             await writeTranscriptEvents(resultSession.id, sliced.slicedEvents);
             return ok({ session: resultSession, strategy });
           }),
+      ),
+    listExternalSessions: (input: unknown): Promise<Result<ExternalSessionView[]>> =>
+      validated(input, parseProjectRef, async ({ projectId }) => {
+        const store = await loadStore(deps.root);
+        const project = store.projects.find((item) => item.id === projectId);
+        if (!project) return fail('Projeto não encontrado.');
+        const env = await deps.baseEnv();
+        const imported = importedProviderSessionIds(store, projectId);
+        const found = await Promise.all(
+          IMPORT_PROVIDERS.map((provider) =>
+            listExternalSessions({
+              provider,
+              sourceHome: defaultCliHome(provider, env),
+              projectPath: project.path,
+            }),
+          ),
+        );
+        return ok(
+          found.flat().map((session) => ({ ...session, imported: imported.has(session.id) })),
+        );
+      }),
+    importSessions: (input: unknown): Promise<Result<Session[]>> =>
+      validated(input, parseImportSessions, ({ projectId, provider, accountId, sessionIds }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const project = store.projects.find((item) => item.id === projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const account = store.accounts.find((item) => item.id === accountId);
+          if (account?.provider !== provider) {
+            return fail('Escolha uma conta do mesmo provedor da sessão.');
+          }
+          const imported = importedProviderSessionIds(store, projectId);
+          if (sessionIds.some((sessionId) => imported.has(sessionId))) {
+            return fail('Uma das sessões selecionadas já foi importada neste projeto.');
+          }
+          const sourceHome = defaultCliHome(provider, await deps.baseEnv());
+          const created: Session[] = [];
+          for (const sessionId of sessionIds) {
+            const { title, events } = await importExternalSession({
+              provider,
+              sourceHome,
+              targetHome: account.homeDir,
+              projectPath: project.path,
+              sessionId,
+            });
+            const session = await createSession({
+              root: deps.root,
+              projectId,
+              title,
+              providerSessionId: sessionId,
+              accountIdOverride: account.id === project.accountId ? null : account.id,
+              worktree: null,
+            });
+            await writeTranscriptEvents(session.id, events);
+            created.push(session);
+          }
+          return ok(created);
+        }),
       ),
     listInbox: (): Promise<Result<InboxItem[]>> =>
       guarded(async () => {

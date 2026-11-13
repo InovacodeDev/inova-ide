@@ -7,6 +7,7 @@ import {
   parseFileSearch,
   parseForkSession,
   parseHandoffSession,
+  parseImportSessions,
   parseLoginCode,
   parseNewAccount,
   parseMessage,
@@ -279,6 +280,23 @@ test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
     copyWorktreeFiles: true,
   });
   expect(parseForkSession({ sessionId: 's1', turnIndex: -1 })).toBeUndefined();
+  const importInput = {
+    projectId: 'p1',
+    provider: 'claude',
+    accountId: 'a1',
+    sessionIds: ['11111111-1111-4111-8111-111111111111'],
+  };
+  expect(parseImportSessions(importInput)).toEqual(importInput);
+  expect(parseImportSessions({ ...importInput, provider: 'gemini' })).toBeUndefined();
+  expect(parseImportSessions({ ...importInput, accountId: '../a1' })).toBeUndefined();
+  expect(parseImportSessions({ ...importInput, sessionIds: [] })).toBeUndefined();
+  expect(parseImportSessions({ ...importInput, sessionIds: ['../../secret'] })).toBeUndefined();
+  expect(
+    parseImportSessions({
+      ...importInput,
+      sessionIds: [...importInput.sessionIds, ...importInput.sessionIds],
+    }),
+  ).toBeUndefined();
   expect(parseUiFocus({ activeSessionId: null, windowFocused: false })).toEqual({
     activeSessionId: null,
     windowFocused: false,
