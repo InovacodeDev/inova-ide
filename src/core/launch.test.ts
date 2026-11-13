@@ -337,7 +337,132 @@ describe('buildChatTurn', () => {
     });
     expect(oc.command).toBe('opencode');
     expect(oc.env['XDG_DATA_HOME']).toBe('/h/oc');
-    expect(oc.args).toEqual(['run', '--format', 'json', '-m', 'openai/gpt-5', '-s', 'p-oc', 'hi']);
+    expect(oc.args).toEqual([
+      'run',
+      '--format',
+      'json',
+      '--auto',
+      '-m',
+      'openai/gpt-5',
+      '-s',
+      'p-oc',
+      'hi',
+    ]);
+  });
+
+  it('maps execution mode flags across all eight providers', () => {
+    const cases: Array<{
+      provider: Account['provider'];
+      mode: NonNullable<Parameters<typeof buildChatTurn>[0]['executionMode']>;
+      expectedArgsSubset: string[];
+      forbiddenArgs?: string[];
+    }> = [
+      { provider: 'claude', mode: 'auto', expectedArgsSubset: ['--permission-mode', 'auto'] },
+      {
+        provider: 'claude',
+        mode: 'manual',
+        expectedArgsSubset: ['--permission-mode', 'manual', '--permission-prompts', 'none'],
+      },
+      {
+        provider: 'claude',
+        mode: 'accept-edits',
+        expectedArgsSubset: ['--permission-mode', 'acceptEdits'],
+      },
+      { provider: 'claude', mode: 'plan', expectedArgsSubset: ['--permission-mode', 'plan'] },
+      {
+        provider: 'claude',
+        mode: 'bypass',
+        expectedArgsSubset: [
+          '--permission-mode',
+          'bypassPermissions',
+          '--dangerously-skip-permissions',
+        ],
+      },
+      {
+        provider: 'gemini',
+        mode: 'manual',
+        expectedArgsSubset: ['--mode', 'accept-edits', '--sandbox'],
+        forbiddenArgs: ['--dangerously-skip-permissions'],
+      },
+      {
+        provider: 'gemini',
+        mode: 'accept-edits',
+        expectedArgsSubset: ['--mode', 'accept-edits'],
+        forbiddenArgs: ['--dangerously-skip-permissions', '--sandbox'],
+      },
+      { provider: 'gemini', mode: 'auto', expectedArgsSubset: ['--mode', 'auto'] },
+      { provider: 'gemini', mode: 'plan', expectedArgsSubset: ['--mode', 'plan'] },
+      {
+        provider: 'gemini',
+        mode: 'bypass',
+        expectedArgsSubset: ['--mode', 'accept-edits', '--dangerously-skip-permissions'],
+      },
+      { provider: 'codex', mode: 'read-only', expectedArgsSubset: ['--sandbox', 'read-only'] },
+      {
+        provider: 'codex',
+        mode: 'accept-edits',
+        expectedArgsSubset: ['--sandbox', 'workspace-write'],
+      },
+      {
+        provider: 'codex',
+        mode: 'auto',
+        expectedArgsSubset: ['--sandbox', 'workspace-write', '--approve-for-me'],
+      },
+      {
+        provider: 'codex',
+        mode: 'bypass',
+        expectedArgsSubset: ['--dangerously-bypass-approvals-and-sandbox'],
+        forbiddenArgs: ['--sandbox'],
+      },
+      { provider: 'qwen', mode: 'plan', expectedArgsSubset: ['--approval-mode', 'plan'] },
+      { provider: 'qwen', mode: 'manual', expectedArgsSubset: ['--approval-mode', 'default'] },
+      {
+        provider: 'qwen',
+        mode: 'accept-edits',
+        expectedArgsSubset: ['--approval-mode', 'auto-edit'],
+      },
+      { provider: 'qwen', mode: 'bypass', expectedArgsSubset: ['--approval-mode', 'yolo'] },
+      {
+        provider: 'kimi',
+        mode: 'manual',
+        expectedArgsSubset: [],
+        forbiddenArgs: ['--yolo', '--auto'],
+      },
+      { provider: 'kimi', mode: 'accept-edits', expectedArgsSubset: ['--yolo'] },
+      { provider: 'kimi', mode: 'bypass', expectedArgsSubset: ['--auto'] },
+      {
+        provider: 'grok',
+        mode: 'manual',
+        expectedArgsSubset: [],
+        forbiddenArgs: ['--always-approve'],
+      },
+      { provider: 'grok', mode: 'bypass', expectedArgsSubset: ['--always-approve'] },
+      { provider: 'opencode', mode: 'manual', expectedArgsSubset: [], forbiddenArgs: ['--auto'] },
+      { provider: 'opencode', mode: 'auto', expectedArgsSubset: ['--auto'] },
+      { provider: 'deepseek', mode: 'read-only', expectedArgsSubset: ['--mode', 'read-only'] },
+      {
+        provider: 'deepseek',
+        mode: 'accept-edits',
+        expectedArgsSubset: ['--mode', 'workspace-write'],
+      },
+    ];
+
+    for (const item of cases) {
+      const spec = buildChatTurn({
+        account: { ...claudeAccount, provider: item.provider, homeDir: `/h/${item.provider}` },
+        cwd: '/proj',
+        prompt: 'hi',
+        turn: { mode: 'new', sessionId: 's1' },
+        baseEnv,
+        executionMode: item.mode,
+      });
+      for (const token of item.expectedArgsSubset) {
+        expect(spec.args).toContain(token);
+      }
+      for (const forbidden of item.forbiddenArgs ?? []) {
+        expect(spec.args).not.toContain(forbidden);
+      }
+    }
   });
 });
 

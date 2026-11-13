@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   parseBinding,
+  parseDefaultMode,
   parseFileSearch,
   parseLoginCode,
   parseNewAccount,
@@ -184,4 +185,22 @@ test('login code requires safe sessionId and trimmed non-empty code up to 512 ch
   expect(parseLoginCode({ sessionId: 'bad/id', code: 'abc' })).toBeUndefined();
   expect(parseLoginCode({ sessionId: '..', code: 'abc' })).toBeUndefined();
   expect(parseLoginCode({ sessionId: 'sess-1', code: 123 })).toBeUndefined();
+});
+
+test('session mode update and default provider mode validation', () => {
+  expect(parseSessionUpdate({ sessionId: 's1', mode: 'plan' })).toEqual({
+    sessionId: 's1',
+    mode: 'plan',
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', mode: null })).toEqual({
+    sessionId: 's1',
+    mode: null,
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', mode: 'bad-mode' })).toBeUndefined();
+  expect(parseDefaultMode({ provider: 'claude', mode: 'plan' })).toEqual({
+    provider: 'claude',
+    mode: 'plan',
+  });
+  expect(parseDefaultMode({ provider: 'unknown', mode: 'plan' })).toBeUndefined();
+  expect(parseDefaultMode({ provider: 'claude', mode: 'invalid' })).toBeUndefined();
 });

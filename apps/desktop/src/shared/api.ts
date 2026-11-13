@@ -2,7 +2,7 @@ import type { AuthStatus } from '@inova/core/providers';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ProviderId, Session, Workspace } from '@inova/core/types';
+import type { EffortLevel, ExecutionMode, ProviderId, Session, Workspace } from '@inova/core/types';
 
 export type ProjectCommandView = ProjectCommand;
 
@@ -69,7 +69,13 @@ export interface InovaApi {
     archived?: boolean;
     model?: string | null;
     effort?: EffortLevel | null;
+    mode?: ExecutionMode | null;
   }): Promise<Result<SessionView>>;
+  getDefaultModes(): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
+  setDefaultMode(input: {
+    provider: ProviderId;
+    mode: ExecutionMode;
+  }): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
   deleteSession(input: { sessionId: string }): Promise<Result<null>>;
   getWorkspace(): Promise<Result<WorkspaceView>>;
   saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
@@ -102,6 +108,8 @@ export const CHANNELS = {
   listSessions: 'inova:listSessions',
   createSession: 'inova:createSession',
   updateSession: 'inova:updateSession',
+  getDefaultModes: 'inova:getDefaultModes',
+  setDefaultMode: 'inova:setDefaultMode',
   deleteSession: 'inova:deleteSession',
   getWorkspace: 'inova:getWorkspace',
   saveWorkspace: 'inova:saveWorkspace',

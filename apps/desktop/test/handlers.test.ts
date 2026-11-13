@@ -935,3 +935,30 @@ test('listCommands returns project prompts and skills across providers', async (
     },
   ]);
 });
+
+test('provider execution modes validate per-provider support, persist defaults, and pass CLI flags', async () => {
+  const { root, handlers, send } = await setup();
+  const { project, session } = await seedSession(root);
+
+  const unsupported = await handlers.updateSession({ sessionId: session.id, mode: 'read-only' });
+  expect(unsupported.ok).toBe(false);
+
+  const updated = unwrap(await handlers.updateSession({ sessionId: session.id, mode: 'plan' }));
+  expect(updated.mode).toBe('plan');
+
+  await handlers.sendMessage({ sessionId: session.id, prompt: 'Planeje' });
+  const firstCall = send.mock.calls[0]?.[0];
+  expect(firstCall?.spec.args).toContain('--permission-mode');
+  const permIdx = firstCall?.spec.args.indexOf('--permission-mode') ?? -1;
+  expect(firstCall?.spec.args[permIdx + 1]).toBe('plan');
+
+  const badDefault = await handlers.setDefaultMode({ provider: 'claude', mode: 'read-only' });
+  expect(badDefault.ok).toBe(false);
+
+  const savedDefaults = unwrap(await handlers.setDefaultMode({ provider: 'claude', mode: 'auto' }));
+  expect(savedDefaults).toEqual({ claude: 'auto' });
+  expect(unwrap(await handlers.getDefaultModes())).toEqual({ claude: 'auto' });
+
+  const inheritedSession = unwrap(await handlers.createSession({ projectId: project.id }));
+  expect(inheritedSession.mode).toBe('auto');
+});

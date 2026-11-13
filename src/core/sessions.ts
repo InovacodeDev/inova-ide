@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { isEffortLevel } from './models.js';
+import { isExecutionMode, isModeSupported } from './modes.js';
 import { loadStore, saveStore } from './store.js';
-import type { Session, Store, Workspace } from './types.js';
+import type { ExecutionMode, ProviderId, Session, Store, Workspace } from './types.js';
 
 type SessionErrorCode =
   | 'project-not-found'
@@ -10,6 +11,7 @@ type SessionErrorCode =
   | 'invalid-title'
   | 'invalid-model'
   | 'invalid-effort'
+  | 'invalid-mode'
   | 'invalid-workspace';
 
 const MAX_TITLE_LENGTH = 200;
@@ -128,15 +130,24 @@ function normalizeModel(model: string | null): string | null {
   return trimmed;
 }
 
+function providerForProject(store: Store, projectId: string): ProviderId | null {
+  const project = store.projects.find((item) => item.id === projectId);
+  if (!project) return null;
+  const account = store.accounts.find((item) => item.id === project.accountId);
+  return account?.provider ?? null;
+}
+
 export async function createSession(ctx: {
   root: string;
   projectId: string;
   parentId?: string | null;
   title?: string;
+  mode?: ExecutionMode | null;
   now?: () => Date;
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
-  if (!store.projects.some((project) => project.id === ctx.projectId)) {
+  const project = store.projects.find((item) => item.id === ctx.projectId);
+  if (!project) {
     throw new SessionError('project-not-found', `Project not found: ${ctx.projectId}`);
   }
   const parentId = ctx.parentId ?? null;
@@ -145,6 +156,15 @@ export async function createSession(ctx: {
     if (parent?.projectId !== ctx.projectId) {
       throw new SessionError('parent-not-found', `Parent session not found: ${parentId}`);
     }
+  }
+  const provider = providerForProject(store, ctx.projectId);
+  const inheritedMode =
+    ctx.mode !== undefined ? ctx.mode : provider ? (store.defaultModes?.[provider] ?? null) : null;
+  if (
+    inheritedMode !== null &&
+    (!isExecutionMode(inheritedMode) || (provider && !isModeSupported(provider, inheritedMode)))
+  ) {
+    throw new SessionError('invalid-mode', `Invalid mode: ${String(inheritedMode)}`);
   }
   const timestamp = (ctx.now?.() ?? new Date()).toISOString();
   const session: Session = {
@@ -155,6 +175,7 @@ export async function createSession(ctx: {
     providerSessionId: null,
     model: null,
     effort: null,
+    mode: inheritedMode,
     createdAt: timestamp,
     updatedAt: timestamp,
     archivedAt: null,
@@ -176,14 +197,14 @@ export async function getSession(ctx: { root: string; sessionId: string }): Prom
 export async function updateSession(ctx: {
   root: string;
   sessionId: string;
-  patch: Partial<Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort'>> & {
+  patch: Partial<Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort' | 'mode'>> & {
     archived?: boolean;
   };
   now?: () => Date;
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
   const session = requireSession(store, ctx.sessionId);
-  const { title, providerSessionId, model, effort, archived } = ctx.patch;
+  const { title, providerSessionId, model, effort, mode, archived } = ctx.patch;
   const timestamp = (ctx.now?.() ?? new Date()).toISOString();
   if (title !== undefined) session.title = normalizeTitle(title);
   if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
@@ -193,6 +214,19 @@ export async function updateSession(ctx: {
       throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);
     }
     session.effort = effort;
+  }
+  if (mode !== undefined) {
+    const provider = providerForProject(store, session.projectId);
+    if (
+      mode !== null &&
+      (!isExecutionMode(mode) || (provider && !isModeSupported(provider, mode)))
+    ) {
+      throw new SessionError(
+        'invalid-mode',
+        `Modo não suportado por este provedor: ${String(mode)}`,
+      );
+    }
+    session.mode = mode;
   }
   if (archived !== undefined) {
     const affected = descendantIds(store, session.id);
@@ -223,4 +257,25 @@ export function removeSessionsOfProjects(store: Store, projectIds: ReadonlySet<s
   );
   store.sessions = store.sessions.filter((session) => !removed.has(session.id));
   dropFromWorkspace(store, removed);
+}
+
+export async function getDefaultModes(
+  root: string,
+): Promise<Partial<Record<ProviderId, ExecutionMode>>> {
+  const store = await loadStore(root);
+  return { ...(store.defaultModes ?? {}) };
+}
+
+export async function setDefaultProviderMode(ctx: {
+  root: string;
+  provider: ProviderId;
+  mode: ExecutionMode;
+}): Promise<Partial<Record<ProviderId, ExecutionMode>>> {
+  if (!isExecutionMode(ctx.mode) || !isModeSupported(ctx.provider, ctx.mode)) {
+    throw new SessionError('invalid-mode', 'Modo não suportado por este provedor.');
+  }
+  const store = await loadStore(ctx.root);
+  store.defaultModes = { ...(store.defaultModes ?? {}), [ctx.provider]: ctx.mode };
+  await saveStore(ctx.root, store);
+  return { ...store.defaultModes };
 }

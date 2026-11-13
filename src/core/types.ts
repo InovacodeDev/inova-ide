@@ -3,6 +3,8 @@ export type ProviderId =
 
 export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export type ExecutionMode = 'auto' | 'manual' | 'accept-edits' | 'plan' | 'bypass' | 'read-only';
+
 export interface Account {
   id: string;
   provider: ProviderId;
@@ -25,6 +27,7 @@ export interface Session {
   providerSessionId: string | null;
   model?: string | null;
   effort?: EffortLevel | null;
+  mode?: ExecutionMode | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
@@ -41,4 +44,5 @@ export interface Store {
   projects: Project[];
   sessions?: Session[];
   workspace?: Workspace;
+  defaultModes?: Partial<Record<ProviderId, ExecutionMode>>;
 }

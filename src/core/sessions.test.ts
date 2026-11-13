@@ -271,4 +271,32 @@ describe('sessions', () => {
       ),
     ).toBe('invalid-workspace');
   });
+
+  it('stores and updates session mode and provider default modes', async () => {
+    const store = await loadStore(root);
+    store.accounts.push({
+      id: 'a1',
+      provider: 'claude',
+      label: 'main',
+      homeDir: '/h/claude',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    store.projects.push({ id: 'p-claude', path: '/tmp/proj', accountId: 'a1' });
+    store.defaultModes = { claude: 'plan' };
+    await saveStore(root, store);
+
+    const created = await createSession({ root, projectId: 'p-claude' });
+    expect(created.mode).toBe('plan');
+
+    const updated = await updateSession({
+      root,
+      sessionId: created.id,
+      patch: { mode: 'auto' },
+    });
+    expect(updated.mode).toBe('auto');
+
+    expect(
+      await codeOf(updateSession({ root, sessionId: created.id, patch: { mode: 'read-only' } })),
+    ).toBe('invalid-mode');
+  });
 });

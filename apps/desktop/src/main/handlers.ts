@@ -14,6 +14,7 @@ import {
   parseOpenCodeModelsOutput,
 } from '@inova/core/models';
 import type { ProviderModels } from '@inova/core/models';
+import { isModeSupported, resolveExecutionMode } from '@inova/core/modes';
 import { PathNotFoundError, bindProject, realPathOf, unbindProject } from '@inova/core/projects';
 import { providers, readAccountEmail } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
@@ -22,12 +23,21 @@ import {
   createSession,
   deleteSession,
   descendantIds,
+  getDefaultModes,
   getWorkspace,
   saveWorkspace,
+  setDefaultProviderMode,
   updateSession,
 } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
-import type { Account, ProviderId, Session, Store, Workspace } from '@inova/core/types';
+import type {
+  Account,
+  ExecutionMode,
+  ProviderId,
+  Session,
+  Store,
+  Workspace,
+} from '@inova/core/types';
 import { UsageError, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
 import type { AccountView, LoginEvent, ProjectView, Result, StartedLogin } from '../shared/api.js';
@@ -41,6 +51,7 @@ import {
   guarded,
   ok,
   parseBinding,
+  parseDefaultMode,
   parseFileSearch,
   parseLoginCode,
   parseMessage,
@@ -231,12 +242,7 @@ export function createHandlers(deps: HandlerDeps) {
       fileListCache.delete(projectId);
       return;
     }
-    void loadStore(deps.root)
-      .then((store) => {
-        const session = sessionsOf(store).find((item) => item.id === sessionId);
-        if (session) fileListCache.delete(session.projectId);
-      })
-      .catch(() => undefined);
+    fileListCache.clear();
   }
 
   async function cachedProjectFiles(
@@ -374,6 +380,11 @@ export function createHandlers(deps: HandlerDeps) {
         ...(DEFAULT_TITLES.has(session.title) ? { title: titleFromPrompt(prompt) } : {}),
       },
     });
+    const executionMode = resolveExecutionMode({
+      provider: account.provider,
+      sessionMode: session.mode ?? null,
+      defaultModes: store.defaultModes,
+    });
     const spec = buildChatTurn({
       account,
       cwd: input.projectPath,
@@ -382,6 +393,7 @@ export function createHandlers(deps: HandlerDeps) {
       baseEnv: input.baseEnv,
       model: session.model ?? null,
       effort: session.effort ?? null,
+      executionMode,
     });
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
@@ -481,7 +493,7 @@ export function createHandlers(deps: HandlerDeps) {
         serialized(async () => ok(await createSession({ root: deps.root, projectId, parentId }))),
       ),
     updateSession: (input: unknown): Promise<Result<Session>> =>
-      validated(input, parseSessionUpdate, ({ sessionId, title, archived, model, effort }) =>
+      validated(input, parseSessionUpdate, ({ sessionId, title, archived, model, effort, mode }) =>
         serialized(async () => {
           const store = await loadStore(deps.root);
           const session = requireSession(store, sessionId);
@@ -497,14 +509,30 @@ export function createHandlers(deps: HandlerDeps) {
               return fail('Nível de esforço não suportado por este provedor.');
             }
           }
+          if (mode !== undefined && mode !== null) {
+            const project = store.projects.find((item) => item.id === session.projectId);
+            const account = store.accounts.find((item) => item.id === project?.accountId);
+            if (account && !isModeSupported(account.provider, mode)) {
+              return fail('Modo não suportado por este provedor.');
+            }
+          }
           const patch = {
             ...(title === undefined ? {} : { title }),
             ...(archived === undefined ? {} : { archived }),
             ...(model === undefined ? {} : { model }),
             ...(effort === undefined ? {} : { effort }),
+            ...(mode === undefined ? {} : { mode }),
           };
           return ok(await updateSession({ root: deps.root, sessionId, patch }));
         }),
+      ),
+    getDefaultModes: (): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>> =>
+      guarded(async () => ok(await getDefaultModes(deps.root))),
+    setDefaultMode: (input: unknown): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>> =>
+      validated(input, parseDefaultMode, ({ provider, mode }) =>
+        serialized(async () =>
+          ok(await setDefaultProviderMode({ root: deps.root, provider, mode })),
+        ),
       ),
     getWorkspace: (): Promise<Result<Workspace>> =>
       guarded(async () => ok(await getWorkspace(deps.root))),

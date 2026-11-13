@@ -1,11 +1,12 @@
 import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
 import { isEffortLevel } from '@inova/core/models';
+import { isExecutionMode } from '@inova/core/modes';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
 import { SessionError } from '@inova/core/sessions';
 import { StoreCorruptError } from '@inova/core/store';
-import type { Account, EffortLevel, ProviderId, Store } from '@inova/core/types';
+import type { Account, EffortLevel, ExecutionMode, ProviderId, Store } from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
 import type { Result } from '../shared/api.js';
 
@@ -104,16 +105,18 @@ export interface SessionUpdateInput {
   archived?: boolean;
   model?: string | null;
   effort?: EffortLevel | null;
+  mode?: ExecutionMode | null;
 }
 
 export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
-  const { sessionId, title, archived, model, effort } = input;
+  const { sessionId, title, archived, model, effort, mode } = input;
   if (
     title === undefined &&
     archived === undefined &&
     model === undefined &&
-    effort === undefined
+    effort === undefined &&
+    mode === undefined
   ) {
     return undefined;
   }
@@ -123,13 +126,25 @@ export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefin
     if (!isText(model) || model.trim() === '') return undefined;
   }
   if (effort !== undefined && effort !== null && !isEffortLevel(effort)) return undefined;
+  if (mode !== undefined && mode !== null && !isExecutionMode(mode)) return undefined;
   return {
     sessionId,
     ...(title === undefined ? {} : { title }),
     ...(archived === undefined ? {} : { archived }),
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
+    ...(mode === undefined ? {} : { mode }),
   };
+}
+
+export function parseDefaultMode(
+  input: unknown,
+): { provider: ProviderId; mode: ExecutionMode } | undefined {
+  if (!isRecord(input)) return undefined;
+  const { provider, mode } = input;
+  if (typeof provider !== 'string' || !isProviderId(provider)) return undefined;
+  if (!isExecutionMode(mode)) return undefined;
+  return { provider, mode };
 }
 
 export function parseWorkspace(
@@ -218,6 +233,8 @@ function sessionMessage(error: SessionError): string {
       return 'O modelo deve ter de 1 a 200 caracteres.';
     case 'invalid-effort':
       return 'Nível de esforço inválido.';
+    case 'invalid-mode':
+      return 'Modo não suportado por este provedor.';
     case 'invalid-workspace':
       return 'Área de trabalho inválida.';
   }

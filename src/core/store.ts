@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isEffortLevel } from './models.js';
+import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
 import type { Store } from './types.js';
 
@@ -56,7 +57,7 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId, model, effort, archivedAt } = value;
+  const { id, parentId, providerSessionId, model, effort, mode, archivedAt } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
@@ -64,6 +65,7 @@ function isSession(value: unknown): boolean {
     isStringOrNull(providerSessionId) &&
     (model === undefined || isStringOrNull(model)) &&
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
+    (mode === undefined || mode === null || isExecutionMode(mode)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
 }
@@ -82,9 +84,16 @@ function isWorkspace(value: unknown): boolean {
   );
 }
 
+function isDefaultModes(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(
+    ([provider, mode]) => isProviderId(provider) && (mode === undefined || isExecutionMode(mode)),
+  );
+}
+
 function isStore(value: unknown): value is Store {
   if (!isRecord(value)) return false;
-  const { version, accounts, projects, sessions, workspace } = value;
+  const { version, accounts, projects, sessions, workspace, defaultModes } = value;
   return (
     version === 1 &&
     Array.isArray(accounts) &&
@@ -92,7 +101,8 @@ function isStore(value: unknown): value is Store {
     Array.isArray(projects) &&
     projects.every(isProject) &&
     (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession))) &&
-    (workspace === undefined || isWorkspace(workspace))
+    (workspace === undefined || isWorkspace(workspace)) &&
+    (defaultModes === undefined || isDefaultModes(defaultModes))
   );
 }
 

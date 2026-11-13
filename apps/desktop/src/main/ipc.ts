@@ -37,6 +37,8 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.listSessions, (input) => handlers.listSessions(input));
   handle(CHANNELS.createSession, (input) => handlers.createSession(input));
   handle(CHANNELS.updateSession, (input) => handlers.updateSession(input));
+  handle(CHANNELS.getDefaultModes, () => handlers.getDefaultModes());
+  handle(CHANNELS.setDefaultMode, (input) => handlers.setDefaultMode(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorkspace, () => handlers.getWorkspace());
   handle(CHANNELS.saveWorkspace, (input) => handlers.saveWorkspace(input));

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ProviderId } from '@inova/core/types';
+import type { EffortLevel, ExecutionMode, ProviderId } from '@inova/core/types';
 import type { ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
@@ -14,6 +14,7 @@ import {
 import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
+import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
@@ -26,9 +27,14 @@ export interface ChatViewProps {
   accountDisplay: string | null;
   model: string | null;
   effort: EffortLevel | null;
+  mode: ExecutionMode | null;
+  defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
+  inWorktree?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
+  onChangeMode: (mode: ExecutionMode) => void;
+  onSetDefaultMode: (mode: ExecutionMode) => void;
   onSend: (prompt: string) => void;
   onCancel: () => void;
 }
@@ -145,9 +151,14 @@ export function ChatView({
   accountDisplay,
   model,
   effort,
+  mode,
+  defaultModes,
+  inWorktree = false,
   catalog,
   readOnly = false,
   onChangeModelConfig,
+  onChangeMode,
+  onSetDefaultMode,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -442,6 +453,15 @@ export function ChatView({
                   catalog={catalog}
                   disabled={readOnly || running}
                   onChange={onChangeModelConfig}
+                />
+                <ModePicker
+                  provider={provider}
+                  sessionMode={mode}
+                  defaultModes={defaultModes}
+                  inWorktree={inWorktree}
+                  disabled={readOnly || running}
+                  onChangeMode={onChangeMode}
+                  onSetDefault={onSetDefaultMode}
                 />
               </>
             ) : null}

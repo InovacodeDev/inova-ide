@@ -119,4 +119,11 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   });
   void api.listCommands({ projectId: 'p' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:listCommands', { projectId: 'p' });
+  void api.getDefaultModes();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getDefaultModes');
+  void api.setDefaultMode({ provider: 'claude', mode: 'plan' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:setDefaultMode', {
+    provider: 'claude',
+    mode: 'plan',
+  });
 });

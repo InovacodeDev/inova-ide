@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
-import type { EffortLevel, Session } from '@inova/core/types';
+import type { EffortLevel, ExecutionMode, ProviderId, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
@@ -51,6 +51,7 @@ export function App() {
   const [sessions, setSessions] = useState<Record<string, Session[]>>({});
   const [usage, setUsage] = useState<Record<string, UsageState>>({});
   const [modelsByAccount, setModelsByAccount] = useState<Record<string, ProviderModels>>({});
+  const [defaultModes, setDefaultModes] = useState<Partial<Record<ProviderId, ExecutionMode>>>({});
   const loadingModelsRef = useRef<Set<string>>(new Set());
   const [view, setView] = useState<View>('workspace');
   const [loginModal, setLoginModal] = useState<LoginModalState | null>(null);
@@ -148,6 +149,9 @@ export function App() {
     if (restoreStarted.current) return;
     restoreStarted.current = true;
     void reloadAccounts();
+    void call(() => window.inova.getDefaultModes()).then((loadedModes) => {
+      if (loadedModes) setDefaultModes(loadedModes.value);
+    });
     void (async () => {
       const loaded = await reloadProjects();
       if (!loaded) return;
@@ -333,7 +337,7 @@ export function App() {
 
   const updateSessionModelConfig = async (input: {
     sessionId: string;
-    patch: { model?: string | null; effort?: EffortLevel | null };
+    patch: { model?: string | null; effort?: EffortLevel | null; mode?: ExecutionMode | null };
   }) => {
     const result = await call(() =>
       window.inova.updateSession({ sessionId: input.sessionId, ...input.patch }),
@@ -346,6 +350,11 @@ export function App() {
         item.id === updated.id ? updated : item,
       ),
     }));
+  };
+
+  const setDefaultProviderMode = async (provider: ProviderId, mode: ExecutionMode) => {
+    const result = await call(() => window.inova.setDefaultMode({ provider, mode }));
+    if (result) setDefaultModes(result.value);
   };
 
   const setArchived = async (input: { session: Session; archived: boolean }) => {
@@ -564,11 +573,19 @@ export function App() {
                   accountDisplay={accountDisplayOf(tabProject)}
                   model={tabSession?.model ?? null}
                   effort={tabSession?.effort ?? null}
+                  mode={tabSession?.mode ?? null}
+                  defaultModes={defaultModes}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   onChangeModelConfig={(patch) =>
                     void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
                   }
+                  onChangeMode={(mode) =>
+                    void updateSessionModelConfig({ sessionId: tab.sessionId, patch: { mode } })
+                  }
+                  onSetDefaultMode={(mode) => {
+                    if (tab.provider) void setDefaultProviderMode(tab.provider, mode);
+                  }}
                   onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
