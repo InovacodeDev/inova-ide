@@ -68,6 +68,7 @@ const PARAGRAPH_OPTIONS: readonly { format: ComposerFormat; label: string }[] = 
 
 export interface ComposerToolbarProps {
   isMac: boolean;
+  active: ReadonlySet<ComposerFormat>;
   onFormat: (format: ComposerFormat) => void;
 }
 
@@ -76,6 +77,7 @@ const keepSelection = (event: MouseEvent) => event.preventDefault();
 function ToolbarGroup({
   actions,
   isMac,
+  active,
   onFormat,
 }: ComposerToolbarProps & { actions: readonly ToolbarAction[] }) {
   return (
@@ -90,6 +92,7 @@ function ToolbarGroup({
             type="button"
             className="chat-format-btn"
             aria-label={title}
+            aria-pressed={active.has(action.format)}
             title={title}
             onMouseDown={keepSelection}
             onClick={() => onFormat(action.format)}
@@ -102,7 +105,7 @@ function ToolbarGroup({
   );
 }
 
-function ParagraphMenu({ onFormat }: Pick<ComposerToolbarProps, 'onFormat'>) {
+function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active' | 'onFormat'>) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +133,7 @@ function ParagraphMenu({ onFormat }: Pick<ComposerToolbarProps, 'onFormat'>) {
       <button
         type="button"
         className="chat-format-btn chat-format-btn-wide"
+        aria-pressed={PARAGRAPH_OPTIONS.some((option) => active.has(option.format))}
         aria-label="Estilo do parágrafo"
         title="Estilo do parágrafo"
         aria-haspopup="menu"
@@ -147,6 +151,7 @@ function ParagraphMenu({ onFormat }: Pick<ComposerToolbarProps, 'onFormat'>) {
               key={option.format}
               type="button"
               role="menuitem"
+              aria-current={active.has(option.format) ? 'true' : undefined}
               className="chat-format-item"
               onMouseDown={keepSelection}
               onClick={() => {
@@ -163,15 +168,15 @@ function ParagraphMenu({ onFormat }: Pick<ComposerToolbarProps, 'onFormat'>) {
   );
 }
 
-export function ComposerToolbar({ isMac, onFormat }: ComposerToolbarProps) {
+export function ComposerToolbar({ isMac, active, onFormat }: ComposerToolbarProps) {
   return (
     <div className="chat-format-toolbar" role="toolbar" aria-label="Formatação da mensagem">
-      <ToolbarGroup actions={INLINE_ACTIONS} isMac={isMac} onFormat={onFormat} />
-      <ParagraphMenu onFormat={onFormat} />
+      <ToolbarGroup actions={INLINE_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
+      <ParagraphMenu active={active} onFormat={onFormat} />
       <span className="chat-format-sep" aria-hidden="true" />
-      <ToolbarGroup actions={LIST_ACTIONS} isMac={isMac} onFormat={onFormat} />
+      <ToolbarGroup actions={LIST_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
       <span className="chat-format-sep" aria-hidden="true" />
-      <ToolbarGroup actions={BLOCK_ACTIONS} isMac={isMac} onFormat={onFormat} />
+      <ToolbarGroup actions={BLOCK_ACTIONS} isMac={isMac} active={active} onFormat={onFormat} />
     </div>
   );
 }
