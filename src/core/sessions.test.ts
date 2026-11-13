@@ -49,6 +49,16 @@ describe('sessions', () => {
     expect((await loadStore(root)).sessions).toEqual([session]);
   });
 
+  it('createSession stores a given provider session id so the first turn resumes it', async () => {
+    const session = await createSession({
+      root,
+      projectId: 'p1',
+      title: 'Importada',
+      providerSessionId: 'external-id',
+    });
+    expect(session).toMatchObject({ title: 'Importada', providerSessionId: 'external-id' });
+  });
+
   it('createSession rejects unknown project', async () => {
     expect(await codeOf(createSession({ root, projectId: 'nope' }))).toBe('project-not-found');
   });

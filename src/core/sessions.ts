@@ -182,6 +182,7 @@ export async function createSession(ctx: {
   projectId: string;
   parentId?: string | null;
   title?: string;
+  providerSessionId?: string | null;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
   comparisonGroupId?: string | null;
@@ -235,7 +236,7 @@ export async function createSession(ctx: {
       projectId: ctx.projectId,
       parentId,
       title: ctx.title ?? (parentId === null ? 'Nova sessão' : 'Subsessão'),
-      providerSessionId: null,
+      providerSessionId: ctx.providerSessionId ?? null,
       ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
       ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
       ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
