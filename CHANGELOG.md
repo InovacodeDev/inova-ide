@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.5.2] - 2026-11-13
+
 ### Adicionado
 
 - Notificação de nova versão, com aviso no app e no sistema.
