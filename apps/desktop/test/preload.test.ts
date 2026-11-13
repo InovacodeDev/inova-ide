@@ -112,4 +112,93 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   expect(electron.invoke).toHaveBeenCalledWith('inova:listAccounts');
   void api.listModels({ accountLabel: 'pessoal' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:listModels', { accountLabel: 'pessoal' });
+  void api.searchFiles({ projectId: 'p', query: 'app' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:searchFiles', {
+    projectId: 'p',
+    query: 'app',
+  });
+  void api.listCommands({ projectId: 'p' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listCommands', { projectId: 'p' });
+  void api.getDefaultModes();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getDefaultModes');
+  void api.setDefaultMode({ provider: 'claude', mode: 'plan' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:setDefaultMode', {
+    provider: 'claude',
+    mode: 'plan',
+  });
+  void api.getWorktreeStatus({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getWorktreeStatus', { sessionId: 's' });
+  void api.applyWorktree({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:applyWorktree', { sessionId: 's' });
+  void api.restoreCheckpoint({ sessionId: 's', ref: 'refs/inova/checkpoints/s/1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:restoreCheckpoint', {
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  void api.detectProjectChecks({ projectId: 'p' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:detectProjectChecks', { projectId: 'p' });
+  void api.updateProjectVerification({ projectId: 'p', autoVerify: true });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:updateProjectVerification', {
+    projectId: 'p',
+    autoVerify: true,
+  });
+  void api.runVerification({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:runVerification', { sessionId: 's' });
+  void api.enqueueTurn({ sessionId: 's', prompt: 'oi' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:enqueueTurn', {
+    sessionId: 's',
+    prompt: 'oi',
+  });
+  void api.cancelQueuedTurn({ turnId: 't1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:cancelQueuedTurn', { turnId: 't1' });
+  void api.listTurnQueue();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listTurnQueue');
+  void api.switchSessionAccount({ sessionId: 's', accountId: 'a2' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:switchSessionAccount', {
+    sessionId: 's',
+    accountId: 'a2',
+  });
+  void api.handoffSession({ sessionId: 's', targetAccountId: 'a2' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:handoffSession', {
+    sessionId: 's',
+    targetAccountId: 'a2',
+  });
+  void api.forkSession({ sessionId: 's', turnIndex: 0 });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:forkSession', {
+    sessionId: 's',
+    turnIndex: 0,
+  });
+  void api.listInbox();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listInbox');
+  void api.markInboxRead({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:markInboxRead', { sessionId: 's' });
+  void api.clearReadInbox();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:clearReadInbox');
+  void api.startComparison({
+    projectId: 'p',
+    prompt: 'oi',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+  });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:startComparison', {
+    projectId: 'p',
+    prompt: 'oi',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+  });
+  void api.getComparisonDiff({ groupId: 'g1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:getComparisonDiff', { groupId: 'g1' });
+  void api.resolveComparison({ groupId: 'g1', winner: 'right', cleanupWorktrees: true });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:resolveComparison', {
+    groupId: 'g1',
+    winner: 'right',
+    cleanupWorktrees: true,
+  });
+  void api.previewProfileSync({ projectId: 'p' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:previewProfileSync', { projectId: 'p' });
+  void api.applyProfileSync({ projectId: 'p', approvedIds: ['mcp:a1'] });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:applyProfileSync', {
+    projectId: 'p',
+    approvedIds: ['mcp:a1'],
+  });
 });

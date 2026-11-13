@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { Notification, app, BrowserWindow, dialog, shell } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
 import { createChatRunner } from './chat.js';
@@ -165,6 +165,11 @@ void app.whenReady().then(async () => {
       },
       emit: (sessionId, event) => sendToWindow(CHANNELS.chatEvent, { sessionId, event }),
       emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
+      emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
+      emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
+      notify: ({ title, body }) => {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      },
       baseEnv,
       pickFolder,
     });

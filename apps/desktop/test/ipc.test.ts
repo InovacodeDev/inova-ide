@@ -28,11 +28,28 @@ function setup() {
       'listSessions',
       'createSession',
       'updateSession',
+      'getDefaultModes',
+      'setDefaultMode',
       'deleteSession',
+      'getWorktreeStatus',
+      'applyWorktree',
+      'restoreCheckpoint',
+      'detectProjectChecks',
+      'updateProjectVerification',
+      'runVerification',
       'getWorkspace',
       'saveWorkspace',
       'loadTranscript',
       'sendMessage',
+      'enqueueTurn',
+      'cancelQueuedTurn',
+      'listTurnQueue',
+      'switchSessionAccount',
+      'handoffSession',
+      'forkSession',
+      'listInbox',
+      'markInboxRead',
+      'clearReadInbox',
       'getUsage',
       'listModels',
       'startLogin',
@@ -40,10 +57,18 @@ function setup() {
       'listAccounts',
       'listProjects',
       'pickFolder',
+      'searchFiles',
+      'listCommands',
+      'startComparison',
+      'getComparisonDiff',
+      'resolveComparison',
+      'previewProfileSync',
+      'applyProfileSync',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
   handlers['cancelLogin'] = vi.fn();
+  handlers['reportUiFocus'] = vi.fn();
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
     allowedOrigin: APP,
@@ -115,6 +140,10 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   const input = { sessionId: 's', prompt: 'oi' };
   await invoke('inova:sendMessage', trusted, input);
   expect(handlers['sendMessage']).toHaveBeenCalledWith(input);
+  await invoke('inova:searchFiles', trusted, { projectId: 'p', query: 'a' });
+  expect(handlers['searchFiles']).toHaveBeenCalledWith({ projectId: 'p', query: 'a' });
+  await invoke('inova:listCommands', trusted, { projectId: 'p' });
+  expect(handlers['listCommands']).toHaveBeenCalledWith({ projectId: 'p' });
   for (const name of ['listSessions', 'createSession', 'updateSession', 'deleteSession']) {
     await invoke(`inova:${name}`, trusted, input);
     expect(handlers[name]).toHaveBeenCalledWith(input);
@@ -127,9 +156,53 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:loadTranscript', trusted, input);
   await invoke('inova:getUsage', trusted, input);
   await invoke('inova:listModels', trusted, input);
+  await invoke('inova:getDefaultModes', trusted);
+  await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
+  await invoke('inova:getWorktreeStatus', trusted, { sessionId: 's' });
+  await invoke('inova:applyWorktree', trusted, { sessionId: 's' });
+  await invoke('inova:restoreCheckpoint', trusted, {
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  await invoke('inova:detectProjectChecks', trusted, { projectId: 'p' });
+  await invoke('inova:updateProjectVerification', trusted, { projectId: 'p', autoVerify: true });
+  await invoke('inova:runVerification', trusted, { sessionId: 's' });
+  await invoke('inova:enqueueTurn', trusted, input);
+  await invoke('inova:cancelQueuedTurn', trusted, { turnId: 't1' });
+  await invoke('inova:listTurnQueue', trusted);
+  await invoke('inova:switchSessionAccount', trusted, { sessionId: 's', accountId: 'a2' });
+  await invoke('inova:handoffSession', trusted, { sessionId: 's', targetAccountId: 'a2' });
+  await invoke('inova:forkSession', trusted, { sessionId: 's', turnIndex: 0 });
+  await invoke('inova:listInbox', trusted);
+  await invoke('inova:markInboxRead', trusted, { sessionId: 's' });
+  await invoke('inova:clearReadInbox', trusted);
+  await invoke('inova:startComparison', trusted, {
+    projectId: 'p',
+    prompt: 'oi',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+  });
+  await invoke('inova:getComparisonDiff', trusted, { groupId: 'g1' });
+  await invoke('inova:resolveComparison', trusted, { groupId: 'g1', winner: 'left' });
+  await invoke('inova:previewProfileSync', trusted, { projectId: 'p' });
+  await invoke('inova:applyProfileSync', trusted, { projectId: 'p', approvedIds: ['x'] });
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
+  expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
+  expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });
+  expect(handlers['getWorktreeStatus']).toHaveBeenCalledWith({ sessionId: 's' });
+  expect(handlers['applyWorktree']).toHaveBeenCalledWith({ sessionId: 's' });
+  expect(handlers['restoreCheckpoint']).toHaveBeenCalledWith({
+    sessionId: 's',
+    ref: 'refs/inova/checkpoints/s/1',
+  });
+  expect(handlers['detectProjectChecks']).toHaveBeenCalledWith({ projectId: 'p' });
+  expect(handlers['updateProjectVerification']).toHaveBeenCalledWith({
+    projectId: 'p',
+    autoVerify: true,
+  });
+  expect(handlers['runVerification']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(electron.invokes.has('inova:openProject')).toBe(false);
 });
 

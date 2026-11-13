@@ -16,7 +16,11 @@ export interface NewSessionViewProps {
   accounts: AccountView[];
   projects: ProjectView[];
   onPickFolder: () => Promise<string | null>;
-  onStart: (input: { target: NewSessionTarget; prompt: string }) => Promise<void>;
+  onStart: (input: {
+    target: NewSessionTarget;
+    prompt: string;
+    isolatedWorktree?: boolean;
+  }) => Promise<void>;
   onCancel: () => void;
   onManageAccounts: () => void;
 }
@@ -33,6 +37,7 @@ export function NewSessionView(props: NewSessionViewProps) {
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<ProviderId | null>(null);
   const [pickedLabel, setPickedLabel] = useState<string | null>(null);
+  const [isolatedWorktreeOverride, setIsolatedWorktreeOverride] = useState<boolean | null>(null);
   const [prompt, setPrompt] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -78,12 +83,14 @@ export function NewSessionView(props: NewSessionViewProps) {
     else setFolderPath(path);
   };
 
+  const isolatedWorktree = isolatedWorktreeOverride ?? project?.autoWorktree ?? false;
+
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!target || submitting) return;
     setSubmitting(true);
     try {
-      await onStart({ target, prompt: prompt.trim() });
+      await onStart({ target, prompt: prompt.trim(), isolatedWorktree });
     } finally {
       setSubmitting(false);
     }
@@ -215,6 +222,17 @@ export function NewSessionView(props: NewSessionViewProps) {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
+        </div>
+
+        <div className="new-session-group">
+          <label className="new-session-check">
+            <input
+              type="checkbox"
+              checked={isolatedWorktree}
+              onChange={(e) => setIsolatedWorktreeOverride(e.target.checked)}
+            />
+            <span>Isolar sessão em Git worktree</span>
+          </label>
         </div>
 
         <div className="new-session-footer">

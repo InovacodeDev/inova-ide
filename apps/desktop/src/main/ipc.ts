@@ -37,18 +37,45 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.listSessions, (input) => handlers.listSessions(input));
   handle(CHANNELS.createSession, (input) => handlers.createSession(input));
   handle(CHANNELS.updateSession, (input) => handlers.updateSession(input));
+  handle(CHANNELS.getDefaultModes, () => handlers.getDefaultModes());
+  handle(CHANNELS.setDefaultMode, (input) => handlers.setDefaultMode(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
+  handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
+  handle(CHANNELS.applyWorktree, (input) => handlers.applyWorktree(input));
+  handle(CHANNELS.restoreCheckpoint, (input) => handlers.restoreCheckpoint(input));
+  handle(CHANNELS.detectProjectChecks, (input) => handlers.detectProjectChecks(input));
+  handle(CHANNELS.updateProjectVerification, (input) => handlers.updateProjectVerification(input));
+  handle(CHANNELS.runVerification, (input) => handlers.runVerification(input));
   handle(CHANNELS.getWorkspace, () => handlers.getWorkspace());
   handle(CHANNELS.saveWorkspace, (input) => handlers.saveWorkspace(input));
   handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
   handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
+  handle(CHANNELS.enqueueTurn, (input) => handlers.enqueueTurn(input));
+  handle(CHANNELS.cancelQueuedTurn, (input) => handlers.cancelQueuedTurn(input));
+  handle(CHANNELS.listTurnQueue, () => handlers.listTurnQueue());
+  handle(CHANNELS.switchSessionAccount, (input) => handlers.switchSessionAccount(input));
+  handle(CHANNELS.handoffSession, (input) => handlers.handoffSession(input));
+  handle(CHANNELS.forkSession, (input) => handlers.forkSession(input));
+  handle(CHANNELS.listInbox, () => handlers.listInbox());
+  handle(CHANNELS.markInboxRead, (input) => handlers.markInboxRead(input));
+  handle(CHANNELS.clearReadInbox, () => handlers.clearReadInbox());
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
+  handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
+  handle(CHANNELS.listCommands, (input) => handlers.listCommands(input));
+  handle(CHANNELS.startComparison, (input) => handlers.startComparison(input));
+  handle(CHANNELS.getComparisonDiff, (input) => handlers.getComparisonDiff(input));
+  handle(CHANNELS.resolveComparison, (input) => handlers.resolveComparison(input));
+  handle(CHANNELS.previewProfileSync, (input) => handlers.previewProfileSync(input));
+  handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);
+  });
+  listen(CHANNELS.reportUiFocus, (payload) => {
+    handlers.reportUiFocus(payload);
   });
   listen(CHANNELS.cancelLogin, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelLogin(sessionId);

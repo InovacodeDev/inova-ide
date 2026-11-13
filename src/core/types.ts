@@ -3,6 +3,8 @@ export type ProviderId =
 
 export type EffortLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export type ExecutionMode = 'auto' | 'manual' | 'accept-edits' | 'plan' | 'bypass' | 'read-only';
+
 export interface Account {
   id: string;
   provider: ProviderId;
@@ -11,10 +13,27 @@ export interface Account {
   createdAt: string;
 }
 
+export interface VerificationCheck {
+  id: string;
+  label: string;
+  command: string;
+  enabled: boolean;
+}
+
 export interface Project {
   id: string;
   path: string;
   accountId: string;
+  autoWorktree?: boolean;
+  autoVerify?: boolean;
+  verificationChecks?: VerificationCheck[];
+}
+
+export interface SessionWorktree {
+  path: string;
+  branch: string;
+  baseCommit: string;
+  createdAt: string;
 }
 
 export interface Session {
@@ -23,11 +42,39 @@ export interface Session {
   parentId: string | null;
   title: string;
   providerSessionId: string | null;
+  accountIdOverride?: string | null;
+  handoffContext?: string | null;
+  comparisonGroupId?: string | null;
+  comparisonRole?: 'left' | 'right' | null;
   model?: string | null;
   effort?: EffortLevel | null;
+  mode?: ExecutionMode | null;
+  worktree?: SessionWorktree | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
+}
+
+export type InboxAttentionKind = 'completed' | 'failed' | 'waiting-input';
+
+export interface InboxItem {
+  sessionId: string;
+  projectId: string;
+  sessionTitle: string;
+  projectName: string;
+  provider: ProviderId;
+  kind: InboxAttentionKind;
+  summary: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface QueuedTurn {
+  turnId: string;
+  sessionId: string;
+  accountId: string;
+  prompt: string;
+  enqueuedAt: string;
 }
 
 export interface Workspace {
@@ -41,4 +88,5 @@ export interface Store {
   projects: Project[];
   sessions?: Session[];
   workspace?: Workspace;
+  defaultModes?: Partial<Record<ProviderId, ExecutionMode>>;
 }

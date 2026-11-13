@@ -3,7 +3,7 @@ import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { createChatParser } from '@inova/core/chat-events';
 import type { ChatParser } from '@inova/core/chat-events';
-import type { ChatEvent, UsageWindow } from '@inova/core/chat-types';
+import type { ChatEvent, UsageWindow, VerificationCheckResult } from '@inova/core/chat-types';
 import type { LaunchSpec } from '@inova/core/launch';
 import type { ProviderId } from '@inova/core/types';
 
@@ -33,6 +33,7 @@ export interface ChatRunner {
   cancel(sessionId: string): void;
   isRunning(sessionId: string): boolean;
   accountsInUse(): ReadonlySet<string>;
+  onAccountIdle?(listener: (accountId: string) => void): () => void;
   closeAll(): Promise<void>;
 }
 
@@ -96,6 +97,29 @@ function windowsOf(value: unknown): UsageWindow[] | undefined {
   return windows;
 }
 
+function checkResultsOf(value: unknown): VerificationCheckResult[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const results: VerificationCheckResult[] = [];
+  for (const item of value as unknown[]) {
+    if (!isJson(item)) return undefined;
+    const { id, label, command, passed, exitCode, timedOut, durationMs, output } = item;
+    if (
+      typeof id !== 'string' ||
+      typeof label !== 'string' ||
+      typeof command !== 'string' ||
+      typeof passed !== 'boolean' ||
+      !numberOrNull(exitCode) ||
+      typeof timedOut !== 'boolean' ||
+      typeof durationMs !== 'number' ||
+      typeof output !== 'string'
+    ) {
+      return undefined;
+    }
+    results.push({ id, label, command, passed, exitCode, timedOut, durationMs, output });
+  }
+  return results;
+}
+
 function eventOf(record: Json): ChatEvent | undefined {
   switch (record['kind']) {
     case 'session':
@@ -132,6 +156,32 @@ function eventOf(record: Json): ChatEvent | undefined {
       const windows = windowsOf(record['windows']);
       return windows && { kind: 'usage-limits', windows };
     }
+    case 'checkpoint': {
+      const { turnId, ref, createdAt, skippedLargeFiles } = record;
+      if (
+        typeof turnId !== 'string' ||
+        typeof ref !== 'string' ||
+        typeof createdAt !== 'string' ||
+        !Array.isArray(skippedLargeFiles) ||
+        !skippedLargeFiles.every((entry) => typeof entry === 'string')
+      ) {
+        return undefined;
+      }
+      return { kind: 'checkpoint', turnId, ref, createdAt, skippedLargeFiles };
+    }
+    case 'verification': {
+      const { turnId, status, checks } = record;
+      if (
+        typeof turnId !== 'string' ||
+        (status !== 'running' && status !== 'passed' && status !== 'failed' && status !== 'skipped')
+      ) {
+        return undefined;
+      }
+      const parsedChecks = checkResultsOf(checks);
+      return parsedChecks
+        ? { kind: 'verification', turnId, status, checks: parsedChecks }
+        : undefined;
+    }
     case 'error':
       return strings(record, ['message'])
         ? { kind: 'error', message: String(record['message']) }
@@ -164,6 +214,7 @@ export function createChatRunner(deps: {
   emit: (sessionId: string, event: ChatEvent) => void;
 }): ChatRunner {
   const turns = new Map<string, Turn>();
+  const idleListeners = new Set<(accountId: string) => void>();
 
   function signal(turn: Turn, name: NodeJS.Signals): void {
     if (turn.pid === undefined) return;
@@ -196,6 +247,12 @@ export function createChatRunner(deps: {
     if (!turn.doneSeen) {
       deps.emit(sessionId, { kind: 'error', message });
       deps.emit(sessionId, { kind: 'done', isError: true, costUsd: null, durationMs: null });
+    }
+    const stillBusy = [...turns.values()].some((active) => active.accountId === turn.accountId);
+    if (!stillBusy) {
+      for (const listener of idleListeners) {
+        listener(turn.accountId);
+      }
     }
     turn.settle();
   }
@@ -299,6 +356,10 @@ export function createChatRunner(deps: {
     cancel,
     isRunning: (sessionId) => turns.has(sessionId),
     accountsInUse: () => new Set([...turns.values()].map((turn) => turn.accountId)),
+    onAccountIdle: (listener) => {
+      idleListeners.add(listener);
+      return () => idleListeners.delete(listener);
+    },
     async closeAll() {
       const running = [...turns.entries()];
       for (const [sessionId] of running) cancel(sessionId);

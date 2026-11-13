@@ -1,6 +1,8 @@
-import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
@@ -890,4 +892,397 @@ test('listModels returns dynamic agy models for gemini, caches them, and falls b
     { id: 'deepseek/deepseek-reasoner', label: 'deepseek-reasoner', description: 'deepseek' },
     { id: 'openai/gpt-5', label: 'gpt-5', description: 'openai' },
   ]);
+});
+
+test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, 'src'), { recursive: true });
+  await writeFile(join(project.path, 'src', 'alpha.ts'), '');
+
+  const first = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'alpha' }));
+  expect(first.files).toEqual(['src/alpha.ts']);
+
+  await writeFile(join(project.path, 'src', 'beta.ts'), '');
+  const cached = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'beta' }));
+  expect(cached.files).toEqual([]);
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  const refreshed = unwrap(await handlers.searchFiles({ projectId: project.id, query: 'beta' }));
+  expect(refreshed.files).toEqual(['src/beta.ts']);
+});
+
+test('listCommands returns project prompts and skills across providers', async () => {
+  const { root, handlers } = await setup();
+  const { project } = await seedProject(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'review.md'),
+    '---\ndescription: Code review\n---\nReview $ARGUMENTS',
+  );
+
+  const commands = unwrap(await handlers.listCommands({ projectId: project.id }));
+  expect(commands).toEqual([
+    {
+      name: 'review',
+      description: 'Code review',
+      source: 'claude',
+      kind: 'command',
+      body: 'Review $ARGUMENTS',
+    },
+  ]);
+});
+
+test('provider execution modes validate per-provider support, persist defaults, and pass CLI flags', async () => {
+  const { root, handlers, send } = await setup();
+  const { project, session } = await seedSession(root);
+
+  const unsupported = await handlers.updateSession({ sessionId: session.id, mode: 'read-only' });
+  expect(unsupported.ok).toBe(false);
+
+  const updated = unwrap(await handlers.updateSession({ sessionId: session.id, mode: 'plan' }));
+  expect(updated.mode).toBe('plan');
+
+  await handlers.sendMessage({ sessionId: session.id, prompt: 'Planeje' });
+  const firstCall = send.mock.calls[0]?.[0];
+  expect(firstCall?.spec.args).toContain('--permission-mode');
+  const permIdx = firstCall?.spec.args.indexOf('--permission-mode') ?? -1;
+  expect(firstCall?.spec.args[permIdx + 1]).toBe('plan');
+
+  const badDefault = await handlers.setDefaultMode({ provider: 'claude', mode: 'read-only' });
+  expect(badDefault.ok).toBe(false);
+
+  const savedDefaults = unwrap(await handlers.setDefaultMode({ provider: 'claude', mode: 'auto' }));
+  expect(savedDefaults).toEqual({ claude: 'auto' });
+  expect(unwrap(await handlers.getDefaultModes())).toEqual({ claude: 'auto' });
+
+  const inheritedSession = unwrap(await handlers.createSession({ projectId: project.id }));
+  expect(inheritedSession.mode).toBe('auto');
+});
+
+test('worktrees isolate turns, searchFiles sees worktree files, checkpoints restore edits, and verification runs after done', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers, send, emitted } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'work' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'package.json'), JSON.stringify({ scripts: { test: 'echo ok' } }));
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+  const project = unwrap(await handlers.bindProject({ path: repoDir, accountLabel: 'work' }));
+  const detected = unwrap(await handlers.detectProjectChecks({ projectId: project.id }));
+  expect(detected.some((c) => c.id === 'test')).toBe(true);
+
+  unwrap(
+    await handlers.updateProjectVerification({
+      projectId: project.id,
+      autoVerify: true,
+      verificationChecks: [{ id: 'fail-check', label: 'Falha', command: 'exit 1', enabled: true }],
+    }),
+  );
+
+  const isolated = unwrap(
+    await handlers.createSession({ projectId: project.id, isolatedWorktree: true }),
+  );
+  expect(isolated.worktree?.branch).toMatch(/^inova\/s-/);
+  const wtPath = isolated.worktree!.path;
+  await writeFile(join(wtPath, 'only-in-wt.ts'), 'export const w = 2;\n');
+
+  const wtSearch = unwrap(
+    await handlers.searchFiles({
+      projectId: project.id,
+      sessionId: isolated.id,
+      query: 'only-in-wt',
+    }),
+  );
+  expect(wtSearch.files).toEqual(['only-in-wt.ts']);
+
+  await handlers.sendMessage({ sessionId: isolated.id, prompt: 'Editar' });
+  expect(send.mock.calls[0]?.[0].spec.cwd).toBe(wtPath);
+  const checkpointEvent = emitted.find(
+    (entry) => entry.sessionId === isolated.id && entry.event.kind === 'checkpoint',
+  )?.event;
+  expect(checkpointEvent?.kind).toBe('checkpoint');
+
+  await writeFile(join(wtPath, 'index.ts'), 'export const v = 999;\n');
+  const statusBeforeApply = unwrap(await handlers.getWorktreeStatus({ sessionId: isolated.id }));
+  expect(statusBeforeApply.changedFiles).toContain('index.ts');
+
+  if (checkpointEvent?.kind === 'checkpoint') {
+    unwrap(
+      await handlers.restoreCheckpoint({
+        sessionId: isolated.id,
+        ref: checkpointEvent.ref,
+      }),
+    );
+    expect(await readFile(join(wtPath, 'index.ts'), 'utf8')).toBe('export const v = 1;\n');
+  }
+
+  await writeFile(join(wtPath, 'index.ts'), 'export const v = 2;\n');
+  unwrap(await handlers.applyWorktree({ sessionId: isolated.id }));
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+
+  handlers.handleChatEvent(isolated.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  const verifEvent = emitted
+    .filter((entry) => entry.sessionId === isolated.id && entry.event.kind === 'verification')
+    .at(-1)?.event;
+  expect(verifEvent).toMatchObject({ kind: 'verification', status: 'failed' });
+
+  const nonForcedDelete = await handlers.deleteSession({ sessionId: isolated.id, force: false });
+  expect(nonForcedDelete.ok).toBe(false);
+  unwrap(await handlers.deleteSession({ sessionId: isolated.id, force: true }));
+});
+
+test('turn queue rejects busy account, drains FIFO on done, and tracks inbox notifications', async () => {
+  const { root, handlers, send, chatInUse } = await setup();
+  const { project, session: s1 } = await seedSession(root);
+  const s2 = unwrap(await handlers.createSession({ projectId: project.id }));
+  const store = await loadStore(root);
+  const accountId = store.accounts[0]!.id;
+
+  unwrap(await handlers.sendMessage({ sessionId: s1.id, prompt: 'Primeiro' }));
+  chatInUse.add(accountId);
+  const busy = await handlers.sendMessage({ sessionId: s2.id, prompt: 'Na fila' });
+  expect(busy.ok).toBe(false);
+  if (!busy.ok) expect(busy.message).toContain('CONTA_OCUPADA:');
+
+  const queued = unwrap(await handlers.enqueueTurn({ sessionId: s2.id, prompt: 'Na fila' }));
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+
+  const queuedCancel = unwrap(await handlers.enqueueTurn({ sessionId: s2.id, prompt: 'Cancelar' }));
+  unwrap(await handlers.cancelQueuedTurn({ turnId: queuedCancel.turnId }));
+  expect(unwrap(await handlers.listTurnQueue())).toEqual([queued]);
+
+  chatInUse.delete(accountId);
+
+  handlers.reportUiFocus({ activeSessionId: null, windowFocused: false });
+  handlers.handleChatEvent(s1.id, { kind: 'text', blockId: 'b1', text: 'Concluido' });
+  handlers.handleChatEvent(s1.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  await new Promise((r) => setTimeout(r, 80));
+
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(s2.id);
+
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.some((item) => item.sessionId === s1.id && item.unread)).toBe(true);
+  const afterRead = unwrap(await handlers.markInboxRead({ sessionId: s1.id }));
+  expect(afterRead.find((item) => item.sessionId === s1.id)?.unread).toBe(false);
+  const afterClear = unwrap(await handlers.clearReadInbox());
+  expect(afterClear.some((item) => item.sessionId === s1.id)).toBe(false);
+});
+
+test('switchSessionAccount, handoffSession, and forkSession preserve context across turns and providers', async () => {
+  const { root, handlers, send } = await setup();
+  const { project, session } = await seedSession(root);
+  const altAccount = await addAccount({ root, provider: 'codex', label: 'codex-alt' });
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'session',
+    providerSessionId: 'cli-sess-1',
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b0', text: 'Resp 0' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 5,
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 1', at: 't1' });
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b1', text: 'Resp 1' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 5,
+  });
+
+  const nativeFork = unwrap(await handlers.forkSession({ sessionId: session.id, turnIndex: 1 }));
+  expect(nativeFork.strategy).toBe('native-claude');
+
+  const partialFork = unwrap(
+    await handlers.forkSession({
+      sessionId: session.id,
+      turnIndex: 0,
+      targetAccountId: altAccount.id,
+    }),
+  );
+  expect(partialFork.strategy).toBe('summary-handoff');
+  expect(partialFork.session.handoffContext).toContain('Turno 0');
+  expect(partialFork.session.handoffContext).not.toContain('Turno 1');
+
+  const handoff = unwrap(
+    await handlers.handoffSession({ sessionId: session.id, targetAccountId: altAccount.id }),
+  );
+  expect(handoff.handoffContext).toContain('Contexto de handoff');
+
+  const s2 = unwrap(await handlers.createSession({ projectId: project.id }));
+  handlers.handleChatEvent(s2.id, { kind: 'user', text: 'Inicio', at: 't0' });
+  handlers.handleChatEvent(s2.id, {
+    kind: 'error',
+    message: '429 rate_limit_exceeded',
+  });
+  handlers.handleChatEvent(s2.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 5,
+  });
+  await new Promise((r) => setTimeout(r, 40));
+
+  const switched = unwrap(
+    await handlers.switchSessionAccount({
+      sessionId: s2.id,
+      accountId: altAccount.id,
+      generateHandoff: true,
+    }),
+  );
+  expect(switched.hadHistory).toBe(true);
+  expect(switched.session.accountIdOverride).toBe(altAccount.id);
+
+  unwrap(await handlers.sendMessage({ sessionId: s2.id, prompt: 'Continuar' }));
+  expect(send.mock.calls[0]?.[0].provider).toBe('codex');
+  expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
+});
+
+test('startComparison runs two isolated sessions in parallel, computes diffs, and applies winner', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers, send } = await setup();
+  const leftAcc = await addAccount({ root, provider: 'claude', label: 'cmp-claude' });
+  const rightAcc = await addAccount({ root, provider: 'codex', label: 'cmp-codex' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'file.ts'), 'export const n = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+  const project = unwrap(await handlers.bindProject({ path: repoDir, accountLabel: 'cmp-claude' }));
+
+  const started = unwrap(
+    await handlers.startComparison({
+      projectId: project.id,
+      prompt: 'Implemente feature X',
+      leftAccountId: leftAcc.id,
+      rightAccountId: rightAcc.id,
+      leftEffort: 'high',
+      rightMode: 'read-only',
+    }),
+  );
+
+  expect(started.left.comparisonGroupId).toBe(started.groupId);
+  expect(started.left.comparisonRole).toBe('left');
+  expect(started.right.comparisonRole).toBe('right');
+  expect(send).toHaveBeenCalledTimes(2);
+  const cwds = send.mock.calls.map((call) => call[0].spec.cwd);
+  expect(cwds).toContain(started.left.worktree?.path);
+  expect(cwds).toContain(started.right.worktree?.path);
+
+  await writeFile(join(started.left.worktree!.path, 'file.ts'), 'export const n = 10;\n');
+  await writeFile(join(started.right.worktree!.path, 'file.ts'), 'export const n = 20;\n');
+
+  const diff = unwrap(await handlers.getComparisonDiff({ groupId: started.groupId }));
+  expect(diff.files[0]?.path).toBe('file.ts');
+  expect(diff.files[0]?.leftDiff).toContain('+export const n = 10;');
+  expect(diff.files[0]?.rightDiff).toContain('+export const n = 20;');
+
+  const resolved = unwrap(
+    await handlers.resolveComparison({
+      groupId: started.groupId,
+      winner: 'right',
+      cleanupWorktrees: true,
+    }),
+  );
+  expect(resolved.winnerSessionId).toBe(started.right.id);
+  expect(await readFile(join(repoDir, 'file.ts'), 'utf8')).toBe('export const n = 20;\n');
+});
+
+test('previewProfileSync and applyProfileSync synchronize .mcp.json and project rules with backups', async () => {
+  const { root, handlers } = await setup();
+  const claudeAcc = await addAccount({ root, provider: 'claude', label: 'sync-claude' });
+  const codexAcc = await addAccount({ root, provider: 'codex', label: 'sync-codex' });
+  const repoDir = await tmp();
+  await writeFile(
+    join(repoDir, '.mcp.json'),
+    JSON.stringify({
+      mcpServers: {
+        linear: {
+          command: 'npx',
+          args: ['-y', '@linear/mcp'],
+          env: { LINEAR_TOKEN: 'lin_secret_xyz' },
+        },
+      },
+    }),
+  );
+  await writeFile(join(repoDir, 'AGENTS.md'), '# Regras oficiais\n');
+  const project = unwrap(
+    await handlers.bindProject({ path: repoDir, accountLabel: claudeAcc.label }),
+  );
+
+  const preview = unwrap(
+    await handlers.previewProfileSync({
+      projectId: project.id,
+      accountIds: [claudeAcc.id, codexAcc.id],
+      rulesSource: 'AGENTS.md',
+    }),
+  );
+  expect(preview.mcpServerCount).toBe(1);
+  expect(
+    preview.items.some((item) => item.id === 'rules:CLAUDE.md' && item.status === 'create'),
+  ).toBe(true);
+
+  const applied = unwrap(
+    await handlers.applyProfileSync({
+      projectId: project.id,
+      accountIds: [claudeAcc.id, codexAcc.id],
+      rulesSource: 'AGENTS.md',
+      approvedIds: preview.items.map((item) => item.id),
+      rulesStrategy: 'copy',
+    }),
+  );
+  expect(applied.appliedIds).toContain(`mcp:${codexAcc.id}`);
+  expect(await readFile(join(repoDir, 'CLAUDE.md'), 'utf8')).toBe('# Regras oficiais\n');
+  expect(await readFile(join(codexAcc.homeDir, 'config.toml'), 'utf8')).toContain(
+    '[mcp_servers.linear]',
+  );
+});
+
+test('startComparison rejects unsupported effort without leaving orphan sessions or worktrees', async () => {
+  const { root, handlers } = await setup();
+  const repoDir = await tmp();
+  const claudeAcc = await addAccount({ root, provider: 'claude', label: 'cmp-c' });
+  const qwenAcc = await addAccount({ root, provider: 'qwen', label: 'cmp-q' });
+  const project = unwrap(
+    await handlers.bindProject({ path: repoDir, accountLabel: claudeAcc.label }),
+  );
+
+  const res = await handlers.startComparison({
+    projectId: project.id,
+    prompt: 'Implementar algo',
+    leftAccountId: claudeAcc.id,
+    rightAccountId: qwenAcc.id,
+    rightEffort: 'high',
+  });
+  expect(res.ok).toBe(false);
+  expect(unwrap(await handlers.listSessions({ projectId: project.id }))).toHaveLength(0);
 });

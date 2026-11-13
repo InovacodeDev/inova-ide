@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
-import { CloseIcon, FolderIcon, PencilIcon } from './icons';
+import { CloseIcon, FolderIcon, GitBranchIcon, PencilIcon, SwitchIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import { STATUS_LABEL, type SessionStatus } from './session-status';
@@ -14,9 +14,14 @@ interface SessionHeaderProps {
   provider: ProviderId | null;
   accountDisplay: string | null;
   path: string | null;
+  worktreeBranch?: string | null;
+  worktreeBusy?: boolean;
   status: SessionStatus | null;
   exited?: boolean;
   onRename?: (title: string) => void;
+  onInspectWorktree?: () => void;
+  onApplyWorktree?: () => void;
+  onHandoff?: () => void;
   onClose: () => void;
 }
 
@@ -29,9 +34,14 @@ export function SessionHeader(props: SessionHeaderProps) {
     provider,
     accountDisplay,
     path,
+    worktreeBranch = null,
+    worktreeBusy = false,
     status,
     exited,
     onRename,
+    onInspectWorktree,
+    onApplyWorktree,
+    onHandoff,
     onClose,
   } = props;
   const [editing, setEditing] = useState(false);
@@ -119,6 +129,29 @@ export function SessionHeader(props: SessionHeaderProps) {
               <span className="mono session-header-path">{path}</span>
             </span>
           ) : null}
+          {worktreeBranch ? (
+            <span className="session-header-worktree">
+              <span className="pill session-worktree-pill" title={worktreeBranch}>
+                <GitBranchIcon size={13} />
+                <span className="mono">{worktreeBranch}</span>
+              </span>
+              {onInspectWorktree ? (
+                <button type="button" className="btn btn-sm" onClick={onInspectWorktree}>
+                  Ver diff
+                </button>
+              ) : null}
+              {onApplyWorktree ? (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={worktreeBusy}
+                  onClick={onApplyWorktree}
+                >
+                  Aplicar
+                </button>
+              ) : null}
+            </span>
+          ) : null}
           {exited ? (
             <span className="pill pill-idle">
               <span className="dot" />
@@ -129,6 +162,17 @@ export function SessionHeader(props: SessionHeaderProps) {
               <span className={status === 'running' ? 'dot pulse' : 'dot'} />
               {STATUS_LABEL[status]}
             </span>
+          ) : null}
+          {onHandoff ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              title="Transferir sessão para outra conta ou provedor"
+              onClick={onHandoff}
+            >
+              <SwitchIcon size={13} />
+              Transferir
+            </button>
           ) : null}
         </div>
       </div>

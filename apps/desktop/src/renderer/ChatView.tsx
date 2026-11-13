@@ -1,30 +1,73 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ProviderId } from '@inova/core/types';
+import type { EffortLevel, ExecutionMode, ProviderId, QueuedTurn } from '@inova/core/types';
+import type { AccountView, ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
-import { FileIcon, PencilIcon, SendIcon, StopIcon, TerminalIcon } from './icons';
+import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
+import {
+  applyCommandSuggestion,
+  buildPromptWithAttachedFiles,
+  detachFileTrigger,
+  detectComposerTrigger,
+  filterCommands,
+  isSameComposerTrigger,
+  parseMessageFileSegments,
+  type ComposerTrigger,
+} from './composer-trigger';
+import {
+  ClockIcon,
+  CloseIcon,
+  FileIcon,
+  GitForkIcon,
+  PencilIcon,
+  PlayIcon,
+  RotateCcwIcon,
+  SendIcon,
+  StopIcon,
+  TerminalIcon,
+} from './icons';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
+import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import './chat.css';
 
 export interface ChatViewProps {
+  sessionId?: string | null;
+  projectId: string | null;
   state: ChatState;
   visible: boolean;
   provider: ProviderId | null;
   accountDisplay: string | null;
   model: string | null;
   effort: EffortLevel | null;
+  mode: ExecutionMode | null;
+  defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
+  inWorktree?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
+  queuedTurns?: readonly QueuedTurn[];
+  busyConflict?: { prompt: string; exhausted: boolean } | null;
+  alternativeAccounts?: readonly AccountView[];
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
+  onChangeMode: (mode: ExecutionMode) => void;
+  onSetDefaultMode: (mode: ExecutionMode) => void;
+  onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
+  onForkTurn?: (turnIndex: number) => void;
+  onOpenHandoff?: () => void;
+  onEnqueuePrompt?: (prompt: string) => void;
+  onCancelQueuedTurn?: (turnId: string) => void;
+  onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
+  onDismissBusyConflict?: () => void;
   onSend: (prompt: string) => void;
   onCancel: () => void;
 }
 
 const NEAR_BOTTOM_PX = 80;
 const MAX_COMPOSER_PX = 200;
+const FILE_SEARCH_DEBOUNCE_MS = 80;
 
 function firstLine(input: string): string {
   const line = input.split('\n').find((candidate) => candidate.trim() !== '') ?? '';
@@ -71,10 +114,107 @@ function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
   );
 }
 
+function buildVerificationRetryPrompt(item: Extract<ChatItem, { type: 'verification' }>): string {
+  const failed = item.checks.filter((check) => !check.passed);
+  const details = failed
+    .map((check) => {
+      const exitLabel = check.exitCode === null ? 'sem código' : String(check.exitCode);
+      const output = check.output.trim();
+      return output
+        ? `Comando: ${check.command} (exit ${exitLabel})\n\`\`\`\n${output}\n\`\`\``
+        : `Comando: ${check.command} (exit ${exitLabel})`;
+    })
+    .join('\n\n');
+  return `A verificação automática falhou. Corrija os erros abaixo:\n\n${details}`;
+}
+
+function VerificationCard({
+  item,
+  canFix,
+  onFix,
+}: {
+  item: Extract<ChatItem, { type: 'verification' }>;
+  canFix: boolean;
+  onFix: () => void;
+}) {
+  const statusLabel =
+    item.status === 'running'
+      ? 'Executando verificações'
+      : item.status === 'passed'
+        ? 'Verificação aprovada'
+        : item.status === 'skipped'
+          ? 'Verificação cancelada'
+          : 'Verificação falhou';
+  return (
+    <details
+      className={`chat-verification chat-verification-${item.status}`}
+      open={item.status === 'failed'}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <PlayIcon size={15} />
+        </span>
+        <span className="chat-tool-name">{statusLabel}</span>
+        <span className="chat-tool-preview">
+          {item.checks
+            .map(
+              (c) =>
+                `${c.passed ? 'OK' : item.status === 'running' ? '...' : item.status === 'skipped' ? '-' : 'ERRO'} ${c.label}`,
+            )
+            .join(' · ')}
+        </span>
+      </summary>
+      <div className="chat-tool-body">
+        {item.checks.map((check) => (
+          <div key={check.id} className="chat-verification-item">
+            <div className="chat-verification-item-head">
+              <span className="chat-tool-name">{check.label}</span>
+              <span className="mono chat-verification-cmd">{check.command}</span>
+              <span
+                className={
+                  check.passed
+                    ? 'chat-verification-badge chat-verification-ok'
+                    : item.status === 'running' || item.status === 'skipped'
+                      ? 'chat-verification-badge'
+                      : 'chat-verification-badge chat-verification-fail'
+                }
+              >
+                {item.status === 'running'
+                  ? 'executando'
+                  : item.status === 'skipped'
+                    ? 'cancelada'
+                    : check.passed
+                      ? `ok (${check.durationMs}ms)`
+                      : `falhou (${check.exitCode ?? 'erro'})`}
+              </span>
+            </div>
+            {check.output.trim() !== '' ? (
+              <pre className="chat-tool-pre">{check.output}</pre>
+            ) : null}
+          </div>
+        ))}
+        {item.status === 'failed' && canFix ? (
+          <div className="chat-verification-actions">
+            <button type="button" className="btn btn-sm btn-primary" onClick={onFix}>
+              Corrigir falha com o agente
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 interface MessageProps {
   item: ChatItem;
+  turnIndex: number;
   showAgentLabel: boolean;
   provider: ProviderId | null;
+  busy: boolean;
+  onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
+  onFixVerification?: (prompt: string) => void;
+  onForkTurn?: (turnIndex: number) => void;
+  onOpenHandoff?: () => void;
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
@@ -86,14 +226,53 @@ function AgentLabel({ provider }: { provider: ProviderId | null }) {
   );
 }
 
-function Message({ item, showAgentLabel, provider }: MessageProps) {
+function Message({
+  item,
+  turnIndex,
+  showAgentLabel,
+  provider,
+  busy,
+  onRestoreCheckpoint,
+  onFixVerification,
+  onForkTurn,
+  onOpenHandoff,
+}: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   switch (item.type) {
     case 'user':
       return (
         <div className="chat-row">
-          <div className="chat-label">Você</div>
-          <div className="chat-user-bubble">{item.text}</div>
+          <div className="chat-label chat-user-header">
+            <span>Você</span>
+            {onForkTurn ? (
+              <button
+                type="button"
+                className="chat-fork-btn"
+                disabled={busy}
+                title="Bifurcar sessão a partir deste turno"
+                onClick={() => onForkTurn(turnIndex)}
+              >
+                <GitForkIcon size={12} />
+                Bifurcar daqui
+              </button>
+            ) : null}
+          </div>
+          <div className="chat-user-bubble">
+            {parseMessageFileSegments(item.text).map((segment, segmentIndex) =>
+              segment.kind === 'file' ? (
+                <span
+                  key={`${segment.path}-${segmentIndex}`}
+                  className="chat-file-tag"
+                  title={segment.path}
+                >
+                  <FileIcon size={12} />
+                  <span className="chat-file-tag-path mono">{segment.path}</span>
+                </span>
+              ) : (
+                <span key={`text-${segmentIndex}`}>{segment.value}</span>
+              ),
+            )}
+          </div>
         </div>
       );
     case 'assistant':
@@ -113,11 +292,59 @@ function Message({ item, showAgentLabel, provider }: MessageProps) {
           <ToolCard item={item} />
         </div>
       );
+    case 'checkpoint':
+      return (
+        <div className="chat-row">
+          <div className="chat-checkpoint">
+            <span className="chat-checkpoint-info">
+              <RotateCcwIcon size={13} />
+              <span>Checkpoint antes do turno</span>
+              {item.skippedLargeFiles.length > 0 ? (
+                <span className="chat-checkpoint-warn" title={item.skippedLargeFiles.join(', ')}>
+                  {item.skippedLargeFiles.length} arquivo(s) &gt;10MB preservado(s)
+                </span>
+              ) : null}
+            </span>
+            {onRestoreCheckpoint ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled={busy}
+                onClick={() =>
+                  onRestoreCheckpoint({
+                    ref: item.ref,
+                    skippedLargeFiles: item.skippedLargeFiles,
+                  })
+                }
+              >
+                Restaurar
+              </button>
+            ) : null}
+          </div>
+        </div>
+      );
+    case 'verification':
+      return (
+        <div className="chat-row">
+          <VerificationCard
+            item={item}
+            canFix={!busy && Boolean(onFixVerification)}
+            onFix={() => onFixVerification?.(buildVerificationRetryPrompt(item))}
+          />
+        </div>
+      );
     case 'error':
       return (
         <div className="chat-row">
           <div className="chat-error" role="alert">
-            {item.message}
+            <div>{item.message}</div>
+            {onOpenHandoff && isRateLimitMessage(item.message) ? (
+              <div className="chat-error-actions">
+                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                  Continuar com resumo em outra conta
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       );
@@ -127,25 +354,200 @@ function Message({ item, showAgentLabel, provider }: MessageProps) {
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
+  sessionId = null,
+  projectId,
   state,
   visible,
   provider,
   accountDisplay,
   model,
   effort,
+  mode,
+  defaultModes,
+  inWorktree = false,
   catalog,
   readOnly = false,
+  queuedTurns = [],
+  busyConflict = null,
+  alternativeAccounts = [],
   onChangeModelConfig,
+  onChangeMode,
+  onSetDefaultMode,
+  onRestoreCheckpoint,
+  onForkTurn,
+  onOpenHandoff,
+  onEnqueuePrompt,
+  onCancelQueuedTurn,
+  onSwitchAccountAndRetry,
+  onDismissBusyConflict,
   onSend,
   onCancel,
 }: ChatViewProps) {
   const [draft, setDraft] = useState('');
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
+  const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [fileResults, setFileResults] = useState<{
+    files: string[];
+    truncated: boolean;
+    loading: boolean;
+  }>({ files: [], truncated: false, loading: false });
+  const [commandResults, setCommandResults] = useState<{
+    commands: ProjectCommandView[];
+    loading: boolean;
+  }>({ commands: [], loading: false });
+  const searchSeqRef = useRef(0);
+  const triggerRef = useRef<ComposerTrigger | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
+  const userTurnIndices = useMemo(() => {
+    let counter = -1;
+    return items.map((item) => {
+      if (item.type === 'user') counter += 1;
+      return counter;
+    });
+  }, [items]);
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
+
+  const triggerKey = trigger ? `${trigger.kind}:${trigger.start}:${trigger.query}` : null;
+  const activeTrigger =
+    !readOnly && visible && trigger && triggerKey !== dismissedTriggerKey ? trigger : null;
+
+  useEffect(() => {
+    if (!activeTrigger || activeTrigger.kind !== 'file' || projectId === null) return;
+    const seq = ++searchSeqRef.current;
+    const timer = setTimeout(() => {
+      void window.inova
+        .searchFiles({
+          projectId,
+          query: activeTrigger.query,
+          limit: 40,
+          ...(sessionId ? { sessionId } : {}),
+        })
+        .then((result) => {
+          if (searchSeqRef.current !== seq) return;
+          setFileResults(
+            result.ok
+              ? { files: result.value.files, truncated: result.value.truncated, loading: false }
+              : { files: [], truncated: false, loading: false },
+          );
+        })
+        .catch(() => {
+          if (searchSeqRef.current === seq) {
+            setFileResults({ files: [], truncated: false, loading: false });
+          }
+        });
+    }, FILE_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [activeTrigger, projectId, sessionId]);
+
+  useEffect(() => {
+    if (!activeTrigger || activeTrigger.kind !== 'command' || projectId === null) return;
+    let alive = true;
+    void window.inova
+      .listCommands({ projectId })
+      .then((result) => {
+        if (!alive) return;
+        setCommandResults({ commands: result.ok ? result.value : [], loading: false });
+      })
+      .catch(() => {
+        if (alive) setCommandResults({ commands: [], loading: false });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeTrigger?.kind, projectId]);
+
+  const filteredCommands = useMemo(
+    () =>
+      activeTrigger?.kind === 'command'
+        ? filterCommands(commandResults.commands, activeTrigger.query)
+        : [],
+    [activeTrigger, commandResults.commands],
+  );
+
+  const commitTrigger = (next: ComposerTrigger | null) => {
+    triggerRef.current = next;
+    setTrigger(next);
+  };
+
+  const syncTrigger = (text: string, cursor: number) => {
+    const next = detectComposerTrigger(text, cursor);
+    if (isSameComposerTrigger(triggerRef.current, next)) return;
+    commitTrigger(next);
+    setActiveIndex(0);
+    setDismissedTriggerKey(null);
+    if (next?.kind === 'file') {
+      setFileResults((current) => ({ ...current, loading: true }));
+    } else if (next?.kind === 'command') {
+      setCommandResults((current) => ({ ...current, loading: current.commands.length === 0 }));
+    }
+  };
+
+  const applySelectedFile = (filePath: string) => {
+    if (!activeTrigger || activeTrigger.kind !== 'file') return;
+    const applied = detachFileTrigger({ text: draft, trigger: activeTrigger });
+    setDraft(applied.text);
+    setAttachedFiles((current) => (current.includes(filePath) ? current : [...current, filePath]));
+    commitTrigger(null);
+    setActiveIndex(0);
+    queueMicrotask(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(applied.cursor, applied.cursor);
+    });
+  };
+
+  const applySelectedCommand = (command: ProjectCommandView) => {
+    if (!activeTrigger || activeTrigger.kind !== 'command') return;
+    const applied = applyCommandSuggestion({ text: draft, trigger: activeTrigger, command });
+    setDraft(applied.text);
+    commitTrigger(null);
+    setActiveIndex(0);
+    queueMicrotask(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(applied.cursor, applied.cursor);
+    });
+  };
+
+  const popupModel: ComposerPopupModel | null = useMemo(() => {
+    if (!activeTrigger || projectId === null) return null;
+    if (activeTrigger.kind === 'file') {
+      const bounded =
+        fileResults.files.length === 0 ? 0 : Math.min(activeIndex, fileResults.files.length - 1);
+      return {
+        kind: 'file',
+        items: fileResults.files,
+        truncated: fileResults.truncated,
+        loading: fileResults.loading,
+        activeIndex: bounded,
+        onSelect: applySelectedFile,
+      };
+    }
+    const bounded =
+      filteredCommands.length === 0 ? 0 : Math.min(activeIndex, filteredCommands.length - 1);
+    return {
+      kind: 'command',
+      items: filteredCommands,
+      loading: commandResults.loading,
+      activeIndex: bounded,
+      onSelect: applySelectedCommand,
+    };
+  }, [
+    activeTrigger,
+    projectId,
+    fileResults,
+    filteredCommands,
+    commandResults.loading,
+    activeIndex,
+  ]);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -170,14 +572,52 @@ export function ChatView({
   };
 
   const submit = () => {
-    const prompt = draft.trim();
+    const prompt = buildPromptWithAttachedFiles({ text: draft, files: attachedFiles });
     if (prompt === '' || running || readOnly) return;
     stickRef.current = true;
     onSend(prompt);
     setDraft('');
+    setAttachedFiles([]);
+    commitTrigger(null);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (popupModel) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        const total = popupModel.items.length;
+        if (total > 0) setActiveIndex((current) => (Math.min(current, total - 1) + 1) % total);
+        return;
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const total = popupModel.items.length;
+        if (total > 0) {
+          setActiveIndex((current) => (Math.min(current, total - 1) - 1 + total) % total);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDismissedTriggerKey(triggerKey);
+        return;
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        const count = popupModel.items.length;
+        if (count > 0) {
+          event.preventDefault();
+          if (popupModel.kind === 'file') {
+            const chosen = popupModel.items[popupModel.activeIndex];
+            if (chosen !== undefined) popupModel.onSelect(chosen);
+          } else {
+            const chosen = popupModel.items[popupModel.activeIndex];
+            if (chosen !== undefined) popupModel.onSelect(chosen);
+          }
+          return;
+        }
+      }
+    }
     if (event.key !== 'Enter' || event.shiftKey) return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     event.preventDefault();
@@ -195,12 +635,42 @@ export function ChatView({
             <Message
               key={item.id}
               item={item}
+              turnIndex={userTurnIndices[index] ?? 0}
               provider={provider}
+              busy={running || readOnly}
+              onRestoreCheckpoint={onRestoreCheckpoint}
+              onForkTurn={onForkTurn}
+              onOpenHandoff={onOpenHandoff}
+              onFixVerification={(fixPrompt) => {
+                if (!running && !readOnly) onSend(fixPrompt);
+              }}
               showAgentLabel={
                 (item.type === 'assistant' || item.type === 'tool') &&
                 (index === 0 || items[index - 1]?.type === 'user')
               }
             />
+          ))}
+          {queuedTurns.map((queued) => (
+            <div key={queued.turnId} className="chat-row">
+              <div className="chat-queued">
+                <div className="chat-queued-head">
+                  <span className="chat-queued-label">
+                    <ClockIcon size={13} />
+                    Na fila — aguardando conta ficar livre
+                  </span>
+                  {onCancelQueuedTurn ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => onCancelQueuedTurn(queued.turnId)}
+                    >
+                      Cancelar
+                    </button>
+                  ) : null}
+                </div>
+                <div className="chat-queued-prompt">{queued.prompt}</div>
+              </div>
+            </div>
           ))}
           {thinking ? (
             <div className="chat-row chat-thinking" aria-live="polite">
@@ -215,15 +685,104 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {busyConflict ? (
+          <div className="chat-busy-banner" role="alert">
+            <div className="chat-busy-text">
+              {busyConflict.exhausted
+                ? 'Esta conta atingiu o limite de uso.'
+                : 'Esta conta está ocupada em outra sessão.'}
+            </div>
+            <div className="chat-busy-actions">
+              {!busyConflict.exhausted && onEnqueuePrompt ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => onEnqueuePrompt(busyConflict.prompt)}
+                >
+                  Enfileirar turno
+                </button>
+              ) : null}
+              {onSwitchAccountAndRetry &&
+                alternativeAccounts.slice(0, 3).map((alt) => (
+                  <button
+                    key={alt.id}
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                      onSwitchAccountAndRetry({ accountId: alt.id, prompt: busyConflict.prompt })
+                    }
+                  >
+                    Mover para {PROVIDER_NAME[alt.provider]} · {alt.label}
+                  </button>
+                ))}
+              {onOpenHandoff ? (
+                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                  Handoff
+                </button>
+              ) : null}
+              {onDismissBusyConflict ? (
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    if (draft.trim() === '' && attachedFiles.length === 0) {
+                      setDraft(busyConflict.prompt);
+                    }
+                    onDismissBusyConflict();
+                  }}
+                >
+                  Fechar
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
+          {attachedFiles.length > 0 ? (
+            <div className="chat-composer-files" aria-label="Arquivos anexados">
+              {attachedFiles.map((filePath) => (
+                <span key={filePath} className="chat-file-tag" title={filePath}>
+                  <FileIcon size={12} />
+                  <span className="chat-file-tag-path mono">{filePath}</span>
+                  <button
+                    type="button"
+                    className="chat-file-tag-remove"
+                    aria-label={`Remover ${filePath}`}
+                    onClick={() =>
+                      setAttachedFiles((current) => current.filter((item) => item !== filePath))
+                    }
+                  >
+                    <CloseIcon size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             className="chat-input"
             rows={1}
             value={draft}
-            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente…'}
+            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente… (@arquivo, /comando)'}
             disabled={readOnly}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              const nextValue = event.target.value;
+              setDraft(nextValue);
+              syncTrigger(nextValue, event.target.selectionStart ?? nextValue.length);
+            }}
+            onClick={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
+            onSelect={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
+            onKeyUp={(event) => {
+              const target = event.currentTarget;
+              syncTrigger(target.value, target.selectionStart ?? target.value.length);
+            }}
             onKeyDown={onKeyDown}
           />
           <div className="chat-composer-bar">
@@ -250,6 +809,15 @@ export function ChatView({
                   disabled={readOnly || running}
                   onChange={onChangeModelConfig}
                 />
+                <ModePicker
+                  provider={provider}
+                  sessionMode={mode}
+                  defaultModes={defaultModes}
+                  inWorktree={inWorktree}
+                  disabled={readOnly || running}
+                  onChangeMode={onChangeMode}
+                  onSetDefault={onSetDefaultMode}
+                />
               </>
             ) : null}
             {running ? (
@@ -266,7 +834,7 @@ export function ChatView({
                 type="button"
                 className="chat-send"
                 aria-label="Enviar mensagem"
-                disabled={readOnly || draft.trim() === ''}
+                disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}
               >
                 <SendIcon size={16} />

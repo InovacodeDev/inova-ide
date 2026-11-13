@@ -3,8 +3,8 @@ import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
 import { removeSessionsOfProjects } from './sessions.js';
-import { loadStore, saveStore } from './store.js';
-import type { Project, Store } from './types.js';
+import { loadStore, saveStore, withStoreLock } from './store.js';
+import type { Project, Store, VerificationCheck } from './types.js';
 
 export class PathNotFoundError extends Error {
   readonly path: string;
@@ -35,19 +35,21 @@ export async function bindProject(ctx: {
   accountLabel: string;
 }): Promise<Project> {
   const path = await realPathOf(ctx.path);
-  const store = await loadStore(ctx.root);
-  const account = findAccount(store, ctx.accountLabel);
-  if (!account) throw new AccountError('not-found', `Account not found: ${ctx.accountLabel}`);
-  const existing = store.projects.find((project) => project.path === path);
-  if (existing) {
-    existing.accountId = account.id;
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const account = findAccount(store, ctx.accountLabel);
+    if (!account) throw new AccountError('not-found', `Account not found: ${ctx.accountLabel}`);
+    const existing = store.projects.find((project) => project.path === path);
+    if (existing) {
+      existing.accountId = account.id;
+      await saveStore(ctx.root, store);
+      return existing;
+    }
+    const project: Project = { id: randomUUID(), path, accountId: account.id };
+    store.projects.push(project);
     await saveStore(ctx.root, store);
-    return existing;
-  }
-  const project: Project = { id: randomUUID(), path, accountId: account.id };
-  store.projects.push(project);
-  await saveStore(ctx.root, store);
-  return project;
+    return project;
+  });
 }
 
 export async function unbindProject(ctx: { root: string; path: string }): Promise<void> {
@@ -55,15 +57,17 @@ export async function unbindProject(ctx: { root: string; path: string }): Promis
     if (error instanceof PathNotFoundError) return resolve(ctx.path);
     throw error;
   });
-  const store = await loadStore(ctx.root);
-  const remaining = store.projects.filter((project) => project.path !== path);
-  if (remaining.length === store.projects.length) return;
-  const removedIds = new Set(
-    store.projects.filter((project) => project.path === path).map((project) => project.id),
-  );
-  store.projects = remaining;
-  removeSessionsOfProjects(store, removedIds);
-  await saveStore(ctx.root, store);
+  await withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const remaining = store.projects.filter((project) => project.path !== path);
+    if (remaining.length === store.projects.length) return;
+    const removedIds = new Set(
+      store.projects.filter((project) => project.path === path).map((project) => project.id),
+    );
+    store.projects = remaining;
+    removeSessionsOfProjects(store, removedIds);
+    await saveStore(ctx.root, store);
+  });
 }
 
 export function resolveProject(store: Store, cwd: string): Project | undefined {
@@ -73,4 +77,29 @@ export function resolveProject(store: Store, cwd: string): Project | undefined {
     if (matches && (!best || project.path.length > best.path.length)) best = project;
   }
   return best;
+}
+
+export async function updateProjectConfig(ctx: {
+  root: string;
+  projectId: string;
+  patch: {
+    autoWorktree?: boolean;
+    autoVerify?: boolean;
+    verificationChecks?: VerificationCheck[];
+  };
+}): Promise<Project> {
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const project = store.projects.find((item) => item.id === ctx.projectId);
+    if (!project) {
+      throw new PathNotFoundError(ctx.projectId);
+    }
+    if (ctx.patch.autoWorktree !== undefined) project.autoWorktree = ctx.patch.autoWorktree;
+    if (ctx.patch.autoVerify !== undefined) project.autoVerify = ctx.patch.autoVerify;
+    if (ctx.patch.verificationChecks !== undefined) {
+      project.verificationChecks = ctx.patch.verificationChecks;
+    }
+    await saveStore(ctx.root, store);
+    return project;
+  });
 }

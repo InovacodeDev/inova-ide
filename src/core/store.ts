@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isEffortLevel } from './models.js';
+import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
 import type { Store } from './types.js';
 
@@ -45,8 +46,27 @@ function isAccount(value: unknown): boolean {
   );
 }
 
+function isVerificationCheck(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasStrings(value, ['id', 'label', 'command']) &&
+    typeof value['enabled'] === 'boolean'
+  );
+}
+
+function isWorktree(value: unknown): boolean {
+  return isRecord(value) && hasStrings(value, ['path', 'branch', 'baseCommit', 'createdAt']);
+}
+
 function isProject(value: unknown): boolean {
-  return isRecord(value) && hasStrings(value, ['id', 'path', 'accountId']);
+  if (!isRecord(value) || !hasStrings(value, ['id', 'path', 'accountId'])) return false;
+  const { autoWorktree, autoVerify, verificationChecks } = value;
+  return (
+    (autoWorktree === undefined || typeof autoWorktree === 'boolean') &&
+    (autoVerify === undefined || typeof autoVerify === 'boolean') &&
+    (verificationChecks === undefined ||
+      (Array.isArray(verificationChecks) && verificationChecks.every(isVerificationCheck)))
+  );
 }
 
 function isStringOrNull(value: unknown): boolean {
@@ -56,14 +76,36 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId, model, effort, archivedAt } = value;
+  const {
+    id,
+    parentId,
+    providerSessionId,
+    accountIdOverride,
+    handoffContext,
+    comparisonGroupId,
+    comparisonRole,
+    model,
+    effort,
+    mode,
+    worktree,
+    archivedAt,
+  } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
     isStringOrNull(parentId) &&
     isStringOrNull(providerSessionId) &&
+    (accountIdOverride === undefined || isSafeIdOrNull(accountIdOverride)) &&
+    (handoffContext === undefined || isStringOrNull(handoffContext)) &&
+    (comparisonGroupId === undefined || isSafeIdOrNull(comparisonGroupId)) &&
+    (comparisonRole === undefined ||
+      comparisonRole === null ||
+      comparisonRole === 'left' ||
+      comparisonRole === 'right') &&
     (model === undefined || isStringOrNull(model)) &&
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
+    (mode === undefined || mode === null || isExecutionMode(mode)) &&
+    (worktree === undefined || worktree === null || isWorktree(worktree)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
 }
@@ -82,9 +124,16 @@ function isWorkspace(value: unknown): boolean {
   );
 }
 
+function isDefaultModes(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(
+    ([provider, mode]) => isProviderId(provider) && (mode === undefined || isExecutionMode(mode)),
+  );
+}
+
 function isStore(value: unknown): value is Store {
   if (!isRecord(value)) return false;
-  const { version, accounts, projects, sessions, workspace } = value;
+  const { version, accounts, projects, sessions, workspace, defaultModes } = value;
   return (
     version === 1 &&
     Array.isArray(accounts) &&
@@ -92,7 +141,8 @@ function isStore(value: unknown): value is Store {
     Array.isArray(projects) &&
     projects.every(isProject) &&
     (sessions === undefined || (Array.isArray(sessions) && sessions.every(isSession))) &&
-    (workspace === undefined || isWorkspace(workspace))
+    (workspace === undefined || isWorkspace(workspace)) &&
+    (defaultModes === undefined || isDefaultModes(defaultModes))
   );
 }
 
@@ -140,5 +190,21 @@ export async function saveStore(root: string, store: Store): Promise<void> {
   } catch (error: unknown) {
     await rm(tmp, { force: true });
     throw error;
+  }
+}
+
+const storeLocks = new Map<string, Promise<unknown>>();
+
+export async function withStoreLock<T>(root: string, task: () => Promise<T>): Promise<T> {
+  const key = resolve(root);
+  const previous = storeLocks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  storeLocks.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (storeLocks.get(key) === next) {
+      storeLocks.delete(key);
+    }
   }
 }

@@ -1,5 +1,6 @@
+import { resolveExecutionMode } from './modes.js';
 import { providers } from './providers.js';
-import type { Account, EffortLevel } from './types.js';
+import type { Account, EffortLevel, ExecutionMode } from './types.js';
 
 export interface LaunchSpec {
   command: string;
@@ -11,6 +12,7 @@ export interface LaunchSpec {
 export interface TurnModelOptions {
   model?: string | null;
   effort?: EffortLevel | null;
+  executionMode?: ExecutionMode | null;
 }
 
 function isolatedEnv(account: Account, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -40,15 +42,31 @@ export type ChatTurn =
   | { mode: 'resume'; providerSessionId: string }
   | { mode: 'fork'; parentProviderSessionId: string; sessionId: string };
 
+function claudeModeArgs(mode: ExecutionMode): string[] {
+  switch (mode) {
+    case 'auto':
+      return ['--permission-mode', 'auto'];
+    case 'manual':
+      return ['--permission-mode', 'manual', '--permission-prompts', 'none'];
+    case 'plan':
+      return ['--permission-mode', 'plan'];
+    case 'bypass':
+      return ['--permission-mode', 'bypassPermissions', '--dangerously-skip-permissions'];
+    case 'accept-edits':
+    case 'read-only':
+      return ['--permission-mode', 'acceptEdits'];
+  }
+}
+
 function claudeTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'claude', sessionMode: options.executionMode });
   const base = [
     '-p',
     '--output-format',
     'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--permission-mode',
-    'acceptEdits',
+    ...claudeModeArgs(mode),
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['--effort', options.effort] : []),
   ];
@@ -71,14 +89,29 @@ function claudeTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOption
   }
 }
 
+function geminiModeArgs(mode: ExecutionMode): string[] {
+  switch (mode) {
+    case 'manual':
+      return ['--mode', 'accept-edits', '--sandbox'];
+    case 'accept-edits':
+      return ['--mode', 'accept-edits'];
+    case 'auto':
+      return ['--mode', 'auto'];
+    case 'plan':
+      return ['--mode', 'plan'];
+    case 'bypass':
+    case 'read-only':
+      return ['--mode', 'accept-edits', '--dangerously-skip-permissions'];
+  }
+}
+
 function geminiTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'gemini', sessionMode: options.executionMode });
   const base = [
     `--prompt=${prompt}`,
     '--output-format',
     'stream-json',
-    '--mode',
-    'accept-edits',
-    '--dangerously-skip-permissions',
+    ...geminiModeArgs(mode),
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['--effort', options.effort] : []),
   ];
@@ -86,11 +119,26 @@ function geminiTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOption
   return base;
 }
 
+function codexModeArgs(mode: ExecutionMode): string[] {
+  switch (mode) {
+    case 'read-only':
+      return ['--sandbox', 'read-only'];
+    case 'auto':
+      return ['--sandbox', 'workspace-write', '--approve-for-me'];
+    case 'bypass':
+      return ['--dangerously-bypass-approvals-and-sandbox'];
+    case 'accept-edits':
+    case 'manual':
+    case 'plan':
+      return ['--sandbox', 'workspace-write'];
+  }
+}
+
 function codexTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'codex', sessionMode: options.executionMode });
   const flags = [
     '--json',
-    '--sandbox',
-    'workspace-write',
+    ...codexModeArgs(mode),
     '--skip-git-repo-check',
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['-c', `model_reasoning_effort="${options.effort}"`] : []),
@@ -103,12 +151,13 @@ function codexTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions
 
 function deepseekTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
   const sessionId = turn.mode === 'resume' ? turn.providerSessionId : turn.sessionId;
+  const mode = resolveExecutionMode({ provider: 'deepseek', sessionMode: options.executionMode });
   return [
     '--profile',
     'headless',
     '--jsonl',
     '--mode',
-    'workspace-write',
+    mode === 'read-only' ? 'read-only' : 'workspace-write',
     '--session-id',
     sessionId,
     ...(options.model ? ['--model', options.model] : []),
@@ -116,32 +165,64 @@ function deepseekTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOpti
   ];
 }
 
+function kimiModeArgs(mode: ExecutionMode): string[] {
+  switch (mode) {
+    case 'manual':
+      return [];
+    case 'bypass':
+      return ['--auto'];
+    case 'accept-edits':
+    case 'auto':
+    case 'plan':
+    case 'read-only':
+      return ['--yolo'];
+  }
+}
+
 function kimiTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'kimi', sessionMode: options.executionMode });
   return [
     '--print',
     '--prompt',
     prompt,
     '--output-format',
     'stream-json',
-    '--yolo',
+    ...kimiModeArgs(mode),
     ...(options.model ? ['-m', options.model] : []),
     ...(turn.mode === 'resume' ? ['-S', turn.providerSessionId] : []),
   ];
 }
 
 function grokTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'grok', sessionMode: options.executionMode });
   return [
     '-p',
     prompt,
     '--output-format',
     'streaming-json',
-    '--always-approve',
+    ...(mode === 'bypass' ? ['--always-approve'] : []),
     ...(options.model ? ['--model', options.model] : []),
     ...(turn.mode === 'resume' ? ['-r', turn.providerSessionId] : []),
   ];
 }
 
+function qwenModeArg(mode: ExecutionMode): string {
+  switch (mode) {
+    case 'plan':
+      return 'plan';
+    case 'manual':
+      return 'default';
+    case 'accept-edits':
+      return 'auto-edit';
+    case 'bypass':
+    case 'auto':
+    case 'read-only':
+      return 'yolo';
+  }
+}
+
 function qwenTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'qwen', sessionMode: options.executionMode });
   return [
     '-p',
     prompt,
@@ -149,17 +230,19 @@ function qwenTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions)
     'stream-json',
     '--include-partial-messages',
     '--approval-mode',
-    'yolo',
+    qwenModeArg(mode),
     ...(options.model ? ['--model', options.model] : []),
     ...(turn.mode === 'resume' ? ['--resume', turn.providerSessionId] : []),
   ];
 }
 
 function opencodeTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions): string[] {
+  const mode = resolveExecutionMode({ provider: 'opencode', sessionMode: options.executionMode });
   return [
     'run',
     '--format',
     'json',
+    ...(mode === 'auto' ? ['--auto'] : []),
     ...(options.model ? ['-m', options.model] : []),
     ...(turn.mode === 'resume' ? ['-s', turn.providerSessionId] : []),
     prompt,
@@ -200,8 +283,13 @@ export function buildChatTurn(ctx: {
   baseEnv: NodeJS.ProcessEnv;
   model?: string | null;
   effort?: EffortLevel | null;
+  executionMode?: ExecutionMode | null;
 }): LaunchSpec {
-  const options: TurnModelOptions = { model: ctx.model, effort: ctx.effort };
+  const options: TurnModelOptions = {
+    model: ctx.model,
+    effort: ctx.effort,
+    executionMode: ctx.executionMode,
+  };
   const args = argsForProvider(ctx.account.provider, ctx.prompt, ctx.turn, options);
   return buildLaunch({ account: ctx.account, cwd: ctx.cwd, args, baseEnv: ctx.baseEnv });
 }

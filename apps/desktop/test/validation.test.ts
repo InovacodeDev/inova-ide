@@ -1,15 +1,30 @@
 import { expect, test } from 'vitest';
 import {
+  parseApplyProfileSync,
   parseBinding,
+  parseComparisonRef,
+  parseDefaultMode,
+  parseFileSearch,
+  parseForkSession,
+  parseHandoffSession,
   parseLoginCode,
   parseNewAccount,
   parseMessage,
   parseNewSession,
   parsePath,
+  parsePreviewProfileSync,
   parseProjectRef,
+  parseProjectVerification,
   parseRemoval,
+  parseResolveComparison,
+  parseRestoreCheckpoint,
+  parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
+  parseStartComparison,
+  parseSwitchAccount,
+  parseTurnRef,
+  parseUiFocus,
   parseUsageRequest,
   parseWorkspace,
 } from '../src/main/validation.js';
@@ -151,6 +166,24 @@ test('paths must be absolute and at most 4096 characters', () => {
   });
 });
 
+test('file search validates projectId, query length, and limit bounds', () => {
+  expect(parseFileSearch({ projectId: 'p', query: '' })).toEqual({
+    projectId: 'p',
+    query: '',
+    limit: 40,
+  });
+  expect(parseFileSearch({ projectId: 'p', query: 'chat', limit: 25 })).toEqual({
+    projectId: 'p',
+    query: 'chat',
+    limit: 25,
+  });
+  expect(parseFileSearch({ projectId: '', query: 'a' })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a'.repeat(256) })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 0 })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 101 })).toBeUndefined();
+  expect(parseFileSearch({ projectId: 'p', query: 'a', limit: 1.5 })).toBeUndefined();
+});
+
 test('login code requires safe sessionId and trimmed non-empty code up to 512 chars', () => {
   expect(parseLoginCode({ sessionId: 'sess-1', code: '  abc123  ' })).toEqual({
     sessionId: 'sess-1',
@@ -165,4 +198,150 @@ test('login code requires safe sessionId and trimmed non-empty code up to 512 ch
   expect(parseLoginCode({ sessionId: 'bad/id', code: 'abc' })).toBeUndefined();
   expect(parseLoginCode({ sessionId: '..', code: 'abc' })).toBeUndefined();
   expect(parseLoginCode({ sessionId: 'sess-1', code: 123 })).toBeUndefined();
+});
+
+test('session mode update and default provider mode validation', () => {
+  expect(parseSessionUpdate({ sessionId: 's1', mode: 'plan' })).toEqual({
+    sessionId: 's1',
+    mode: 'plan',
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', mode: null })).toEqual({
+    sessionId: 's1',
+    mode: null,
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', mode: 'bad-mode' })).toBeUndefined();
+  expect(parseDefaultMode({ provider: 'claude', mode: 'plan' })).toEqual({
+    provider: 'claude',
+    mode: 'plan',
+  });
+  expect(parseDefaultMode({ provider: 'unknown', mode: 'plan' })).toBeUndefined();
+  expect(parseDefaultMode({ provider: 'claude', mode: 'invalid' })).toBeUndefined();
+});
+
+test('worktree, checkpoint restore, and project verification validation', () => {
+  expect(parseNewSession({ projectId: 'p1', isolatedWorktree: true })).toEqual({
+    projectId: 'p1',
+    parentId: null,
+    isolatedWorktree: true,
+  });
+  expect(parseSessionDelete({ sessionId: 's1', force: true })).toEqual({
+    sessionId: 's1',
+    force: true,
+  });
+  expect(parseRestoreCheckpoint({ sessionId: 's1', ref: 'refs/inova/checkpoints/s1/t1' })).toEqual({
+    sessionId: 's1',
+    ref: 'refs/inova/checkpoints/s1/t1',
+    preserveFiles: [],
+  });
+  expect(parseRestoreCheckpoint({ sessionId: 's1', ref: 'refs/heads/main' })).toBeUndefined();
+  expect(
+    parseProjectVerification({
+      projectId: 'p1',
+      autoWorktree: true,
+      autoVerify: true,
+      verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    autoWorktree: true,
+    autoVerify: true,
+    verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
+  });
+  expect(parseProjectVerification({ projectId: 'p1' })).toBeUndefined();
+});
+
+test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
+  expect(parseTurnRef({ turnId: 't1' })).toEqual({ turnId: 't1' });
+  expect(parseTurnRef({ turnId: '../x' })).toBeUndefined();
+  expect(parseSwitchAccount({ sessionId: 's1', accountId: 'a2', generateHandoff: false })).toEqual({
+    sessionId: 's1',
+    accountId: 'a2',
+    generateHandoff: false,
+  });
+  expect(
+    parseHandoffSession({ sessionId: 's1', targetAccountId: 'a2', createWorktree: true }),
+  ).toEqual({
+    sessionId: 's1',
+    targetAccountId: 'a2',
+    createWorktree: true,
+  });
+  expect(
+    parseForkSession({
+      sessionId: 's1',
+      turnIndex: 0,
+      targetAccountId: 'a2',
+      copyWorktreeFiles: true,
+    }),
+  ).toEqual({
+    sessionId: 's1',
+    turnIndex: 0,
+    targetAccountId: 'a2',
+    copyWorktreeFiles: true,
+  });
+  expect(parseForkSession({ sessionId: 's1', turnIndex: -1 })).toBeUndefined();
+  expect(parseUiFocus({ activeSessionId: null, windowFocused: false })).toEqual({
+    activeSessionId: null,
+    windowFocused: false,
+  });
+});
+
+test('comparison and profile sync validation', () => {
+  expect(
+    parseStartComparison({
+      projectId: 'p1',
+      prompt: 'Refatore módulo',
+      leftAccountId: 'a1',
+      rightAccountId: 'a2',
+      leftEffort: 'high',
+      rightMode: 'plan',
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    prompt: 'Refatore módulo',
+    leftAccountId: 'a1',
+    rightAccountId: 'a2',
+    leftEffort: 'high',
+    rightMode: 'plan',
+  });
+  expect(
+    parseStartComparison({
+      projectId: 'p1',
+      prompt: '   ',
+      leftAccountId: 'a1',
+      rightAccountId: 'a2',
+    }),
+  ).toBeUndefined();
+  expect(parseComparisonRef({ groupId: 'g1' })).toEqual({ groupId: 'g1' });
+  expect(parseComparisonRef({ groupId: '../bad' })).toBeUndefined();
+  expect(parseResolveComparison({ groupId: 'g1', winner: 'left', cleanupWorktrees: true })).toEqual(
+    {
+      groupId: 'g1',
+      winner: 'left',
+      cleanupWorktrees: true,
+    },
+  );
+  expect(parseResolveComparison({ groupId: 'g1', winner: 'center' })).toBeUndefined();
+  expect(
+    parsePreviewProfileSync({ projectId: 'p1', accountIds: ['a1'], rulesSource: 'AGENTS.md' }),
+  ).toEqual({
+    projectId: 'p1',
+    accountIds: ['a1'],
+    rulesSource: 'AGENTS.md',
+  });
+  expect(
+    parseApplyProfileSync({
+      projectId: 'p1',
+      rulesSource: 'CLAUDE.md',
+      approvedIds: ['rules:AGENTS.md'],
+      rulesStrategy: 'symlink',
+    }),
+  ).toEqual({
+    projectId: 'p1',
+    rulesSource: 'CLAUDE.md',
+    approvedIds: ['rules:AGENTS.md'],
+    rulesStrategy: 'symlink',
+  });
+  expect(
+    parseApplyProfileSync({ projectId: 'p1', approvedIds: [''], rulesStrategy: 'copy' }),
+  ).toBeUndefined();
 });

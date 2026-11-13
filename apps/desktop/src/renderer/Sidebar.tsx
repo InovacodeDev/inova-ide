@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Session } from '@inova/core/types';
+import type { InboxItem, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
+import { InboxView } from './InboxView';
 import { accountDisplayName } from './provider-meta';
 import {
   ArchiveIcon,
@@ -9,11 +10,13 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  CompareIcon,
   FolderIcon,
   GridIcon,
   KeyIcon,
   PencilIcon,
   PlusIcon,
+  SlidersIcon,
   TrashIcon,
 } from './icons';
 import { ProviderBadge } from './ProviderBadge';
@@ -28,7 +31,7 @@ import {
 } from './session-tree';
 import './sidebar.css';
 
-export type View = 'workspace' | 'agents' | 'accounts' | 'new-session';
+export type View = 'workspace' | 'agents' | 'compare' | 'accounts' | 'new-session';
 
 export interface SidebarProps {
   view: View;
@@ -36,8 +39,12 @@ export interface SidebarProps {
   accounts: AccountView[];
   projects: ProjectView[];
   sessions: Record<string, Session[]>;
+  inboxItems?: readonly InboxItem[];
   activeSessionId: string | null;
   statusOf: (sessionId: string) => SessionStatus;
+  onOpenInboxItem?: (sessionId: string) => void;
+  onClearReadInbox?: () => void;
+  onOpenProfileSync?: (project: ProjectView) => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
   onUnbind: (project: ProjectView) => void;
@@ -69,6 +76,7 @@ type SessionActions = Pick<
 const NAV_ITEMS: { view: Exclude<View, 'new-session'>; label: string; icon: ReactNode }[] = [
   { view: 'workspace', label: 'Workspace', icon: <ChatIcon size={16} /> },
   { view: 'agents', label: 'Agentes em paralelo', icon: <GridIcon size={16} /> },
+  { view: 'compare', label: 'Comparar', icon: <CompareIcon size={16} /> },
   { view: 'accounts', label: 'Contas e providers', icon: <KeyIcon size={16} /> },
 ];
 
@@ -132,11 +140,12 @@ function StatusLine({ status }: { status: SessionStatus }) {
 interface SessionRowProps extends SessionActions {
   node: SessionNode;
   project: ProjectView;
+  accounts: AccountView[];
   activeSessionId: string | null;
 }
 
 function SessionRow(props: SessionRowProps) {
-  const { node, project, activeSessionId, ...actions } = props;
+  const { node, project, accounts, activeSessionId, ...actions } = props;
   const {
     onOpenSession,
     onNewSession,
@@ -149,6 +158,10 @@ function SessionRow(props: SessionRowProps) {
   const [editing, setEditing] = useState(false);
   const archived = session.archivedAt !== null;
   const isSubsession = session.parentId !== null;
+  const sessionProvider =
+    (session.accountIdOverride
+      ? accounts.find((candidate) => candidate.id === session.accountIdOverride)?.provider
+      : undefined) ?? project.provider;
   const rowClasses = ['session-row', isSubsession ? 'session-row-sub' : 'session-row-root'];
   if (session.id === activeSessionId) rowClasses.push('active');
 
@@ -161,7 +174,7 @@ function SessionRow(props: SessionRowProps) {
       <div className={rowClasses.join(' ')}>
         {editing ? (
           <div className="session-main">
-            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
+            <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
             <TitleEditor
               initial={session.title}
               onSave={(title) => {
@@ -179,7 +192,7 @@ function SessionRow(props: SessionRowProps) {
             onClick={() => onOpenSession(session)}
             onDoubleClick={() => setEditing(true)}
           >
-            <ProviderBadge provider={project.provider} size={isSubsession ? 16 : 20} />
+            <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
             <span className="session-text">
               {isSubsession ? <span className="session-kind-sub">Subsessão</span> : null}
               <span className="session-title">{session.title}</span>
@@ -252,6 +265,7 @@ function SessionRow(props: SessionRowProps) {
               key={child.session.id}
               node={child}
               project={project}
+              accounts={accounts}
               activeSessionId={activeSessionId}
               {...actions}
             />
@@ -264,15 +278,25 @@ function SessionRow(props: SessionRowProps) {
 
 interface ProjectSectionProps extends SessionActions {
   project: ProjectView;
+  accounts: AccountView[];
   accountLabelText: string;
   sessions: Session[];
   activeSessionId: string | null;
+  onOpenProfileSync?: (project: ProjectView) => void;
   onRequestUnbind: (project: ProjectView) => void;
 }
 
 function ProjectSection(props: ProjectSectionProps) {
-  const { project, accountLabelText, sessions, activeSessionId, onRequestUnbind, ...actions } =
-    props;
+  const {
+    project,
+    accounts,
+    accountLabelText,
+    sessions,
+    activeSessionId,
+    onOpenProfileSync,
+    onRequestUnbind,
+    ...actions
+  } = props;
   const { onNewSession } = actions;
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -311,6 +335,17 @@ function ProjectSection(props: ProjectSectionProps) {
           </span>
         </button>
         <div className="project-actions">
+          {onOpenProfileSync ? (
+            <button
+              type="button"
+              className="session-action"
+              aria-label="Sincronizar MCPs e regras"
+              title="Sincronizar MCPs e regras"
+              onClick={() => onOpenProfileSync(project)}
+            >
+              <SlidersIcon size={14} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="session-action"
@@ -342,6 +377,7 @@ function ProjectSection(props: ProjectSectionProps) {
                   key={node.session.id}
                   node={node}
                   project={project}
+                  accounts={accounts}
                   activeSessionId={activeSessionId}
                   {...actions}
                 />
@@ -375,6 +411,7 @@ function ProjectSection(props: ProjectSectionProps) {
                   key={node.session.id}
                   node={node}
                   project={project}
+                  accounts={accounts}
                   activeSessionId={activeSessionId}
                   {...actions}
                 />
@@ -388,7 +425,17 @@ function ProjectSection(props: ProjectSectionProps) {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { view, onNavigate, accounts, projects, sessions, activeSessionId } = props;
+  const {
+    view,
+    onNavigate,
+    accounts,
+    projects,
+    sessions,
+    inboxItems = [],
+    activeSessionId,
+    onOpenInboxItem,
+    onClearReadInbox,
+  } = props;
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const emailByLabel = useMemo(
     () => new Map(accounts.map((account) => [account.label, account.email] as const)),
@@ -416,6 +463,13 @@ export function Sidebar(props: SidebarProps) {
             </li>
           ))}
         </ul>
+        {onOpenInboxItem && onClearReadInbox ? (
+          <InboxView
+            items={inboxItems}
+            onOpenItem={onOpenInboxItem}
+            onClearRead={onClearReadInbox}
+          />
+        ) : null}
         <div className="sidebar-projects">
           {projects.length === 0 && (
             <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>
@@ -424,6 +478,7 @@ export function Sidebar(props: SidebarProps) {
             <ProjectSection
               key={project.id}
               project={project}
+              accounts={accounts}
               accountLabelText={accountDisplayName({
                 label: project.accountLabel,
                 email: emailByLabel.get(project.accountLabel) ?? project.accountEmail,
@@ -431,6 +486,7 @@ export function Sidebar(props: SidebarProps) {
               sessions={sessions[project.id] ?? []}
               activeSessionId={activeSessionId}
               statusOf={props.statusOf}
+              onOpenProfileSync={props.onOpenProfileSync}
               onOpenSession={props.onOpenSession}
               onNewSession={props.onNewSession}
               onRenameSession={props.onRenameSession}

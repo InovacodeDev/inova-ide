@@ -9,6 +9,10 @@ function itemText(item: ChatItem): string {
       return item.message;
     case 'tool':
       return `› ${item.name}\n${item.output ?? item.input}`;
+    case 'checkpoint':
+      return 'Checkpoint salvo';
+    case 'verification':
+      return `Verificação: ${item.status}`;
   }
 }
 

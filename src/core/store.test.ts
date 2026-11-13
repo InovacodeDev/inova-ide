@@ -171,11 +171,37 @@ describe('store', () => {
     ['a numeric parentId', { ...goodSession, parentId: 1 }],
     ['a missing providerSessionId', { ...goodSession, providerSessionId: undefined }],
     ['a missing updatedAt', { ...goodSession, updatedAt: undefined }],
+    ['an invalid execution mode', { ...goodSession, mode: 'turbo-invalid' }],
   ])('loadStore rejects sessions with %s', async (_name, session) => {
     const sessions = typeof session === 'string' ? session : [session];
     await writeFile(
       join(root, 'store.json'),
       JSON.stringify({ version: 1, accounts: [], projects: [], sessions }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
+
+  it('loadStore validates and preserves defaultModes on store', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        defaultModes: { claude: 'plan', gemini: 'auto' },
+      }),
+    );
+    const loaded = await loadStore(root);
+    expect(loaded.defaultModes).toEqual({ claude: 'plan', gemini: 'auto' });
+
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        defaultModes: { claude: 'invalid-mode' },
+      }),
     );
     await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
   });
