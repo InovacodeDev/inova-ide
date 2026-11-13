@@ -43,6 +43,12 @@ describe('settings', () => {
     });
   });
 
+  it('updateSettings stores the theme preference and defaults to dark', async () => {
+    expect((await getSettings(root)).appearance.theme).toBe('dark');
+    await updateSettings({ root, patch: { appearance: { theme: 'light' } } });
+    expect((await getSettings(root)).appearance.theme).toBe('light');
+  });
+
   it('updateSettings merges a partial patch per section and persists it', async () => {
     await updateSettings({ root, patch: { sessions: { autoArchiveDays: 7 } } });
     const result = await updateSettings({
@@ -50,6 +56,7 @@ describe('settings', () => {
       patch: { notifications: { completed: true }, voice: { language: 'pt' } },
     });
     const expected = {
+      ...DEFAULT_SETTINGS,
       voice: { ...DEFAULT_SETTINGS.voice, language: 'pt' },
       sessions: { autoArchiveDays: 7, collapseFinishedTurns: true },
       notifications: { ...DEFAULT_SETTINGS.notifications, completed: true },
@@ -77,6 +84,7 @@ describe('settings', () => {
       updateSettings({ root, patch: { notifications: { failed: false } } }),
     ]);
     expect(await getSettings(root)).toEqual({
+      ...DEFAULT_SETTINGS,
       voice: { ...DEFAULT_SETTINGS.voice, language: 'es' },
       sessions: { autoArchiveDays: 0, collapseFinishedTurns: false },
       notifications: { ...DEFAULT_SETTINGS.notifications, failed: false },
@@ -115,7 +123,8 @@ describe('settings', () => {
   it.each<[string, unknown]>([
     ['a voice model outside the catalog', { voice: { modelId: 'huge' } }],
     ['a path as voice model', { voice: { modelId: '../ggml-base' } }],
-    ['an unknown section', { appearance: { theme: 'dark' } }],
+    ['an unknown section', { telemetry: { enabled: true } }],
+    ['a theme outside the enum', { appearance: { theme: 'sepia' } }],
     ['an unknown field', { voice: { volume: 1 } }],
     ['a value outside the enum', { sessions: { autoArchiveDays: 5 } }],
     ['a wrong type', { notifications: { failed: 'yes' } }],

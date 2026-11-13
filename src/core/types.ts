@@ -84,7 +84,12 @@ export interface Workspace {
 
 export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-turbo-q5_0';
 
+export type ThemePreference = 'system' | 'dark' | 'light';
+
 export interface Settings {
+  appearance: {
+    theme: ThemePreference;
+  };
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';
     modelId: VoiceModelId;

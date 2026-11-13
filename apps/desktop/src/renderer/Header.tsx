@@ -4,9 +4,8 @@ export function Header(props: { runningCount: number }) {
   return (
     <header className="app-header">
       <div className="app-brand">
-        <div className="app-logo">
-          <LogoIcon size={18} />
-        </div>
+        <LogoIcon />
+
         <span className="app-name">
           Inova<span className="app-name-accent">IDE</span>
         </span>

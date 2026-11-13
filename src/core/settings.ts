@@ -16,6 +16,7 @@ export const VOICE_MODEL_IDS: readonly VoiceModelId[] = [
 ];
 
 export const DEFAULT_SETTINGS: Settings = {
+  appearance: { theme: 'dark' },
   voice: { language: 'auto', modelId: 'large-v3-turbo-q5_0' },
   sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
   notifications: {
@@ -36,6 +37,7 @@ function oneOf(options: readonly unknown[]): FieldGuard {
 
 const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } =
   {
+    appearance: { theme: oneOf(['system', 'dark', 'light']) },
     voice: { language: oneOf(['auto', 'pt', 'en', 'es']), modelId: oneOf(VOICE_MODEL_IDS) },
     sessions: {
       autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
@@ -95,6 +97,7 @@ function mergeSettings(input: {
 }): Settings {
   const { stored, patch } = input;
   return {
+    appearance: { ...DEFAULT_SETTINGS.appearance, ...stored?.appearance, ...patch?.appearance },
     voice: { ...DEFAULT_SETTINGS.voice, ...stored?.voice, ...patch?.voice },
     sessions: { ...DEFAULT_SETTINGS.sessions, ...stored?.sessions, ...patch?.sessions },
     notifications: {

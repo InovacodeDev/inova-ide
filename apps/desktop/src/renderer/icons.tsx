@@ -40,21 +40,22 @@ interface IconProps {
   size?: number;
 }
 
-export function LogoIcon({ size = 18 }: IconProps) {
+export function LogoIcon({ size = 28 }: IconProps) {
   return (
     <svg
       aria-hidden="true"
+      className="logo-mark"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="0 0 32 32"
       fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
+      strokeWidth={2.6}
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M3.5 7l5 5-5 5" />
-      <path d="M11.5 12h3M14.5 12l4.5-5.5M14.5 12h5.5M14.5 12l4.5 5.5" />
+      <rect className="logo-tile" width="32" height="32" rx="8" />
+      <path className="logo-prompt" d="M7.5 10l6 6-6 6" />
+      <path className="logo-spark" d="M17 16h3.5M20.5 16l4.5-5.5M20.5 16h5.5M20.5 16l4.5 5.5" />
     </svg>
   );
 }
