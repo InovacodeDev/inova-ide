@@ -131,6 +131,7 @@ export function App() {
   const inboxRef = useRef<HTMLElement>(null);
   const activeChatRef = useRef<ChatViewHandle>(null);
   useTheme(settings?.appearance.theme);
+  const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
@@ -906,6 +907,13 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const mainClassName = [
+    'main',
+    inWorkspace && activeSession && activeProject ? 'has-details' : '',
+    sidebarCollapsed ? 'rail-offset' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
@@ -993,6 +1001,10 @@ export function App() {
           view={view}
           inboxRef={inboxRef}
           onNavigate={setView}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() =>
+            void updateSettings({ appearance: { sidebarCollapsed: !sidebarCollapsed } })
+          }
           accounts={accounts}
           projects={projects}
           sessions={sessions}
@@ -1025,9 +1037,7 @@ export function App() {
           onRequestArchiveSession={setPendingArchive}
           onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
-        <main
-          className={inWorkspace && activeSession && activeProject ? 'main has-details' : 'main'}
-        >
+        <main className={mainClassName}>
           {view === 'agents' && (
             <AgentsView
               agents={chatTabs.map((tab) => {

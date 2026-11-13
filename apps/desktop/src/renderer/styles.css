@@ -144,6 +144,10 @@ a:hover {
   background: var(--bg);
 }
 
+.main.rail-offset {
+  padding-left: 76px;
+}
+
 .main.has-details {
   padding-right: 312px;
 }

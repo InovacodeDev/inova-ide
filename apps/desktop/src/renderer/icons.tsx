@@ -36,6 +36,8 @@ import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
 import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
+import { PanelLeftClose } from 'pulsoicon-react/icons/panel-left-close';
+import { PanelLeftOpen } from 'pulsoicon-react/icons/panel-left-open';
 import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
@@ -226,6 +228,14 @@ export function ClockIcon({ size = 16 }: IconProps) {
 
 export function CompareIcon({ size = 16 }: IconProps) {
   return <GitCompare size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SidebarCollapseIcon({ size = 16 }: IconProps) {
+  return <PanelLeftClose size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SidebarExpandIcon({ size = 16 }: IconProps) {
+  return <PanelLeftOpen size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function DownloadIcon({ size = 16 }: IconProps) {

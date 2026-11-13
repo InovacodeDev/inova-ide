@@ -89,6 +89,7 @@ export type ThemePreference = 'system' | 'dark' | 'light';
 export interface Settings {
   appearance: {
     theme: ThemePreference;
+    sidebarCollapsed: boolean;
   };
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';

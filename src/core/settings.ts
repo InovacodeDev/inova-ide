@@ -17,7 +17,7 @@ export const VOICE_MODEL_IDS: readonly VoiceModelId[] = [
 ];
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: 'dark' },
+  appearance: { theme: 'dark', sidebarCollapsed: false },
   voice: { language: 'auto', modelId: 'large-v3-turbo-q5_0' },
   sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
   notifications: {
@@ -62,7 +62,7 @@ function oneOf(options: readonly unknown[]): FieldGuard {
 
 const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } =
   {
-    appearance: { theme: oneOf(['system', 'dark', 'light']) },
+    appearance: { theme: oneOf(['system', 'dark', 'light']), sidebarCollapsed: isBoolean },
     voice: { language: oneOf(['auto', 'pt', 'en', 'es']), modelId: oneOf(VOICE_MODEL_IDS) },
     sessions: {
       autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
