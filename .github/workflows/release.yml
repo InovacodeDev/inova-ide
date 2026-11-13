@@ -163,6 +163,7 @@ jobs:
         env:
           VERSION: ${{ needs.validate.outputs.version }}
           ARM_SHA: ${{ needs.publish-release.outputs.arm64_sha256 }}
+          HOMEBREW_GITHUB_API_TOKEN: ${{ github.token }}
         run: |
           CASK="homebrew-tap/Casks/inova-ide.rb"
           ruby -e 'c = File.read(ARGV[0]).sub(/version "[^"]+"/, %(version "#{ARGV[1]}")).sub(/sha256 "[^"]+"/, %(sha256 "#{ARGV[2]}")); File.write(ARGV[0], c)' "${CASK}" "${VERSION}" "${ARM_SHA}"
