@@ -64,10 +64,15 @@ export function SettingsModal(props: SettingsModalProps) {
   };
 
   const panels: Record<SettingsSectionId, ReactNode> = {
-    general: (
-      <GeneralSection defaultModes={defaultModes} call={call} onSetDefaultMode={onSetDefaultMode} />
+    general: <GeneralSection call={call} />,
+    models: (
+      <ModelsSection
+        settings={settings}
+        defaultModes={defaultModes}
+        onUpdate={onUpdate}
+        onSetDefaultMode={onSetDefaultMode}
+      />
     ),
-    models: <ModelsSection settings={settings} onUpdate={onUpdate} />,
     appearance: <AppearanceSection settings={settings} onUpdate={onUpdate} />,
     sessions: <SessionsSection settings={settings} onUpdate={onUpdate} />,
     notifications: <NotificationsSection settings={settings} onUpdate={onUpdate} call={call} />,

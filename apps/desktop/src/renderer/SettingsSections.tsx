@@ -1,9 +1,5 @@
 import { useState } from 'react';
-import { PROVIDER_MODES } from '@inova/core/modes';
-import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/core/types';
-import { effectiveModeForSession } from './mode-picker-state';
-import { PlatformSelect } from './PlatformSelect';
-import { PROVIDER_NAME } from './provider-meta';
+import type { Settings, SettingsPatch } from '@inova/core/types';
 import { Segmented, SettingGroup, SettingRow, Switch } from './settings-controls';
 import { SHORTCUTS, formatBinding, groupShortcuts } from './shortcuts';
 import type { WarningCall } from './useWarning';
@@ -13,56 +9,22 @@ interface SettingsSectionProps {
   onUpdate: (patch: SettingsPatch) => void;
 }
 
-const PROVIDERS = Object.keys(PROVIDER_MODES) as ProviderId[];
-
-export function GeneralSection(props: {
-  defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
-  call: WarningCall;
-  onSetDefaultMode: (provider: ProviderId, mode: ExecutionMode) => void;
-}) {
-  const { defaultModes, call, onSetDefaultMode } = props;
+export function GeneralSection({ call }: { call: WarningCall }) {
   return (
-    <>
-      <SettingGroup
-        title="Modo de execução padrão"
-        description="Modo usado nas novas sessões de cada provedor. Cada sessão ainda pode mudar o próprio modo."
+    <SettingGroup title="Dados">
+      <SettingRow
+        title="Pasta de dados"
+        description="Onde o Inova IDE guarda contas, sessões e configurações."
       >
-        {PROVIDERS.map((provider) => {
-          const catalog = PROVIDER_MODES[provider];
-          return (
-            <SettingRow key={provider} title={PROVIDER_NAME[provider]}>
-              <PlatformSelect
-                ariaLabel={`Modo padrão: ${PROVIDER_NAME[provider]}`}
-                value={effectiveModeForSession({ provider, defaultModes })}
-                options={catalog.options.map((option) => ({
-                  value: option.id,
-                  label: option.label,
-                  description: option.description,
-                }))}
-                onChange={(value) => {
-                  const chosen = catalog.options.find((option) => option.id === value);
-                  if (chosen) onSetDefaultMode(provider, chosen.id);
-                }}
-              />
-            </SettingRow>
-          );
-        })}
-      </SettingGroup>
-      <SettingGroup title="Dados">
-        <SettingRow
-          title="Pasta de dados"
-          description="Onde o Inova IDE guarda contas, sessões e configurações."
+        <button
+          type="button"
+          className="btn"
+          onClick={() => void call(() => window.inova.openDataFolder())}
         >
-          <button
-            type="button"
-            className="btn"
-            onClick={() => void call(() => window.inova.openDataFolder())}
-          >
-            Abrir pasta de dados
-          </button>
-        </SettingRow>
-      </SettingGroup>
-    </>
+          Abrir pasta de dados
+        </button>
+      </SettingRow>
+    </SettingGroup>
   );
 }
 

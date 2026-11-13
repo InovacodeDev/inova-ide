@@ -1,22 +1,14 @@
 import { useState } from 'react';
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
-import type { Session, VerificationCheck } from '@inova/core/types';
-import type { AccountView, ProjectView } from '../shared/api';
+import type { VerificationCheck } from '@inova/core/types';
+import type { ProjectView } from '../shared/api';
 import type { ContextInfo } from './chat-reducer';
 import { CloseIcon } from './icons';
 import { contextLabel, formatTokens } from './token-format';
-import { ProviderBadge } from './ProviderBadge';
-import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
-import { relativeTime } from './relative-time';
-import { STATUS_TEXT, UsageSection, type UsageState } from './UsageBar';
 import './session.css';
 
 interface SessionDetailsProps {
-  session: Session;
-  parentTitle?: string | null;
   project: ProjectView;
-  account: AccountView | undefined;
-  usage: UsageState | undefined;
   running?: boolean;
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
@@ -35,16 +27,8 @@ const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
   error: 'erro',
 };
 
-function folderName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
 export function SessionDetails({
-  session,
-  parentTitle = null,
   project,
-  account,
-  usage,
   running = false,
   subagents = [],
   context,
@@ -54,13 +38,6 @@ export function SessionDetails({
 }: SessionDetailsProps) {
   const [newCommand, setNewCommand] = useState('');
   const contextSummary = contextLabel(context);
-  const now = new Date();
-  const effectiveProvider = account?.provider ?? project.provider;
-  const displayAccount = accountDisplayName({
-    label: account?.label ?? project.accountLabel,
-    email: account?.email ?? project.accountEmail,
-  });
-  const isSubsession = session.parentId !== null;
   const checks = project.verificationChecks ?? [];
 
   const toggleCheck = (id: string) => {
@@ -91,55 +68,6 @@ export function SessionDetails({
 
   return (
     <aside className="session-details" aria-label="Detalhes da sessão">
-      <section className="session-details-section">
-        <h2 className="section-label">Conta</h2>
-        <div className="session-details-account">
-          <span className="session-details-account-label" title={displayAccount}>
-            <ProviderBadge provider={effectiveProvider} size={18} />
-            <span className="session-details-account-text">
-              {PROVIDER_NAME[effectiveProvider]} · {displayAccount}
-            </span>
-          </span>
-          {account ? (
-            <span className="session-details-status">{STATUS_TEXT[account.status]}</span>
-          ) : null}
-        </div>
-        <UsageSection state={usage} />
-      </section>
-      <section className="session-details-section">
-        <h2 className="section-label">{isSubsession ? 'Subsessão' : 'Sessão'}</h2>
-        <dl className="session-details-grid">
-          <dt>Tipo</dt>
-          <dd>{isSubsession ? 'Subsessão' : 'Sessão'}</dd>
-          <dt>Seção</dt>
-          <dd className="mono" title={project.path}>
-            {folderName(project.path)}
-          </dd>
-          {isSubsession && parentTitle ? (
-            <>
-              <dt>Sessão pai</dt>
-              <dd title={parentTitle}>{parentTitle}</dd>
-            </>
-          ) : null}
-          {session.worktree ? (
-            <>
-              <dt>Worktree</dt>
-              <dd className="mono" title={session.worktree.path}>
-                {session.worktree.branch}
-              </dd>
-            </>
-          ) : null}
-          <dt>Provedor</dt>
-          <dd className="session-details-provider mono">
-            <ProviderBadge provider={effectiveProvider} size={16} />
-            {PROVIDER_NAME[effectiveProvider]}
-          </dd>
-          <dt>Criada</dt>
-          <dd className="mono">{relativeTime({ iso: session.createdAt, now })}</dd>
-          <dt>Atualizada</dt>
-          <dd className="mono">{relativeTime({ iso: session.updatedAt, now })}</dd>
-        </dl>
-      </section>
       <section className="session-details-section">
         <h2 className="section-label">Contexto</h2>
         <div className="session-details-context">

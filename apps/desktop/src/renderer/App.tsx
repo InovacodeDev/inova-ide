@@ -1229,11 +1229,7 @@ export function App() {
         </main>
         {inWorkspace && activeSession && activeProject && (
           <SessionDetails
-            session={activeSession}
-            parentTitle={activeParentTitle}
             project={activeProject}
-            account={activeAccount}
-            usage={activeAccountLabel ? usage[activeAccountLabel] : undefined}
             running={Boolean(chats[activeSession.id]?.running)}
             subagents={chats[activeSession.id]?.subagents}
             context={chats[activeSession.id]?.context}
