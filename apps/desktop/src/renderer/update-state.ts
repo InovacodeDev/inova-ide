@@ -21,6 +21,21 @@ export function shouldShowWhatsNew(input: { lastSeen: string | null; current: st
   return input.lastSeen !== null && input.lastSeen !== '' && input.lastSeen !== input.current;
 }
 
+const UNRELEASED_HEADING = /^## \[(?:Não lançado|Unreleased)\]/i;
+const SECTION_HEADING = /^## /;
+
+export function publishedChangelog(source: string): string {
+  const lines = source.split('\n');
+  const start = lines.findIndex((line) => UNRELEASED_HEADING.test(line));
+  if (start === -1) return source;
+  const nextOffset = lines.slice(start + 1).findIndex((line) => SECTION_HEADING.test(line));
+  const kept =
+    nextOffset === -1
+      ? lines.slice(0, start)
+      : [...lines.slice(0, start), ...lines.slice(start + 1 + nextOffset)];
+  return `${kept.join('\n').trimEnd()}\n`;
+}
+
 export function changelogTitle(input: { whatsNew: boolean; version: string | null }): string {
   return input.whatsNew && input.version !== null
     ? `Novidades da versão ${input.version}`

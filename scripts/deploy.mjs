@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RELATIVE_PACKAGE_PATHS, bumpVersions, checkVersions, nextVersion } from './version.mjs';
@@ -65,11 +65,36 @@ function assertTagAvailable({ tag, repoRoot, runGit }) {
   }
 }
 
+const UNRELEASED_HEADING = '## [Não lançado]';
+const CHANGELOG_PATH = 'CHANGELOG.md';
+
+export function releaseChangelog({ content, version, date }) {
+  if (!content.includes(`${UNRELEASED_HEADING}\n`)) return null;
+  return content.replace(
+    `${UNRELEASED_HEADING}\n`,
+    `${UNRELEASED_HEADING}\n\n## [${version}] - ${date}\n`,
+  );
+}
+
+function promoteChangelog({ repoRoot, version, date }) {
+  const file = resolve(repoRoot, CHANGELOG_PATH);
+  if (!existsSync(file)) return false;
+  const released = releaseChangelog({ content: readFileSync(file, 'utf8'), version, date });
+  if (released === null) return false;
+  writeFileSync(file, released);
+  return true;
+}
+
+function isoToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export function deploy({
   target,
   repoRoot = defaultRoot,
   runGit = defaultGitRunner,
   log = console.log,
+  today = isoToday,
 }) {
   const releaseTarget = parseReleaseTarget([target]);
   assertCleanWorktree(runGit, repoRoot);
@@ -84,7 +109,13 @@ export function deploy({
   checkVersions({ repoRoot, tag });
   log(`Bumped version: ${current} -> ${updated}`);
 
-  runGit(['add', ...RELATIVE_PACKAGE_PATHS], repoRoot);
+  const changelogPromoted = promoteChangelog({ repoRoot, version: updated, date: today() });
+  if (changelogPromoted) log(`Moved unreleased changelog entries into ${tag}`);
+
+  runGit(
+    ['add', ...RELATIVE_PACKAGE_PATHS, ...(changelogPromoted ? [CHANGELOG_PATH] : [])],
+    repoRoot,
+  );
   runGit(['commit', '-m', `chore: release ${tag}`], repoRoot);
   log(`Committed release ${tag} on ${branch}`);
 

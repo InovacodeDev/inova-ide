@@ -10,9 +10,23 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 - Notificação de nova versão, com aviso no app e no sistema.
 - Versão do app e changelog dentro do app, com novidades exibidas após cada atualização.
-- Botão de anexos no chat.
-- Modelo e esforço padrão por provedor nas configurações.
-- Barra de formatação no campo de mensagem.
+- Botão de anexos no chat para fotos, documentos e pastas.
+- Modelo, esforço e modo padrão por provedor nas configurações.
+- Campo de mensagem com formatação visível enquanto você digita, como no Slack.
+- Subagentes em execução e uso do contexto no painel da sessão.
+- Configurações do projeto, com automação de worktree e comandos de verificação.
+- Onda de áudio e botão de gravação durante o ditado.
+
+### Alterado
+
+- Sem a opção "Padrão" de esforço: a sessão usa o esforço das configurações (Médio por padrão).
+- Painel da sessão mais enxuto, sem dados de conta e de sessão repetidos.
+- Botão de parar redesenhado.
+
+### Corrigido
+
+- Arquivos com espaço no caminho aparecem como uma tag só e chegam inteiros ao agente.
+- Texto de subagentes não aparece mais no chat principal.
 
 ## [0.5.1] - 2026-11-13
 

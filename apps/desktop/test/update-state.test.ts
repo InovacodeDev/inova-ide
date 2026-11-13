@@ -3,6 +3,7 @@ import type { UpdateInfo } from '../src/shared/api';
 import {
   changelogTitle,
   isUpdateDismissed,
+  publishedChangelog,
   shouldShowUpdateToast,
   shouldShowWhatsNew,
 } from '../src/renderer/update-state';
@@ -55,5 +56,41 @@ describe('changelogTitle', () => {
     expect(changelogTitle({ whatsNew: true, version: '0.5.1' })).toBe('Novidades da versão 0.5.1');
     expect(changelogTitle({ whatsNew: false, version: '0.5.1' })).toBe('Novidades');
     expect(changelogTitle({ whatsNew: true, version: null })).toBe('Novidades');
+  });
+});
+
+describe('publishedChangelog', () => {
+  test('removes the unreleased section and keeps released ones', () => {
+    const source = [
+      '# Changelog',
+      '',
+      'Intro.',
+      '',
+      '## [Não lançado]',
+      '',
+      '### Adicionado',
+      '',
+      '- Segredo futuro.',
+      '',
+      '## [0.5.1] - 2026-11-13',
+      '',
+      '- Correção.',
+      '',
+    ].join('\n');
+    const result = publishedChangelog(source);
+    expect(result).not.toContain('Não lançado');
+    expect(result).not.toContain('Segredo futuro');
+    expect(result).toContain('## [0.5.1] - 2026-11-13');
+    expect(result).toContain('Intro.');
+  });
+
+  test('removes an unreleased section placed last', () => {
+    const source = '# Changelog\n\n## [0.5.1]\n\n- A.\n\n## [Unreleased]\n\n- B.\n';
+    expect(publishedChangelog(source)).toBe('# Changelog\n\n## [0.5.1]\n\n- A.\n');
+  });
+
+  test('keeps text without an unreleased section', () => {
+    const source = '# Changelog\n\n## [0.5.1]\n\n- A.\n';
+    expect(publishedChangelog(source)).toBe(source);
   });
 });

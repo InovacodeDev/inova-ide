@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
-import changelog from '../../../../CHANGELOG.md?raw';
+import changelogSource from '../../../../CHANGELOG.md?raw';
 import { CloseIcon } from './icons';
 import { Markdown } from './Markdown';
 import { openModalCount } from './modal-layers';
-import { changelogTitle } from './update-state';
+import { changelogTitle, publishedChangelog } from './update-state';
 import './modal.css';
 import './update.css';
+
+const changelog = publishedChangelog(changelogSource);
 
 interface ChangelogModalProps {
   version: string | null;

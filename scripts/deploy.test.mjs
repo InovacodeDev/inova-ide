@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
-import { deploy, parseReleaseTarget } from './deploy.mjs';
+import { deploy, parseReleaseTarget, releaseChangelog } from './deploy.mjs';
 
 const tempDirs = [];
 
@@ -62,6 +62,23 @@ describe('parseReleaseTarget', () => {
     assert.throws(() => parseReleaseTarget([]), /Usage:/);
     assert.throws(() => parseReleaseTarget(['0.4.0']), /Usage:/);
     assert.throws(() => parseReleaseTarget(['patch', 'extra']), /Usage:/);
+  });
+});
+
+describe('releaseChangelog', () => {
+  it('renames the unreleased section and opens an empty one above it', () => {
+    const content = '# Changelog\n\n## [Não lançado]\n\n- Novo.\n';
+    assert.equal(
+      releaseChangelog({ content, version: '1.2.0', date: '2026-11-13' }),
+      '# Changelog\n\n## [Não lançado]\n\n## [1.2.0] - 2026-11-13\n\n- Novo.\n',
+    );
+  });
+
+  it('returns null when there is no unreleased section', () => {
+    assert.equal(
+      releaseChangelog({ content: '# Changelog\n', version: '1.2.0', date: '2026-11-13' }),
+      null,
+    );
   });
 });
 
@@ -148,6 +165,23 @@ describe('deploy', () => {
     );
     assert.equal(taggedRootPkg.version, '0.4.0');
     assert.equal(taggedDesktopPkg.version, '0.4.0');
+  });
+
+  it('promotes the unreleased changelog section into the tagged release', () => {
+    const { originDir, workDir } = setupRepo('0.3.0');
+    writeFileSync(
+      join(workDir, 'CHANGELOG.md'),
+      '# Changelog\n\n## [Não lançado]\n\n- Novo.\n\n## [0.3.0] - 2026-01-01\n\n- Antigo.\n',
+    );
+    git(['add', 'CHANGELOG.md'], workDir);
+    git(['commit', '-m', 'changelog'], workDir);
+
+    deploy({ target: 'patch', repoRoot: workDir, log: () => {}, today: () => '2026-11-13' });
+
+    assert.equal(
+      git(['show', 'v0.3.1:CHANGELOG.md'], originDir),
+      '# Changelog\n\n## [Não lançado]\n\n## [0.3.1] - 2026-11-13\n\n- Novo.\n\n## [0.3.0] - 2026-01-01\n\n- Antigo.',
+    );
   });
 
   it('fails cleanly via CLI on invalid arguments', () => {
