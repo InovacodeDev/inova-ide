@@ -1,6 +1,14 @@
 # Inova IDE: Tela de Configurações
 
-Data: 2026-11-13 · Status: proposto · Branch sugerida: `feat/settings-modal`
+Data: 2026-11-13 · Status: fase 1 implementada · Branch: `feat/settings-modal`
+
+## Mudanças na implementação
+
+- O padrão de `voice.modelId` é `large-v3-turbo-q5_0`, o modelo que o código já usava (commit `746e31c`).
+- Tema entrou na fase 1: `appearance.theme` (`system`, `dark`, `light`), padrão `dark`. O tema claro troca o fundo pelo texto e mantém o laranja. A logo inverte com o tema.
+- A caixa de entrada usa `mod+shift+U`, para não conflitar com o DevTools.
+- O arquivamento automático considera a atividade de toda a subárvore da sessão, não só da raiz.
+- O botão de engrenagem fica no cabeçalho. A versão do app não aparece na seção Geral.
 
 ## Problema e objetivo
 
