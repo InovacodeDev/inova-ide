@@ -8,10 +8,10 @@ import { fail, isRecord, ok } from './validation.js';
 export const VOICE_SAMPLE_RATE = 16_000;
 export const VOICE_MAX_SECONDS = 120;
 export const VOICE_MODEL = {
-  file: 'ggml-small-q5_1.bin',
-  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin',
-  bytes: 190_085_487,
-  sha256: 'ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb',
+  file: 'ggml-large-v3-turbo-q5_0.bin',
+  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin',
+  bytes: 574_041_195,
+  sha256: '394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2',
 } as const;
 
 const MIN_AUDIO_BYTES = VOICE_SAMPLE_RATE * 2 * 0.3;
