@@ -138,6 +138,14 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   expect(electron.invoke).toHaveBeenCalledWith('inova:updateSettings', {
     notifications: { completed: true },
   });
+  void api.downloadVoiceModel();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:downloadVoiceModel', undefined);
+  void api.downloadVoiceModel({ modelId: 'base' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:downloadVoiceModel', { modelId: 'base' });
+  void api.deleteVoiceModel({ modelId: 'small-q5_1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:deleteVoiceModel', {
+    modelId: 'small-q5_1',
+  });
   void api.sendTestNotification();
   expect(electron.invoke).toHaveBeenCalledWith('inova:sendTestNotification');
   void api.openDataFolder();

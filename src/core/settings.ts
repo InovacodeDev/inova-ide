@@ -1,5 +1,5 @@
 import { loadStore, saveStore, withStoreLock } from './store.js';
-import type { Settings, SettingsPatch } from './types.js';
+import type { Settings, SettingsPatch, VoiceModelId } from './types.js';
 
 export class SettingsError extends Error {
   constructor(message: string) {
@@ -8,8 +8,15 @@ export class SettingsError extends Error {
   }
 }
 
+export const VOICE_MODEL_IDS: readonly VoiceModelId[] = [
+  'base',
+  'small-q5_1',
+  'medium-q5_0',
+  'large-v3-turbo-q5_0',
+];
+
 export const DEFAULT_SETTINGS: Settings = {
-  voice: { language: 'auto' },
+  voice: { language: 'auto', modelId: 'large-v3-turbo-q5_0' },
   sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
   notifications: {
     waitingInput: true,
@@ -29,7 +36,7 @@ function oneOf(options: readonly unknown[]): FieldGuard {
 
 const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } =
   {
-    voice: { language: oneOf(['auto', 'pt', 'en', 'es']) },
+    voice: { language: oneOf(['auto', 'pt', 'en', 'es']), modelId: oneOf(VOICE_MODEL_IDS) },
     sessions: {
       autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
       collapseFinishedTurns: isBoolean,

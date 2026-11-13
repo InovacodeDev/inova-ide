@@ -228,7 +228,7 @@ test('session mode update and default provider mode validation', () => {
 
 test('settings patch validation rejects the whole patch on any unknown key or invalid value', () => {
   const valid = {
-    voice: { language: 'pt' },
+    voice: { language: 'pt', modelId: 'medium-q5_0' },
     sessions: { autoArchiveDays: 30, collapseFinishedTurns: false },
     notifications: { waitingInput: true, onlyWhenUnfocused: false },
   };
@@ -243,6 +243,9 @@ test('settings patch validation rejects the whole patch on any unknown key or in
     [],
     { theme: 'dark' },
     { voice: { language: 'fr' } },
+    { voice: { modelId: 'huge' } },
+    { voice: { modelId: '../base' } },
+    { voice: { modelId: 1 } },
     { voice: { language: 'pt', volume: 1 } },
     { sessions: { autoArchiveDays: 2 } },
     { sessions: { autoArchiveDays: '7' } },

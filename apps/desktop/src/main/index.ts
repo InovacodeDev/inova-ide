@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { getSettings } from '@inova/core/settings';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
@@ -194,6 +195,7 @@ void app.whenReady().then(async () => {
     const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
     const voice = createVoiceService({
       modelDir: join(dataRoot(process.env), 'models'),
+      getModelId: async () => (await getSettings(dataRoot(process.env))).voice.modelId,
       binaryCandidates: [
         join(process.resourcesPath, 'whisper', whisperName),
         join(app.getAppPath(), 'resources', 'whisper', whisperName),

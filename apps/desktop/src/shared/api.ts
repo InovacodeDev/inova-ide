@@ -33,6 +33,7 @@ import type {
   Settings,
   SettingsPatch,
   VerificationCheck,
+  VoiceModelId,
   Workspace,
 } from '@inova/core/types';
 
@@ -76,13 +77,23 @@ export interface ProjectView {
   verificationChecks?: VerificationCheck[];
 }
 
+export interface VoiceModelInfo {
+  id: VoiceModelId;
+  label: string;
+  bytes: number;
+}
+
 export interface VoiceStatus {
   binary: boolean;
   model: boolean;
   modelBytes: number;
+  modelId: VoiceModelId;
+  installed: VoiceModelId[];
+  catalog: VoiceModelInfo[];
 }
 
 export interface VoiceModelProgress {
+  modelId: VoiceModelId;
   receivedBytes: number;
   totalBytes: number;
 }
@@ -161,7 +172,8 @@ export interface InovaApi {
   }): Promise<Result<null>>;
   getPathForFile(file: File): string;
   getVoiceStatus(): Promise<Result<VoiceStatus>>;
-  downloadVoiceModel(): Promise<Result<null>>;
+  downloadVoiceModel(input?: { modelId: VoiceModelId }): Promise<Result<null>>;
+  deleteVoiceModel(input: { modelId: VoiceModelId }): Promise<Result<VoiceStatus>>;
   transcribeAudio(input: {
     pcm: Uint8Array;
     final: boolean;
@@ -300,6 +312,7 @@ export const CHANNELS = {
   loginEvent: 'inova:login:event',
   getVoiceStatus: 'inova:getVoiceStatus',
   downloadVoiceModel: 'inova:downloadVoiceModel',
+  deleteVoiceModel: 'inova:deleteVoiceModel',
   transcribeAudio: 'inova:transcribeAudio',
   voiceModelProgress: 'inova:voice:model-progress',
 } as const;

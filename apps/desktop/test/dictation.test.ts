@@ -4,6 +4,7 @@ import {
   dictationLanguage,
   encodePcm16,
   formatMegabytes,
+  resolveDictationLanguage,
 } from '../src/renderer/dictation.js';
 
 test('encodePcm16 joins chunks, clamps samples and writes little-endian 16-bit', () => {
@@ -19,6 +20,13 @@ test('dictationLanguage keeps the two-letter language and falls back to auto', (
   expect(dictationLanguage('EN')).toBe('en');
   expect(dictationLanguage('')).toBe('auto');
   expect(dictationLanguage('fil-PH')).toBe('auto');
+});
+
+test('resolveDictationLanguage sends an explicit setting and detects the locale otherwise', () => {
+  expect(resolveDictationLanguage({ setting: 'es', locale: 'pt-BR' })).toBe('es');
+  expect(resolveDictationLanguage({ setting: 'auto', locale: 'pt-BR' })).toBe('pt');
+  expect(resolveDictationLanguage({ setting: undefined, locale: 'en-US' })).toBe('en');
+  expect(resolveDictationLanguage({ setting: undefined, locale: '' })).toBe('auto');
 });
 
 test('appendDictation inserts a single separating space', () => {

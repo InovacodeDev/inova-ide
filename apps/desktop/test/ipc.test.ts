@@ -77,6 +77,7 @@ function setup() {
   const voice = {
     getVoiceStatus: vi.fn(async () => ({ ok: true as const, value: 'getVoiceStatus' })),
     downloadVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'downloadVoiceModel' })),
+    deleteVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'deleteVoiceModel' })),
     transcribeAudio: vi.fn(async () => ({ ok: true as const, value: 'transcribeAudio' })),
   };
   registerIpc({
@@ -134,7 +135,11 @@ test('voice invokes reach the voice handlers', async () => {
   await invoke('inova:getVoiceStatus', trusted);
   await invoke('inova:downloadVoiceModel', trusted);
   expect(voice.getVoiceStatus).toHaveBeenCalledOnce();
-  expect(voice.downloadVoiceModel).toHaveBeenCalledOnce();
+  expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith(undefined);
+  await invoke('inova:downloadVoiceModel', trusted, { modelId: 'base' });
+  expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith({ modelId: 'base' });
+  await invoke('inova:deleteVoiceModel', trusted, { modelId: 'base' });
+  expect(voice.deleteVoiceModel).toHaveBeenCalledWith({ modelId: 'base' });
 });
 
 test('terminal pty and openLogin channels are not registered', () => {

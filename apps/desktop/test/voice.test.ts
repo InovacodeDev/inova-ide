@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { VOICE_MODEL_IDS } from '@inova/core/settings';
+import type { VoiceModelId } from '@inova/core/types';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-  VOICE_MODEL,
+  VOICE_MODELS,
   VoiceError,
   buildVoicePrompt,
   cleanTranscript,
@@ -11,21 +14,36 @@ import {
   createVoiceService,
   encodeWav,
   parseTranscribe,
+  parseVoiceDownload,
+  parseVoiceModelRequest,
   whisperArgs,
   type VoiceDeps,
 } from '../src/main/voice.js';
 
 const ONE_SECOND = new Uint8Array(16_000 * 2);
+const DEFAULT_MODEL: VoiceModelId = 'large-v3-turbo-q5_0';
+const ORIGINAL_MODELS = { ...VOICE_MODELS };
 
 let dir = '';
+let activeModel: VoiceModelId = DEFAULT_MODEL;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'inova-voice-test-'));
+  activeModel = DEFAULT_MODEL;
 });
 
 afterEach(async () => {
+  Object.assign(VOICE_MODELS, ORIGINAL_MODELS);
   await rm(dir, { recursive: true, force: true });
 });
+
+function shrinkModel(modelId: VoiceModelId, payload: string): void {
+  VOICE_MODELS[modelId] = {
+    ...ORIGINAL_MODELS[modelId],
+    bytes: Buffer.byteLength(payload),
+    sha256: createHash('sha256').update(payload).digest('hex'),
+  };
+}
 
 async function setup(overrides: Partial<VoiceDeps> = {}) {
   const binary = join(dir, 'whisper-cli');
@@ -34,6 +52,7 @@ async function setup(overrides: Partial<VoiceDeps> = {}) {
   const onProgress = vi.fn();
   const service = createVoiceService({
     modelDir: join(dir, 'models'),
+    getModelId: async () => activeModel,
     binaryCandidates: [join(dir, 'missing'), binary],
     findOnPath: async () => undefined,
     runWhisper,
@@ -119,22 +138,150 @@ describe('parseTranscribe', () => {
 });
 
 describe('voice service', () => {
-  async function seedModel(): Promise<void> {
+  async function seedModel(modelId: VoiceModelId = DEFAULT_MODEL): Promise<void> {
     await mkdir(join(dir, 'models'), { recursive: true });
-    const path = join(dir, 'models', VOICE_MODEL.file);
+    const path = join(dir, 'models', VOICE_MODELS[modelId].file);
     await writeFile(path, '');
-    await truncate(path, VOICE_MODEL.bytes);
+    await truncate(path, VOICE_MODELS[modelId].bytes);
   }
+
+  test('the catalog covers every model id with a real Hugging Face file', () => {
+    expect(Object.keys(VOICE_MODELS).sort()).toEqual([...VOICE_MODEL_IDS].sort());
+    for (const spec of Object.values(ORIGINAL_MODELS)) {
+      expect(spec.url).toBe(
+        `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${spec.file}`,
+      );
+      expect(spec.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(spec.bytes).toBeGreaterThan(100_000_000);
+    }
+  });
 
   test('status reports the first existing binary and a model of the exact size', async () => {
     const { service } = await setup();
-    expect(await service.status()).toEqual({
+    const status = await service.status();
+    expect(status).toMatchObject({
       binary: true,
       model: false,
-      modelBytes: VOICE_MODEL.bytes,
+      modelBytes: VOICE_MODELS[DEFAULT_MODEL].bytes,
+      modelId: DEFAULT_MODEL,
+      installed: [],
     });
+    expect(status.catalog).toEqual(
+      VOICE_MODEL_IDS.map((id) => ({
+        id,
+        label: VOICE_MODELS[id].label,
+        bytes: VOICE_MODELS[id].bytes,
+      })),
+    );
     await seedModel();
     expect((await service.status()).model).toBe(true);
+  });
+
+  test('status follows the active model without restarting the service', async () => {
+    await seedModel(DEFAULT_MODEL);
+    const { service } = await setup();
+    activeModel = 'base';
+    expect(await service.status()).toMatchObject({
+      model: false,
+      modelId: 'base',
+      modelBytes: VOICE_MODELS.base.bytes,
+      installed: [DEFAULT_MODEL],
+    });
+    await seedModel('base');
+    expect(await service.status()).toMatchObject({
+      model: true,
+      installed: ['base', DEFAULT_MODEL],
+    });
+  });
+
+  test('transcribe runs whisper with the file of the active model', async () => {
+    await seedModel('base');
+    const { service, runWhisper } = await setup();
+    const input = { pcm: ONE_SECOND, final: true, language: 'pt', hints: [] };
+    await expect(service.transcribe(input)).rejects.toThrow(/Modelo de voz não encontrado/);
+    activeModel = 'base';
+    await service.transcribe(input);
+    expect(runWhisper.mock.calls[0]?.[0].args[1]).toBe(join(dir, 'models', 'ggml-base.bin'));
+  });
+
+  test('downloadModel fetches a model that is not the active one and reports its id', async () => {
+    shrinkModel('base', 'tiny base model');
+    const fetch = vi.fn(async () => new Response('tiny base model'));
+    const { service, onProgress } = await setup({ fetch });
+    await service.downloadModel({ modelId: 'base' });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledWith(ORIGINAL_MODELS.base.url);
+    expect(onProgress).toHaveBeenLastCalledWith({
+      modelId: 'base',
+      receivedBytes: 15,
+      totalBytes: 15,
+    });
+    expect(await readdir(join(dir, 'models'))).toEqual(['ggml-base.bin']);
+    expect(await service.status()).toMatchObject({ model: false, installed: ['base'] });
+  });
+
+  test('downloads of different models run independently and the same model is shared', async () => {
+    shrinkModel('base', 'tiny base model');
+    shrinkModel('small-q5_1', 'tiny small model');
+    const fetch = vi.fn(
+      async (url: string) =>
+        new Response(url === ORIGINAL_MODELS.base.url ? 'tiny base model' : 'tiny small model'),
+    );
+    const { service } = await setup({ fetch });
+    await Promise.all([
+      service.downloadModel({ modelId: 'base' }),
+      service.downloadModel({ modelId: 'small-q5_1' }),
+      service.downloadModel({ modelId: 'base' }),
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect((await service.status()).installed).toEqual(['base', 'small-q5_1']);
+  });
+
+  test('downloadModel without input downloads the active model', async () => {
+    shrinkModel('base', 'tiny base model');
+    activeModel = 'base';
+    const fetch = vi.fn(async () => new Response('tiny base model'));
+    const { service } = await setup({ fetch });
+    await service.downloadModel();
+    expect(fetch).toHaveBeenCalledWith(ORIGINAL_MODELS.base.url);
+    expect((await service.status()).model).toBe(true);
+  });
+
+  test('deleteModel removes only the catalog file of that model and returns the status', async () => {
+    await seedModel('base');
+    await seedModel(DEFAULT_MODEL);
+    await writeFile(join(dir, 'models', 'keep.bin'), 'x');
+    const { service } = await setup();
+    const status = await service.deleteModel({ modelId: 'base' });
+    expect(status.installed).toEqual([DEFAULT_MODEL]);
+    expect(status.model).toBe(true);
+    expect((await readdir(join(dir, 'models'))).sort()).toEqual([
+      'ggml-large-v3-turbo-q5_0.bin',
+      'keep.bin',
+    ]);
+    expect((await service.deleteModel({ modelId: DEFAULT_MODEL })).model).toBe(false);
+    expect((await service.deleteModel({ modelId: 'base' })).installed).toEqual([]);
+  });
+
+  test('deleteModel refuses a model that is still downloading', async () => {
+    shrinkModel('base', 'tiny base model');
+    let release: () => void = () => undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        release = () => {
+          controller.enqueue(new TextEncoder().encode('tiny base model'));
+          controller.close();
+        };
+      },
+    });
+    const fetch = vi.fn(async () => new Response(body));
+    const { service } = await setup({ fetch });
+    const pending = service.downloadModel({ modelId: 'base' });
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    await expect(service.deleteModel({ modelId: 'base' })).rejects.toThrow(/sendo baixado/);
+    release();
+    await pending;
+    expect((await service.status()).installed).toEqual(['base']);
   });
 
   test('status falls back to the PATH lookup', async () => {
@@ -244,5 +391,71 @@ describe('voice handlers', () => {
     expect(result).toMatchObject({ ok: false });
     expect(await handlers.getVoiceStatus()).toMatchObject({ ok: true, value: { binary: true } });
     expect(await handlers.downloadVoiceModel()).toMatchObject({ ok: false });
+  });
+
+  test('deleteVoiceModel removes a catalog model and returns the status', async () => {
+    await mkdir(join(dir, 'models'), { recursive: true });
+    const path = join(dir, 'models', VOICE_MODELS.base.file);
+    await writeFile(path, '');
+    await truncate(path, VOICE_MODELS.base.bytes);
+    const { service } = await setup();
+    const result = await createVoiceHandlers(service).deleteVoiceModel({ modelId: 'base' });
+    expect(result).toMatchObject({ ok: true, value: { installed: [] } });
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('deleteVoiceModel and downloadVoiceModel reject ids outside the catalog', async () => {
+    await mkdir(join(dir, 'models'), { recursive: true });
+    await writeFile(join(dir, 'models', 'victim.bin'), 'x');
+    const fetch = vi.fn(async () => new Response(null, { status: 500 }));
+    const { service } = await setup({ fetch });
+    const handlers = createVoiceHandlers(service);
+    const invalid = [
+      undefined,
+      null,
+      'base',
+      {},
+      { modelId: 'victim' },
+      { modelId: '../victim' },
+      { modelId: 'ggml-base.bin' },
+      { modelId: '__proto__' },
+      { modelId: 1 },
+    ];
+    for (const input of invalid) {
+      expect(await handlers.deleteVoiceModel(input)).toEqual({
+        ok: false,
+        message: 'Modelo de voz inválido.',
+      });
+    }
+    for (const input of invalid.filter((value) => value !== undefined)) {
+      expect(await handlers.downloadVoiceModel(input)).toEqual({
+        ok: false,
+        message: 'Modelo de voz inválido.',
+      });
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await readdir(join(dir, 'models'))).toEqual(['victim.bin']);
+  });
+
+  test('downloadVoiceModel downloads the requested model', async () => {
+    shrinkModel('small-q5_1', 'tiny small model');
+    const fetch = vi.fn(async () => new Response('tiny small model'));
+    const { service } = await setup({ fetch });
+    const result = await createVoiceHandlers(service).downloadVoiceModel({
+      modelId: 'small-q5_1',
+    });
+    expect(result).toEqual({ ok: true, value: null });
+    expect(fetch).toHaveBeenCalledWith(ORIGINAL_MODELS['small-q5_1'].url);
+  });
+
+  test('request parsers accept only catalog ids', () => {
+    expect(parseVoiceModelRequest({ modelId: 'medium-q5_0', extra: 1 })).toEqual({
+      modelId: 'medium-q5_0',
+    });
+    expect(parseVoiceModelRequest({ modelId: 'huge' })).toBeUndefined();
+    expect(parseVoiceDownload(undefined)).toEqual({});
+    expect(parseVoiceDownload({ modelId: 'base' })).toEqual({ modelId: 'base' });
+    expect(parseVoiceDownload({})).toBeUndefined();
+    expect(parseVoiceDownload(null)).toBeUndefined();
   });
 });

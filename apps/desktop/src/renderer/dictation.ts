@@ -1,3 +1,5 @@
+import type { Settings } from '@inova/core/types';
+
 export const DICTATION_SAMPLE_RATE = 16_000;
 export const DICTATION_MAX_MS = 120_000;
 export const DICTATION_INTERIM_MS = 2_000;
@@ -20,6 +22,14 @@ export function dictationLanguage(locale: string): string {
   // REGEX: leading two-letter language of a BCP 47 tag such as pt-BR
   const match = /^([a-z]{2})(?:-|$)/i.exec(locale);
   return match?.[1]?.toLowerCase() ?? 'auto';
+}
+
+export function resolveDictationLanguage(input: {
+  setting: Settings['voice']['language'] | undefined;
+  locale: string;
+}): string {
+  const { setting, locale } = input;
+  return setting === undefined || setting === 'auto' ? dictationLanguage(locale) : setting;
 }
 
 export function appendDictation(draft: string, text: string): string {

@@ -1,10 +1,11 @@
+import type { Settings, VoiceModelId } from '@inova/core/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DICTATION_INTERIM_MS,
   DICTATION_MAX_MS,
   DICTATION_SAMPLE_RATE,
-  dictationLanguage,
   encodePcm16,
+  resolveDictationLanguage,
 } from './dictation';
 
 export type DictationPhase =
@@ -36,6 +37,7 @@ const BUFFER_SIZE = 4096;
 
 export function useDictation(input: {
   hints: readonly string[];
+  language?: Settings['voice']['language'];
   onText: (text: string) => void;
 }): Dictation {
   const [phase, setPhaseState] = useState<DictationPhase>('idle');
@@ -46,6 +48,7 @@ export function useDictation(input: {
   const phaseRef = useRef<DictationPhase>('idle');
   const captureRef = useRef<Capture | null>(null);
   const interimBusyRef = useRef(false);
+  const missingModelRef = useRef<VoiceModelId | null>(null);
   const inputRef = useRef(input);
   inputRef.current = input;
 
@@ -59,7 +62,10 @@ export function useDictation(input: {
     return window.inova.transcribeAudio({
       pcm: encodePcm16(chunks),
       final,
-      language: dictationLanguage(navigator.language),
+      language: resolveDictationLanguage({
+        setting: inputRef.current.language,
+        locale: navigator.language,
+      }),
       hints: [...inputRef.current.hints],
     });
   }, []);
@@ -142,6 +148,7 @@ export function useDictation(input: {
       return;
     }
     if (!status.value.model) {
+      missingModelRef.current = status.value.modelId;
       setModelBytes(status.value.modelBytes);
       setPhase('needs-model');
       return;
@@ -150,14 +157,16 @@ export function useDictation(input: {
   }, [record, setPhase]);
 
   const confirmDownload = useCallback(() => {
-    if (phaseRef.current !== 'needs-model') return;
+    const modelId = missingModelRef.current;
+    if (phaseRef.current !== 'needs-model' || modelId === null) return;
     setDownloadPercent(0);
     setPhase('downloading');
     const unsubscribe = window.inova.onVoiceModelProgress((progress) => {
+      if (progress.modelId !== modelId) return;
       setDownloadPercent(Math.floor((progress.receivedBytes / progress.totalBytes) * 100));
     });
     void window.inova
-      .downloadVoiceModel()
+      .downloadVoiceModel({ modelId })
       .then(async (result) => {
         if (phaseRef.current !== 'downloading') return;
         if (result.ok) {

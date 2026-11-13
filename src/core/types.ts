@@ -82,9 +82,12 @@ export interface Workspace {
   activeSessionId: string | null;
 }
 
+export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-turbo-q5_0';
+
 export interface Settings {
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';
+    modelId: VoiceModelId;
   };
   sessions: {
     autoArchiveDays: 0 | 1 | 3 | 7 | 30;

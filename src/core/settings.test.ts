@@ -9,6 +9,7 @@ import {
   isSettingsPatch,
   SettingsError,
   updateSettings,
+  VOICE_MODEL_IDS,
 } from './settings.js';
 import { loadStore, saveStore } from './store.js';
 import type { SettingsPatch } from './types.js';
@@ -49,7 +50,7 @@ describe('settings', () => {
       patch: { notifications: { completed: true }, voice: { language: 'pt' } },
     });
     const expected = {
-      voice: { language: 'pt' },
+      voice: { ...DEFAULT_SETTINGS.voice, language: 'pt' },
       sessions: { autoArchiveDays: 7, collapseFinishedTurns: true },
       notifications: { ...DEFAULT_SETTINGS.notifications, completed: true },
     };
@@ -76,13 +77,44 @@ describe('settings', () => {
       updateSettings({ root, patch: { notifications: { failed: false } } }),
     ]);
     expect(await getSettings(root)).toEqual({
-      voice: { language: 'es' },
+      voice: { ...DEFAULT_SETTINGS.voice, language: 'es' },
       sessions: { autoArchiveDays: 0, collapseFinishedTurns: false },
       notifications: { ...DEFAULT_SETTINGS.notifications, failed: false },
     });
   });
 
+  it('updateSettings stores the voice model next to the language', async () => {
+    expect(DEFAULT_SETTINGS.voice.modelId).toBe('large-v3-turbo-q5_0');
+    for (const modelId of VOICE_MODEL_IDS) {
+      const result = await updateSettings({ root, patch: { voice: { modelId } } });
+      expect(result.voice).toEqual({ language: 'auto', modelId });
+    }
+    await updateSettings({ root, patch: { voice: { language: 'en' } } });
+    expect((await getSettings(root)).voice).toEqual({
+      language: 'en',
+      modelId: VOICE_MODEL_IDS[VOICE_MODEL_IDS.length - 1],
+    });
+  });
+
+  it('getSettings fills a missing voice model for a store saved before the field existed', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        settings: { voice: { language: 'pt' } },
+      }),
+    );
+    expect((await getSettings(root)).voice).toEqual({
+      language: 'pt',
+      modelId: DEFAULT_SETTINGS.voice.modelId,
+    });
+  });
+
   it.each<[string, unknown]>([
+    ['a voice model outside the catalog', { voice: { modelId: 'huge' } }],
+    ['a path as voice model', { voice: { modelId: '../ggml-base' } }],
     ['an unknown section', { appearance: { theme: 'dark' } }],
     ['an unknown field', { voice: { volume: 1 } }],
     ['a value outside the enum', { sessions: { autoArchiveDays: 5 } }],
@@ -105,9 +137,10 @@ describe('settings', () => {
 
   it('isSettings ignores unknown keys and absent fields', () => {
     expect(isSettings(DEFAULT_SETTINGS)).toBe(true);
-    expect(isSettings({ voice: { language: 'pt', modelId: 'future' }, later: {} })).toBe(true);
+    expect(isSettings({ voice: { language: 'pt', future: 'x' }, later: {} })).toBe(true);
     expect(isSettings({ voice: {} })).toBe(true);
     expect(isSettings({ voice: { language: 'fr' } })).toBe(false);
+    expect(isSettings({ voice: { modelId: 'future' } })).toBe(false);
     expect(isSettings('settings')).toBe(false);
   });
 });
