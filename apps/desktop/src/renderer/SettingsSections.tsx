@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/core/types';
 import { effectiveModeForSession } from './mode-picker-state';
@@ -154,8 +155,29 @@ const NOTIFICATION_ROWS: {
 
 export function NotificationsSection(props: SettingsSectionProps & { call: WarningCall }) {
   const { settings, onUpdate, call } = props;
+  const [blocked, setBlocked] = useState<string | null>(null);
+
+  // NOTE: the operating system only asks for notification permission when the app posts its
+  // first notification, so posting one is how the permission is requested.
+  const requestPermission = async (): Promise<void> => {
+    const result = await window.inova.sendTestNotification();
+    setBlocked(result.ok ? null : result.message);
+  };
+
   return (
     <SettingGroup>
+      {blocked !== null && (
+        <div className="setting-alert" role="alert">
+          <p>{blocked}</p>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void call(() => window.inova.openNotificationSettings())}
+          >
+            Abrir ajustes de notificação
+          </button>
+        </div>
+      )}
       {NOTIFICATION_ROWS.map((row) => {
         const id = `notification-${row.key}`;
         return (
@@ -163,7 +185,10 @@ export function NotificationsSection(props: SettingsSectionProps & { call: Warni
             <Switch
               id={id}
               checked={settings.notifications[row.key]}
-              onChange={(checked) => onUpdate({ notifications: { [row.key]: checked } })}
+              onChange={(checked) => {
+                onUpdate({ notifications: { [row.key]: checked } });
+                if (checked && row.key !== 'onlyWhenUnfocused') void requestPermission();
+              }}
             />
           </SettingRow>
         );
@@ -172,11 +197,7 @@ export function NotificationsSection(props: SettingsSectionProps & { call: Warni
         title="Notificação de teste"
         description="Mostra uma notificação para conferir se o sistema a exibe."
       >
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void call(() => window.inova.sendTestNotification())}
-        >
+        <button type="button" className="btn" onClick={() => void requestPermission()}>
           Enviar notificação de teste
         </button>
       </SettingRow>

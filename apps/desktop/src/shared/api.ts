@@ -145,6 +145,7 @@ export interface InovaApi {
   getSettings(): Promise<Result<Settings>>;
   updateSettings(input: SettingsPatch): Promise<Result<Settings>>;
   sendTestNotification(): Promise<Result<null>>;
+  openNotificationSettings(): Promise<Result<null>>;
   openDataFolder(): Promise<Result<null>>;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
   getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
@@ -271,6 +272,7 @@ export const CHANNELS = {
   getSettings: 'inova:getSettings',
   updateSettings: 'inova:updateSettings',
   sendTestNotification: 'inova:sendTestNotification',
+  openNotificationSettings: 'inova:openNotificationSettings',
   openDataFolder: 'inova:openDataFolder',
   deleteSession: 'inova:deleteSession',
   getWorktreeStatus: 'inova:getWorktreeStatus',

@@ -75,7 +75,10 @@ async function setup(options: { withBinary?: boolean; withOpenPath?: boolean } =
     accountsInUse: () => inUse,
   };
   const baseEnv = { PATH: bin, TERM: 'xterm-256color', ANTHROPIC_API_KEY: 'fake-key' };
-  const notify = vi.fn<NonNullable<HandlerDeps['notify']>>();
+  const notify = vi.fn<NonNullable<HandlerDeps['notify']>>(async () => ({
+    ok: true,
+    value: null,
+  }));
   const openPath = vi.fn<NonNullable<HandlerDeps['openPath']>>(async () => undefined);
   const handlers = createHandlers({
     root,
@@ -1334,6 +1337,12 @@ test('settings default, update through the handler, reject invalid patches, and 
     expect(await handlers.updateSettings(input)).toEqual(INVALID);
   }
   expect(unwrap(await handlers.getSettings())).toEqual(updated);
+});
+
+test('sendTestNotification reports a notification the system blocked', async () => {
+  const { handlers, notify } = await setup();
+  notify.mockResolvedValueOnce({ ok: false, message: 'bloqueada' });
+  expect(await handlers.sendTestNotification()).toEqual({ ok: false, message: 'bloqueada' });
 });
 
 test('sendTestNotification notifies with the fixed title and body', async () => {

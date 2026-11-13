@@ -123,6 +123,25 @@
   color: var(--muted);
 }
 
+.setting-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--error) 55%, var(--border));
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.setting-alert p {
+  margin: 0;
+}
+
 .setting-row-control {
   flex: none;
   display: flex;

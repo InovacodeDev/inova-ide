@@ -27,6 +27,7 @@ const api: InovaApi = {
   getSettings: () => ipcRenderer.invoke(CHANNELS.getSettings),
   updateSettings: (input) => ipcRenderer.invoke(CHANNELS.updateSettings, input),
   sendTestNotification: () => ipcRenderer.invoke(CHANNELS.sendTestNotification),
+  openNotificationSettings: () => ipcRenderer.invoke(CHANNELS.openNotificationSettings),
   openDataFolder: () => ipcRenderer.invoke(CHANNELS.openDataFolder),
   deleteSession: (input) => ipcRenderer.invoke(CHANNELS.deleteSession, input),
   getWorktreeStatus: (input) => ipcRenderer.invoke(CHANNELS.getWorktreeStatus, input),

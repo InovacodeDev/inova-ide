@@ -47,6 +47,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.getSettings, () => handlers.getSettings());
   handle(CHANNELS.updateSettings, (input) => handlers.updateSettings(input));
   handle(CHANNELS.sendTestNotification, () => handlers.sendTestNotification());
+  handle(CHANNELS.openNotificationSettings, () => handlers.openNotificationSettings());
   handle(CHANNELS.openDataFolder, () => handlers.openDataFolder());
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));

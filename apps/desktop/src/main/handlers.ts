@@ -141,7 +141,8 @@ export interface HandlerDeps {
   emitLogin?: (event: LoginEvent) => void;
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
-  notify?: (input: { title: string; body: string }) => void;
+  notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
+  openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
   pickFolder: () => Promise<string | null>;
@@ -358,7 +359,7 @@ export function createHandlers(deps: HandlerDeps) {
         notifications[NOTIFICATION_TOGGLES[input.kind]] &&
         (!notifications.onlyWhenUnfocused || !uiFocus.windowFocused)
       ) {
-        deps.notify?.({ title: session.title, body: input.summary });
+        await deps.notify?.({ title: session.title, body: input.summary });
       }
     });
     inboxChain = work.catch((error: unknown) => {
@@ -1034,7 +1035,15 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     sendTestNotification: (): Promise<Result<null>> =>
       guarded(async () => {
-        deps.notify?.({ title: 'Inova', body: 'Notificação de teste' });
+        if (!deps.notify) return fail('Notificações não estão disponíveis.');
+        return deps.notify({ title: 'Inova', body: 'Notificação de teste' });
+      }),
+    openNotificationSettings: (): Promise<Result<null>> =>
+      guarded(async () => {
+        if (!deps.openNotificationSettings) {
+          return fail('Abra os ajustes de notificação do sistema manualmente.');
+        }
+        await deps.openNotificationSettings();
         return ok(null);
       }),
     openDataFolder: (): Promise<Result<null>> =>

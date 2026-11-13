@@ -148,6 +148,8 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   });
   void api.sendTestNotification();
   expect(electron.invoke).toHaveBeenCalledWith('inova:sendTestNotification');
+  void api.openNotificationSettings();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:openNotificationSettings');
   void api.openDataFolder();
   expect(electron.invoke).toHaveBeenCalledWith('inova:openDataFolder');
   void api.getWorktreeStatus({ sessionId: 's' });

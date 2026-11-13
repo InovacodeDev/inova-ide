@@ -13,6 +13,7 @@ import { createChatRunner } from './chat.js';
 import type { SpawnChild } from './chat.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
+import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { killProcessGroup } from './process-group.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
@@ -27,6 +28,7 @@ const AUTO_ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
 const appUrl =
   process.env['ELECTRON_RENDERER_URL'] ??
   pathToFileURL(join(__dirname, '../renderer/index.html')).href;
+const notificationSettingsUrl = NOTIFICATION_SETTINGS_URL[process.platform];
 let mainWindow: BrowserWindow | undefined;
 let cachedBaseEnv: Promise<NodeJS.ProcessEnv> | undefined;
 
@@ -174,9 +176,23 @@ void app.whenReady().then(async () => {
       emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
       emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
       emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
-      notify: ({ title, body }) => {
-        if (Notification.isSupported()) new Notification({ title, body }).show();
-      },
+      notify: createNotifier({
+        platform: process.platform,
+        isSupported: () => Notification.isSupported(),
+        showNative: ({ title, body }) =>
+          new Promise((resolve) => {
+            const notification = new Notification({ title, body });
+            notification.once('show', () => resolve(null));
+            notification.once('failed', (_event, error) => resolve(error));
+            notification.show();
+          }),
+        runOsascript: async (args) => {
+          await execFileAsync('/usr/bin/osascript', args, { timeout: SHELL_TIMEOUT_MS });
+        },
+      }),
+      ...(notificationSettingsUrl === undefined
+        ? {}
+        : { openNotificationSettings: () => shell.openExternal(notificationSettingsUrl) }),
       openPath: async (path) => {
         const failure = await shell.openPath(path);
         if (failure !== '') throw new Error(failure);
