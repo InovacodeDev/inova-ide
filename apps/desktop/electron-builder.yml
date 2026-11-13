@@ -55,6 +55,7 @@ linux:
   category: Development
   icon: build/icon.png
   executableName: inova-ide
+  maintainer: InovacodeDev <tito@inovacode.dev>
   artifactName: InovaIDE-${version}-linux-${arch}.${ext}
   target:
     - target: AppImage
