@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
-import { AlertIcon, CheckIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons';
+import { AlertIcon, CheckIcon, ChevronRightIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons';
 import {
   PROVIDER_ORDER,
   formatResetDateTime,
   formatResetIn,
   groupByProvider,
   orderedUsageWindows,
+  providerHealth,
   usageLevel,
 } from './footer-state';
 import { folderName } from './path-name';
@@ -226,43 +227,47 @@ export function AccountsView(props: AccountsViewProps) {
         ) : (
           <div className="accounts-list">
             {groups.map((group) => {
-              const missingCli = group.accounts.some((a) => a.status === 'binary-missing');
-              const connected = group.accounts.filter((a) => a.status === 'logged-in').length;
+              const health = providerHealth(group.accounts);
               const groupLabels = new Set(group.accounts.map((a) => a.label));
               const groupProjects = projects.filter((p) => groupLabels.has(p.accountLabel)).length;
               return (
-                <section key={group.provider} className="accounts-card">
-                  <div className="accounts-card-head">
+                <details key={group.provider} className="accounts-card" open>
+                  <summary className="accounts-card-head">
+                    <span className="accounts-card-chevron">
+                      <ChevronRightIcon size={16} />
+                    </span>
                     <ProviderBadge provider={group.provider} size={28} />
                     <div className="accounts-card-title">
                       <h2>{PROVIDER_NAME[group.provider]}</h2>
                       <div className="accounts-card-meta">
                         <span className="mono">CLI {PROVIDER_BINARY[group.provider]}</span>
                         <span>
-                          {connected}/
+                          {group.connected}/
                           {plural({
                             count: group.accounts.length,
                             one: 'conta conectada',
                             many: 'contas conectadas',
                           })}
                         </span>
-                        <span className="account-medium-only">
+                        <span>
                           {plural({ count: groupProjects, one: 'projeto', many: 'projetos' })}
                         </span>
                       </div>
                     </div>
-                    {missingCli ? (
-                      <span className="accounts-health accounts-health-bad">
-                        <AlertIcon size={14} />
-                        CLI não instalado
-                      </span>
-                    ) : (
+                    {health.kind === 'ok' ? (
                       <span className="accounts-health accounts-health-ok">
                         <CheckIcon size={14} />
                         Saudável
                       </span>
+                    ) : (
+                      <span className="accounts-health accounts-health-bad">
+                        <AlertIcon size={14} />
+                        {health.kind === 'missing-cli'
+                          ? 'CLI não instalado'
+                          : plural({ count: health.count, one: 'pendência', many: 'pendências' })}
+                      </span>
                     )}
-                  </div>
+                  </summary>
                   <div className="accounts-scroll">
                     <div className="account-row account-row-head section-label">
                       <span>Conta</span>
@@ -341,7 +346,7 @@ export function AccountsView(props: AccountsViewProps) {
                       );
                     })}
                   </div>
-                </section>
+                </details>
               );
             })}
           </div>

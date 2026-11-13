@@ -39,6 +39,17 @@ export function groupByProvider(accounts: readonly AccountView[]): ProviderGroup
   });
 }
 
+export type ProviderHealth =
+  { kind: 'ok' } | { kind: 'missing-cli' } | { kind: 'pending'; count: number };
+
+export function providerHealth(accounts: readonly AccountView[]): ProviderHealth {
+  if (accounts.some((account) => account.status === 'binary-missing')) {
+    return { kind: 'missing-cli' };
+  }
+  const count = accounts.filter((account) => account.status !== 'logged-in').length;
+  return count === 0 ? { kind: 'ok' } : { kind: 'pending', count };
+}
+
 export function highlightedProvider(input: {
   groups: ProviderGroup[];
   focusedProvider: ProviderId | null;

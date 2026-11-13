@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { UsageWindow } from '@inova/core/chat-types';
 import type { AccountView } from '../shared/api';
@@ -36,7 +36,8 @@ const POPOVER_WINDOW_LABEL: Record<UsageWindow['kind'], string> = {
   monthly: 'Mensal',
 };
 
-const POPOVER_CLOSE_DELAY_MS = 120;
+const POPOVER_WIDTH_PX = 360;
+const POPOVER_EDGE_GAP_PX = 12;
 const COUNTDOWN_TICK_MS = 15_000;
 
 function readyWindows(state: UsageState | undefined): UsageWindow[] {
@@ -70,26 +71,18 @@ function FooterMeter(props: { window: UsageWindow; provider: ProviderId }) {
 function PopoverAccountCard(props: {
   account: AccountView;
   active: boolean;
-  highlighted: boolean;
   usageState: UsageState | undefined;
   nowMs: number;
 }) {
-  const { account, active, highlighted, usageState, nowMs } = props;
+  const { account, active, usageState, nowMs } = props;
   const windows = readyWindows(usageState);
-  const classNames = ['footer-popover-card'];
-  if (active) classNames.push('footer-popover-card-active');
-  else if (highlighted) classNames.push('footer-popover-card-highlight');
 
   return (
-    <article className={classNames.join(' ')}>
+    <article
+      className={active ? 'footer-popover-card footer-popover-card-active' : 'footer-popover-card'}
+    >
       <div className="footer-popover-card-head">
-        <div className="footer-popover-identity">
-          <ProviderBadge provider={account.provider} size={18} />
-          <div className="footer-popover-titles">
-            <span className="footer-popover-account">{accountDisplayName(account)}</span>
-            <span className="footer-popover-provider">{PROVIDER_NAME[account.provider]}</span>
-          </div>
-        </div>
+        <span className="footer-popover-account">{accountDisplayName(account)}</span>
         {active ? (
           <span className="footer-popover-status footer-popover-status-active">
             <span className="footer-inuse-dot" />
@@ -142,17 +135,12 @@ function PopoverAccountCard(props: {
 export function Footer(props: FooterProps) {
   const { accounts, focusedAccountLabel, usage, onLoadUsage, onManageAccounts } = props;
   const loadRef = useRef(onLoadUsage);
-  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [hoveredProvider, setHoveredProvider] = useState<ProviderId | null>(null);
+  const [popover, setPopover] = useState<{ provider: ProviderId; alignRight: boolean } | null>(
+    null,
+  );
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const groups = useMemo(() => groupByProvider(accounts), [accounts]);
-  const allAccounts = useMemo(() => groups.flatMap((group) => group.accounts), [groups]);
-  const connectedCount = useMemo(
-    () => accounts.filter((account) => account.status === 'logged-in').length,
-    [accounts],
-  );
   const shown = useMemo(
     () =>
       groups.map((group) => ({
@@ -164,177 +152,132 @@ export function Footer(props: FooterProps) {
       })),
     [groups, focusedAccountLabel],
   );
+  const popoverProvider = popover?.provider ?? null;
 
-  const clearCloseTimer = useCallback(() => {
-    if (!closeTimerRef.current) return;
-    clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-  }, []);
-
-  const openPopover = useCallback(
-    (provider?: ProviderId) => {
-      clearCloseTimer();
-      setNowMs(Date.now());
-      setPopoverOpen(true);
-      if (provider !== undefined) setHoveredProvider(provider);
-    },
-    [clearCloseTimer],
-  );
-
-  const scheduleClose = useCallback(() => {
-    clearCloseTimer();
-    closeTimerRef.current = setTimeout(() => {
-      setPopoverOpen(false);
-      setHoveredProvider(null);
-      closeTimerRef.current = null;
-    }, POPOVER_CLOSE_DELAY_MS);
-  }, [clearCloseTimer]);
+  const openPopover = (provider: ProviderId, anchor: HTMLElement) => {
+    const { left } = anchor.getBoundingClientRect();
+    setNowMs(Date.now());
+    setPopover({
+      provider,
+      alignRight: left + POPOVER_WIDTH_PX + POPOVER_EDGE_GAP_PX > window.innerWidth,
+    });
+  };
+  const closePopover = () => setPopover(null);
 
   useEffect(() => {
     loadRef.current = onLoadUsage;
   });
 
-  useEffect(() => clearCloseTimer, [clearCloseTimer]);
-
-  const missingShownLabels = shown
-    .flatMap(({ account }) =>
-      account && account.status === 'logged-in' && usage[account.label] === undefined
+  const missingLabels = accounts
+    .flatMap((account) => {
+      const isShown = shown.some((entry) => entry.account?.label === account.label);
+      const inPopover = account.provider === popoverProvider;
+      return (isShown || inPopover) &&
+        account.status === 'logged-in' &&
+        usage[account.label] === undefined
         ? [account.label]
-        : [],
-    )
+        : [];
+    })
     .join('\n');
   useEffect(() => {
-    if (!missingShownLabels) return;
-    const missing = new Set(missingShownLabels.split('\n'));
-    shown.forEach(({ account }) => {
-      if (account && missing.has(account.label)) loadRef.current(account);
+    if (!missingLabels) return;
+    const missing = new Set(missingLabels.split('\n'));
+    accounts.forEach((account) => {
+      if (missing.has(account.label)) loadRef.current(account);
     });
-  }, [shown, missingShownLabels]);
-
-  const missingPopoverLabels = popoverOpen
-    ? accounts
-        .flatMap((account) =>
-          account.status === 'logged-in' && usage[account.label] === undefined
-            ? [account.label]
-            : [],
-        )
-        .join('\n')
-    : '';
-  useEffect(() => {
-    if (!popoverOpen || !missingPopoverLabels) return;
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      const missing = new Set(missingPopoverLabels.split('\n'));
-      accounts.forEach((account) => {
-        if (missing.has(account.label)) loadRef.current(account);
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [popoverOpen, accounts, missingPopoverLabels]);
+  }, [accounts, missingLabels]);
 
   useEffect(() => {
-    if (!popoverOpen) return;
+    if (popoverProvider === null) return;
     const timer = setInterval(() => {
       setNowMs(Date.now());
     }, COUNTDOWN_TICK_MS);
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setPopoverOpen(false);
-        setHoveredProvider(null);
-      }
+      if (event.key === 'Escape') setPopover(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => {
       clearInterval(timer);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [popoverOpen]);
+  }, [popoverProvider]);
 
   return (
-    <div className="footer-shell" onMouseEnter={() => openPopover()} onMouseLeave={scheduleClose}>
-      {popoverOpen && allAccounts.length > 0 ? (
-        <section
-          className="footer-popover"
-          aria-label="Detalhes de uso e reset das contas"
-          onMouseEnter={() => openPopover()}
-        >
-          <header className="footer-popover-head">
-            <span className="footer-popover-title">Detalhes das contas</span>
-            <span className="footer-popover-summary">
-              {connectedCount} {connectedCount === 1 ? 'conectada' : 'conectadas'} ·{' '}
-              {allAccounts.length} {allAccounts.length === 1 ? 'conta' : 'contas'}
+    <footer className="footer-bar" aria-label="Provedores conectados">
+      {shown.length === 0 ? <span className="footer-empty">Nenhuma conta conectada</span> : null}
+      {shown.map(({ group, account }) => {
+        if (!account) return null;
+        const extra = group.accounts.length - 1;
+        const active = account.label === focusedAccountLabel;
+        const open = popover?.provider === group.provider;
+        return (
+          <div
+            key={group.provider}
+            className={`footer-group${active ? ' footer-group-active' : ''}`}
+            tabIndex={0}
+            onMouseEnter={(event) => openPopover(group.provider, event.currentTarget)}
+            onMouseLeave={closePopover}
+            onFocus={(event) => openPopover(group.provider, event.currentTarget)}
+            onBlur={closePopover}
+          >
+            <ProviderBadge provider={group.provider} size={16} />
+            <span className="footer-name">
+              {PROVIDER_NAME[group.provider]} · {accountDisplayName(account)}
             </span>
-          </header>
-          <div className="footer-popover-list">
-            {allAccounts.map((account) => (
-              <PopoverAccountCard
-                key={account.label}
-                account={account}
-                active={account.label === focusedAccountLabel}
-                highlighted={hoveredProvider === account.provider}
-                usageState={usage[account.label]}
-                nowMs={nowMs}
-              />
-            ))}
-          </div>
-        </section>
-      ) : null}
-      <footer className="footer-bar" aria-label="Provedores conectados">
-        {shown.length === 0 ? <span className="footer-empty">Nenhuma conta conectada</span> : null}
-        {shown.map(({ group, account }) => {
-          if (!account) return null;
-          const extra = group.accounts.length - 1;
-          const active = account.label === focusedAccountLabel;
-          return (
-            <div
-              key={group.provider}
-              className={`footer-group${active ? ' footer-group-active' : ''}`}
-              onMouseEnter={() => openPopover(group.provider)}
-            >
-              <ProviderBadge provider={group.provider} size={16} />
-              <span className="footer-name">
-                {PROVIDER_NAME[group.provider]} · {accountDisplayName(account)}
+            {active ? (
+              <span className="footer-inuse">
+                <span className="footer-inuse-dot" />
+                em uso
               </span>
-              {active ? (
-                <span className="footer-inuse">
-                  <span className="footer-inuse-dot" />
-                  em uso
-                </span>
-              ) : null}
-              {account.status === 'logged-in' ? (
-                readyWindows(usage[account.label]).map((w) => (
-                  <FooterMeter key={w.kind} window={w} provider={group.provider} />
-                ))
-              ) : (
-                <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>
-              )}
-              {extra > 0 ? (
-                <span
-                  className="footer-extra"
-                  title={group.accounts.map((a) => accountDisplayName(a)).join('\n')}
-                >
-                  +{extra} {extra === 1 ? 'conta' : 'contas'}
-                </span>
-              ) : null}
-            </div>
-          );
-        })}
-        <button
-          type="button"
-          className="footer-manage"
-          onClick={() => {
-            clearCloseTimer();
-            setPopoverOpen(false);
-            setHoveredProvider(null);
-            onManageAccounts();
-          }}
-        >
-          Gerenciar contas
-        </button>
-      </footer>
-    </div>
+            ) : null}
+            {account.status === 'logged-in' ? (
+              readyWindows(usage[account.label]).map((w) => (
+                <FooterMeter key={w.kind} window={w} provider={group.provider} />
+              ))
+            ) : (
+              <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>
+            )}
+            {extra > 0 ? (
+              <span className="footer-extra">
+                +{extra} {extra === 1 ? 'conta' : 'contas'}
+              </span>
+            ) : null}
+            {open ? (
+              <section
+                className={
+                  popover?.alignRight ? 'footer-popover footer-popover-right' : 'footer-popover'
+                }
+                aria-label={`Uso e reset das contas ${PROVIDER_NAME[group.provider]}`}
+              >
+                <header className="footer-popover-head">
+                  <span className="footer-popover-title">
+                    <ProviderBadge provider={group.provider} size={18} />
+                    {PROVIDER_NAME[group.provider]}
+                  </span>
+                  <span className="footer-popover-summary">
+                    {group.connected} {group.connected === 1 ? 'conectada' : 'conectadas'} ·{' '}
+                    {group.accounts.length} {group.accounts.length === 1 ? 'conta' : 'contas'}
+                  </span>
+                </header>
+                <div className="footer-popover-list">
+                  {group.accounts.map((item) => (
+                    <PopoverAccountCard
+                      key={item.label}
+                      account={item}
+                      active={item.label === focusedAccountLabel}
+                      usageState={usage[item.label]}
+                      nowMs={nowMs}
+                    />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        );
+      })}
+      <button type="button" className="footer-manage" onClick={onManageAccounts}>
+        Gerenciar contas
+      </button>
+    </footer>
   );
 }

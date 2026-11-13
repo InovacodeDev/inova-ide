@@ -6,6 +6,7 @@ import {
   groupByProvider,
   highlightedProvider,
   orderedUsageWindows,
+  providerHealth,
   usageLevel,
 } from '../src/renderer/footer-state';
 
@@ -37,6 +38,33 @@ describe('groupByProvider', () => {
 
   test('returns an empty list without accounts', () => {
     expect(groupByProvider([])).toEqual([]);
+  });
+});
+
+describe('providerHealth', () => {
+  test('is ok only when every account is logged in', () => {
+    expect(providerHealth([account('a', 'claude'), account('b', 'claude')])).toEqual({
+      kind: 'ok',
+    });
+  });
+
+  test('counts accounts that are not logged in as pending', () => {
+    expect(
+      providerHealth([
+        account('a', 'claude'),
+        account('b', 'claude', 'logged-out'),
+        account('c', 'claude', 'unknown'),
+      ]),
+    ).toEqual({ kind: 'pending', count: 2 });
+  });
+
+  test('reports a missing CLI before any pending login', () => {
+    expect(
+      providerHealth([
+        account('a', 'codex', 'logged-out'),
+        account('b', 'codex', 'binary-missing'),
+      ]),
+    ).toEqual({ kind: 'missing-cli' });
   });
 });
 

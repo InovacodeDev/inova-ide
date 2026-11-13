@@ -68,7 +68,27 @@
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.accounts-card-head::-webkit-details-marker {
+  display: none;
+}
+
+.accounts-card[open] > .accounts-card-head {
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.accounts-card-chevron {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted);
+  transition: transform 0.12s ease;
+}
+
+.accounts-card[open] .accounts-card-chevron {
+  transform: rotate(90deg);
 }
 
 .accounts-card-title {
@@ -93,11 +113,13 @@
 }
 
 .accounts-health {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .accounts-health-ok {
@@ -109,19 +131,21 @@
 }
 
 .accounts-scroll {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 1.3fr)
+    max-content
+    minmax(180px, 1.6fr)
+    max-content;
+  column-gap: 16px;
   overflow-x: auto;
 }
 
 .account-row {
   display: grid;
-  grid-template-columns:
-    minmax(170px, 1.3fr)
-    minmax(125px, 0.9fr)
-    minmax(210px, 1.6fr)
-    minmax(175px, 1fr);
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
   align-items: center;
-  gap: 16px;
-  min-width: 640px;
   padding: 12px 16px;
   font-size: 13px;
   border-top: 1px solid var(--border-subtle);
@@ -183,7 +207,6 @@
   border-style: dashed;
 }
 
-.account-medium-only,
 .account-wide-only {
   display: none;
 }
@@ -276,20 +299,18 @@
   gap: 6px;
 }
 
-@container (min-width: 720px) {
-  .account-medium-only {
-    display: inline;
-  }
+.account-actions > * {
+  flex: none;
 }
 
-@container (min-width: 1000px) {
-  .account-row {
+@container (min-width: 1080px) {
+  .accounts-scroll {
     grid-template-columns:
-      minmax(190px, 1.2fr)
-      minmax(150px, 1fr)
-      minmax(125px, 0.7fr)
-      minmax(240px, 1.6fr)
-      minmax(175px, 0.9fr);
+      minmax(170px, 1.2fr)
+      minmax(140px, 1fr)
+      max-content
+      minmax(220px, 1.6fr)
+      max-content;
   }
 
   .account-projects-cell {
@@ -310,13 +331,13 @@
 }
 
 @container (min-width: 1320px) {
-  .account-row {
+  .accounts-scroll {
     grid-template-columns:
-      minmax(210px, 1.1fr)
+      minmax(200px, 1.1fr)
       minmax(180px, 1fr)
-      minmax(125px, 0.6fr)
+      max-content
       minmax(360px, 2.4fr)
-      minmax(175px, 0.8fr);
+      max-content;
   }
 
   .account-usage {
