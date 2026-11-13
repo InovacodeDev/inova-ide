@@ -52,6 +52,7 @@ import {
   PlayIcon,
   RotateCcwIcon,
   SendIcon,
+  StopFilledIcon,
   StopIcon,
   TerminalIcon,
 } from './icons';
@@ -1122,7 +1123,7 @@ export function ChatView({
                 aria-label="Parar"
                 onClick={onCancel}
               >
-                <StopIcon />
+                <StopFilledIcon size={12} />
               </button>
             ) : (
               <button

@@ -108,6 +108,14 @@ export function StopIcon({ size = 16 }: IconProps) {
   return <Square size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
+export function StopFilledIcon({ size = 12 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+      <rect x="1" y="1" width="10" height="10" rx="2" />
+    </svg>
+  );
+}
+
 export function SendIcon({ size = 16 }: IconProps) {
   return <ArrowRight size={size} strokeWidth={2.1} aria-hidden="true" />;
 }

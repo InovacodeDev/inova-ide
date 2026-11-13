@@ -120,6 +120,34 @@ function checkResultsOf(value: unknown): VerificationCheckResult[] | undefined {
   return results;
 }
 
+function subagentOf(record: Json): ChatEvent | undefined {
+  const { toolId, description, agentType, model, status } = record;
+  const { inputTokens, outputTokens, totalTokens } = record;
+  if (
+    typeof toolId !== 'string' ||
+    typeof description !== 'string' ||
+    (agentType !== null && typeof agentType !== 'string') ||
+    (model !== null && typeof model !== 'string') ||
+    (status !== 'running' && status !== 'done' && status !== 'error') ||
+    typeof inputTokens !== 'number' ||
+    typeof outputTokens !== 'number' ||
+    typeof totalTokens !== 'number'
+  ) {
+    return undefined;
+  }
+  return {
+    kind: 'subagent',
+    toolId,
+    description,
+    agentType,
+    model,
+    status,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
+}
+
 function eventOf(record: Json): ChatEvent | undefined {
   switch (record['kind']) {
     case 'session':
@@ -156,6 +184,16 @@ function eventOf(record: Json): ChatEvent | undefined {
       const windows = windowsOf(record['windows']);
       return windows && { kind: 'usage-limits', windows };
     }
+    case 'context': {
+      const { usedTokens, windowTokens, model } = record;
+      return typeof usedTokens === 'number' &&
+        numberOrNull(windowTokens) &&
+        (model === null || typeof model === 'string')
+        ? { kind: 'context', usedTokens, windowTokens, model }
+        : undefined;
+    }
+    case 'subagent':
+      return subagentOf(record);
     case 'checkpoint': {
       const { turnId, ref, createdAt, skippedLargeFiles } = record;
       if (

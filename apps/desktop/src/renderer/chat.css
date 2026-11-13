@@ -747,9 +747,22 @@
 }
 
 .chat-send-stop {
-  background: transparent;
-  border-color: var(--error);
-  color: var(--error);
+  background: var(--error);
+  color: var(--on-error);
+}
+
+.chat-send-stop:hover:not(:disabled) {
+  background: var(--error-hover);
+}
+
+.chat-send-stop:active:not(:disabled) {
+  background: var(--error);
+  transform: scale(0.96);
+}
+
+.chat-send-stop:focus-visible {
+  outline: 2px solid var(--error);
+  outline-offset: 2px;
 }
 
 .chat-readonly-hint {

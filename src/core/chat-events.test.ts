@@ -270,6 +270,7 @@ describe('codex parser', () => {
       { kind: 'tool-use', toolId: 't1:item_1', name: 'command_execution', input: 'bash -lc ls' },
       { kind: 'tool-result', toolId: 't1:item_1', output: 'README.md\nsrc\n', isError: false },
       expect.objectContaining({ kind: 'text', blockId: 't1:item_2' }),
+      { kind: 'context', usedTokens: 24885, windowTokens: null, model: null },
       { kind: 'done', isError: false, costUsd: null, durationMs: null },
       { kind: 'error', message: 'stream disconnected before completion' },
       { kind: 'done', isError: true, costUsd: null, durationMs: null },
@@ -347,6 +348,121 @@ describe('extra providers parsers', () => {
         }),
       ),
     ).toEqual([{ kind: 'text', blockId: 't3:m1', text: 'Pronto' }]);
+  });
+});
+
+describe('claude context and subagents', () => {
+  const asyncToolId = 'toolu_01DU5xSQYUJnBekukKPY9Utv';
+  const base = {
+    kind: 'subagent',
+    toolId: asyncToolId,
+    description: 'Reply with ok',
+    agentType: 'general-purpose',
+    model: 'haiku',
+  } as const;
+
+  it('tracks an async subagent and keeps its text out of the main chat', () => {
+    const events = parseFixture('claude', 'claude-subagent-async.jsonl');
+    const subagents = events.filter((event) => event.kind === 'subagent');
+    expect(subagents).toEqual([
+      { ...base, status: 'running', inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      {
+        ...base,
+        model: 'claude-haiku-5-5',
+        status: 'running',
+        inputTokens: 15640,
+        outputTokens: 4,
+        totalTokens: 15644,
+      },
+      {
+        ...base,
+        model: 'claude-haiku-5-5',
+        status: 'done',
+        inputTokens: 15640,
+        outputTokens: 4,
+        totalTokens: 15644,
+      },
+    ]);
+    const texts = events.flatMap((event) => (event.kind === 'text' ? [event.text] : []));
+    expect(texts).toEqual([
+      'The Haiku subagent is running in the background.',
+      'The Haiku subagent finished and replied: ok.',
+    ]);
+  });
+
+  it('reports main-thread context only', () => {
+    const events = parseFixture('claude', 'claude-subagent-async.jsonl');
+    const contexts = events.filter((event) => event.kind === 'context');
+    expect(contexts).toEqual([
+      { kind: 'context', usedTokens: 23190, windowTokens: 200_000, model: 'claude-haiku-5-5' },
+      { kind: 'context', usedTokens: 28161, windowTokens: 200_000, model: 'claude-haiku-5-5' },
+      { kind: 'context', usedTokens: 28687, windowTokens: 200_000, model: 'claude-haiku-5-5' },
+    ]);
+  });
+
+  it('uses the tool_use_result totals of a synchronous subagent', () => {
+    const events = parseFixture('claude', 'claude-subagent-sync.jsonl');
+    const subagents = events.filter((event) => event.kind === 'subagent');
+    const last = subagents[subagents.length - 1];
+    expect(last).toEqual({
+      kind: 'subagent',
+      toolId: 'toolu_01RMZgQmvD38eyYDTmYGUPhT',
+      description: 'Reply with ok',
+      agentType: 'general-purpose',
+      model: 'claude-haiku-5-5',
+      status: 'done',
+      inputTokens: 11496,
+      outputTokens: 105,
+      totalTokens: 11601,
+    });
+    expect(events.some((event) => event.kind === 'text' && event.text === 'ok')).toBe(false);
+  });
+
+  it('marks a failed subagent as error', () => {
+    const parser = createChatParser('claude', { turnId: 't1' });
+    parser.parse(
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'm',
+          model: 'claude-opus-5-5',
+          content: [{ type: 'tool_use', id: 'tu', name: 'Task', input: { description: 'd' } }],
+        },
+        parent_tool_use_id: null,
+      }),
+    );
+    const events = parser.parse(
+      JSON.stringify({
+        type: 'system',
+        subtype: 'task_notification',
+        tool_use_id: 'tu',
+        status: 'failed',
+        usage: { total_tokens: 10 },
+      }),
+    );
+    expect(events).toEqual([
+      {
+        kind: 'subagent',
+        toolId: 'tu',
+        description: 'd',
+        agentType: null,
+        model: null,
+        status: 'error',
+        inputTokens: 10,
+        outputTokens: 0,
+        totalTokens: 10,
+      },
+    ]);
+  });
+
+  it('emits codex context from turn.completed usage', () => {
+    const events = parseFixture('codex', 'codex-exec.jsonl');
+    expect(events).toContainEqual({
+      kind: 'context',
+      usedTokens: 24885,
+      windowTokens: null,
+      model: null,
+    });
   });
 });
 

@@ -183,6 +183,18 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
     { kind: 'tool-use', toolId: 'i', name: 'n', input: '{}' },
     { kind: 'tool-result', toolId: 'i', output: 'o', isError: true },
     { kind: 'usage-limits', windows: [{ kind: 'weekly', usedPercent: 1, resetsAt: null }] },
+    { kind: 'context', usedTokens: 10, windowTokens: null, model: 'claude-opus-5-5' },
+    {
+      kind: 'subagent',
+      toolId: 'tu',
+      description: 'd',
+      agentType: null,
+      model: null,
+      status: 'running',
+      inputTokens: 1,
+      outputTokens: 2,
+      totalTokens: 3,
+    },
     { kind: 'error', message: 'm' },
     { kind: 'done', isError: false, costUsd: null, durationMs: 3 },
   ];

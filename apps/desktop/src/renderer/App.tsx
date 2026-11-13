@@ -1235,6 +1235,8 @@ export function App() {
             account={activeAccount}
             usage={activeAccountLabel ? usage[activeAccountLabel] : undefined}
             running={Boolean(chats[activeSession.id]?.running)}
+            subagents={chats[activeSession.id]?.subagents}
+            context={chats[activeSession.id]?.context}
             onDetectChecks={() => void detectChecks(activeProject)}
             onRunVerification={() => void runVerification(activeSession.id)}
             onUpdateProjectVerification={(patch) =>

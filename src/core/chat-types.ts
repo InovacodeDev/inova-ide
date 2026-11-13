@@ -25,6 +25,19 @@ export interface VerificationCheckResult {
   output: string;
 }
 
+export type SubagentStatus = 'running' | 'done' | 'error';
+
+export interface SubagentSnapshot {
+  toolId: string;
+  description: string;
+  agentType: string | null;
+  model: string | null;
+  status: SubagentStatus;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export type ChatEvent =
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'user'; text: string; at: string }
@@ -33,6 +46,8 @@ export type ChatEvent =
   | { kind: 'tool-use'; toolId: string; name: string; input: string }
   | { kind: 'tool-result'; toolId: string; output: string; isError: boolean }
   | { kind: 'usage-limits'; windows: UsageWindow[] }
+  | { kind: 'context'; usedTokens: number; windowTokens: number | null; model: string | null }
+  | ({ kind: 'subagent' } & SubagentSnapshot)
   | {
       kind: 'checkpoint';
       turnId: string;

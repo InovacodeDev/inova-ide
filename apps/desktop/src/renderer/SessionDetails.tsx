@@ -1,7 +1,10 @@
 import { useState } from 'react';
+import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
 import type { Session, VerificationCheck } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
+import type { ContextInfo } from './chat-reducer';
 import { CloseIcon } from './icons';
+import { contextLabel, formatTokens } from './token-format';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { relativeTime } from './relative-time';
@@ -15,6 +18,8 @@ interface SessionDetailsProps {
   account: AccountView | undefined;
   usage: UsageState | undefined;
   running?: boolean;
+  subagents?: SubagentSnapshot[];
+  context?: ContextInfo;
   onDetectChecks?: () => void;
   onRunVerification?: () => void;
   onUpdateProjectVerification?: (patch: {
@@ -23,6 +28,12 @@ interface SessionDetailsProps {
     verificationChecks?: VerificationCheck[];
   }) => void;
 }
+
+const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
+  running: 'rodando',
+  done: 'concluído',
+  error: 'erro',
+};
 
 function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -35,11 +46,14 @@ export function SessionDetails({
   account,
   usage,
   running = false,
+  subagents = [],
+  context,
   onDetectChecks,
   onRunVerification,
   onUpdateProjectVerification,
 }: SessionDetailsProps) {
   const [newCommand, setNewCommand] = useState('');
+  const contextSummary = contextLabel(context);
   const now = new Date();
   const effectiveProvider = account?.provider ?? project.provider;
   const displayAccount = accountDisplayName({
@@ -126,6 +140,54 @@ export function SessionDetails({
           <dd className="mono">{relativeTime({ iso: session.updatedAt, now })}</dd>
         </dl>
       </section>
+      <section className="session-details-section">
+        <h2 className="section-label">Contexto</h2>
+        <div className="session-details-context">
+          <span className="mono">{contextSummary.text}</span>
+          {contextSummary.percent !== null ? (
+            <div
+              className="session-details-meter"
+              role="progressbar"
+              aria-label="Uso do contexto"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={contextSummary.percent}
+            >
+              <div
+                className="session-details-meter-fill"
+                data-high={contextSummary.percent >= 80}
+                style={{ width: `${contextSummary.percent}%` }}
+              />
+            </div>
+          ) : null}
+          <span className="session-details-context-model mono">{context?.model ?? '—'}</span>
+        </div>
+      </section>
+      {subagents.length > 0 ? (
+        <section className="session-details-section">
+          <h2 className="section-label">Subagentes</h2>
+          <ul className="session-details-subagents">
+            {subagents.map((agent) => (
+              <li key={agent.toolId} className="session-details-subagent">
+                <div className="session-details-subagent-head">
+                  <span className="session-details-subagent-name" title={agent.description}>
+                    {agent.description}
+                  </span>
+                  <span className="session-details-subagent-status" data-status={agent.status}>
+                    {SUBAGENT_STATUS_TEXT[agent.status]}
+                  </span>
+                </div>
+                <div className="session-details-subagent-meta mono">
+                  {[agent.agentType, agent.model].filter(Boolean).join(' · ') || '—'}
+                </div>
+                <div className="session-details-subagent-meta mono">
+                  {`${formatTokens(agent.inputTokens)} entrada · ${formatTokens(agent.outputTokens)} saída · ${formatTokens(agent.totalTokens)} total`}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {onUpdateProjectVerification ? (
         <section className="session-details-section">
           <h2 className="section-label">Automação do projeto</h2>
