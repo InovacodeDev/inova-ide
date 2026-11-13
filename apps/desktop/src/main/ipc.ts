@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { createHandlers } from './handlers.js';
+import type { VoiceHandlers } from './voice.js';
 
 type Handlers = ReturnType<typeof createHandlers>;
 type SenderEvent = { senderFrame?: { url: string } | null };
@@ -10,8 +11,12 @@ export function isAppUrl(url: string | undefined, appUrl: string): boolean {
   return url === appUrl || ['/', '?', '#'].some((separator) => url.startsWith(appUrl + separator));
 }
 
-export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string }): void {
-  const { handlers, allowedOrigin } = deps;
+export function registerIpc(deps: {
+  handlers: Handlers;
+  voice: VoiceHandlers;
+  allowedOrigin: string;
+}): void {
+  const { handlers, voice, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -70,6 +75,9 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
+  handle(CHANNELS.getVoiceStatus, () => voice.getVoiceStatus());
+  handle(CHANNELS.downloadVoiceModel, () => voice.downloadVoiceModel());
+  handle(CHANNELS.transcribeAudio, (input) => voice.transcribeAudio(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);

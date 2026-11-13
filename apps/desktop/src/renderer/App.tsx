@@ -1058,6 +1058,10 @@ export function App() {
                   defaultModes={defaultModes}
                   inWorktree={Boolean(tabSession?.worktree)}
                   workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
+                  voiceHints={[
+                    ...(tabProject ? [folderName(tabProject.path)] : []),
+                    ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
+                  ]}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   queuedTurns={tabQueuedTurns}

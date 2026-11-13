@@ -19,6 +19,7 @@ import { LayoutGrid } from 'pulsoicon-react/icons/layout-grid';
 import { ListTodo } from 'pulsoicon-react/icons/list-todo';
 import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
+import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
 import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
@@ -92,6 +93,10 @@ export function StopIcon({ size = 16 }: IconProps) {
 
 export function SendIcon({ size = 16 }: IconProps) {
   return <ArrowRight size={size} strokeWidth={2.1} aria-hidden="true" />;
+}
+
+export function MicIcon({ size = 16 }: IconProps) {
+  return <Mic size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
 export function TerminalIcon({ size = 16 }: IconProps) {

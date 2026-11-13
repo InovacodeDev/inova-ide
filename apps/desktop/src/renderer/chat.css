@@ -592,6 +592,60 @@
   cursor: pointer;
 }
 
+.chat-mic {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.chat-mic:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.chat-mic:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-mic-recording,
+.chat-mic-recording:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.chat-mic + .chat-send {
+  margin-left: 0;
+}
+
+.chat-dictation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-dictation-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-dictation-error {
+  color: var(--error);
+}
+
 .chat-send:disabled {
   opacity: 0.4;
   cursor: default;

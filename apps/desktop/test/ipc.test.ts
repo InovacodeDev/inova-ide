@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
+import type { VoiceHandlers } from '../src/main/voice.js';
 
 type Listener = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -69,11 +70,17 @@ function setup() {
   handlers['cancelTurn'] = vi.fn();
   handlers['cancelLogin'] = vi.fn();
   handlers['reportUiFocus'] = vi.fn();
+  const voice = {
+    getVoiceStatus: vi.fn(async () => ({ ok: true as const, value: 'getVoiceStatus' })),
+    downloadVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'downloadVoiceModel' })),
+    transcribeAudio: vi.fn(async () => ({ ok: true as const, value: 'transcribeAudio' })),
+  };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
+    voice: voice as unknown as VoiceHandlers,
     allowedOrigin: APP,
   });
-  return { handlers };
+  return { handlers, voice };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -104,13 +111,26 @@ test('a trusted invoke reaches the handler with the payload only', async () => {
 });
 
 test('invokes from a foreign or unknown sender are rejected', async () => {
-  const { handlers } = setup();
+  const { handlers, voice } = setup();
   for (const event of [foreign, { senderFrame: null }, {}]) {
     for (const channel of electron.invokes.keys()) {
       await expect(invoke(channel, event, {})).rejects.toThrow('Remetente não autorizado.');
     }
   }
-  for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+  for (const handler of [...Object.values(handlers), ...Object.values(voice)]) {
+    expect(handler).not.toHaveBeenCalled();
+  }
+});
+
+test('voice invokes reach the voice handlers', async () => {
+  const { voice } = setup();
+  const input = { pcm: new Uint8Array(2), final: true, language: 'pt', hints: [] };
+  await invoke('inova:transcribeAudio', trusted, input);
+  expect(voice.transcribeAudio).toHaveBeenCalledWith(input);
+  await invoke('inova:getVoiceStatus', trusted);
+  await invoke('inova:downloadVoiceModel', trusted);
+  expect(voice.getVoiceStatus).toHaveBeenCalledOnce();
+  expect(voice.downloadVoiceModel).toHaveBeenCalledOnce();
 });
 
 test('terminal pty and openLogin channels are not registered', () => {

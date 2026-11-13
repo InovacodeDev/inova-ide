@@ -27,12 +27,14 @@ import {
   type DroppedPath,
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
+import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
   CloseIcon,
   FileIcon,
   GitForkIcon,
   ListTodoIcon,
+  MicIcon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -52,6 +54,7 @@ import {
   toolSummary,
   type ChatEntry,
 } from './turn-groups';
+import { useDictation, type Dictation } from './useDictation';
 import './chat.css';
 
 export interface ChatViewProps {
@@ -67,6 +70,7 @@ export interface ChatViewProps {
   defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
   inWorktree?: boolean;
   workingDir?: string | null;
+  voiceHints?: readonly string[];
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
@@ -410,6 +414,50 @@ function dropAccessDescription(input: {
   return `${paths} está fora da pasta do projeto. ${scope}`;
 }
 
+function DictationStatus({ dictation }: { dictation: Dictation }) {
+  if (dictation.error !== null) {
+    return (
+      <div className="chat-dictation chat-dictation-error" role="alert">
+        <span className="chat-dictation-text">{dictation.error}</span>
+        <button
+          type="button"
+          className="chat-file-tag-remove"
+          aria-label="Fechar aviso do ditado"
+          onClick={dictation.dismissError}
+        >
+          <CloseIcon size={12} />
+        </button>
+      </div>
+    );
+  }
+  const text =
+    dictation.phase === 'recording'
+      ? dictation.interim === ''
+        ? 'Ouvindo…'
+        : dictation.interim
+      : dictation.phase === 'transcribing'
+        ? 'Transcrevendo…'
+        : dictation.phase === 'downloading'
+          ? `Baixando o modelo de voz… ${dictation.downloadPercent}%`
+          : null;
+  if (text === null) return null;
+  return (
+    <div className="chat-dictation" role="status">
+      {dictation.phase === 'recording' ? <span className="dot pulse" aria-hidden="true" /> : null}
+      <span className="chat-dictation-text">{text}</span>
+      <button
+        type="button"
+        className="chat-file-tag-remove"
+        aria-label="Cancelar ditado"
+        onClick={dictation.cancel}
+      >
+        <CloseIcon size={12} />
+      </button>
+    </div>
+  );
+}
+
+const NO_VOICE_HINTS: readonly string[] = [];
 const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
@@ -425,6 +473,7 @@ export function ChatView({
   defaultModes,
   inWorktree = false,
   workingDir = null,
+  voiceHints = NO_VOICE_HINTS,
   catalog,
   readOnly = false,
   queuedTurns = [],
@@ -448,6 +497,14 @@ export function ChatView({
   const [dragging, setDragging] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<DroppedPath[] | null>(null);
   const [grantedDirs, setGrantedDirs] = useState<string[]>([]);
+  const dictation = useDictation({
+    hints: voiceHints,
+    onText: (text) => {
+      setDraft((current) => appendDictation(current, text));
+      inputRef.current?.focus();
+    },
+  });
+  const recording = dictation.phase === 'recording';
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
   const [dismissedTriggerKey, setDismissedTriggerKey] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -767,6 +824,15 @@ export function ChatView({
           onCancel={() => setPendingDrop(null)}
         />
       ) : null}
+      {dictation.phase === 'needs-model' ? (
+        <ConfirmModal
+          title="Baixar o modelo de voz?"
+          description={`A transcrição roda neste computador e o áudio não sai dele. O download tem ${formatMegabytes(dictation.modelBytes)} e acontece uma vez.`}
+          confirmLabel="Baixar modelo"
+          onConfirm={dictation.confirmDownload}
+          onCancel={dictation.cancel}
+        />
+      ) : null}
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         <div className="chat-list-inner">
           {items.length === 0 && !running ? (
@@ -896,6 +962,7 @@ export function ChatView({
               ))}
             </div>
           ) : null}
+          <DictationStatus dictation={dictation} />
           <textarea
             ref={inputRef}
             className="chat-input"
@@ -957,6 +1024,19 @@ export function ChatView({
                 />
               </>
             ) : null}
+            {readOnly ? null : (
+              <button
+                type="button"
+                className={recording ? 'chat-mic chat-mic-recording' : 'chat-mic'}
+                aria-label={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
+                title={recording ? 'Parar ditado e transcrever' : 'Ditar mensagem'}
+                aria-pressed={recording}
+                disabled={dictation.phase !== 'idle' && !recording}
+                onClick={dictation.toggle}
+              >
+                {recording ? <StopIcon size={14} /> : <MicIcon size={16} />}
+              </button>
+            )}
             {running ? (
               <button
                 type="button"

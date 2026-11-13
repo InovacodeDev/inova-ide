@@ -74,6 +74,17 @@ export interface ProjectView {
   verificationChecks?: VerificationCheck[];
 }
 
+export interface VoiceStatus {
+  binary: boolean;
+  model: boolean;
+  modelBytes: number;
+}
+
+export interface VoiceModelProgress {
+  receivedBytes: number;
+  totalBytes: number;
+}
+
 export type LoginStage =
   'starting' | 'waiting-auth' | 'verifying' | 'succeeded' | 'failed' | 'canceled';
 
@@ -143,6 +154,15 @@ export interface InovaApi {
     extraDirs?: string[];
   }): Promise<Result<null>>;
   getPathForFile(file: File): string;
+  getVoiceStatus(): Promise<Result<VoiceStatus>>;
+  downloadVoiceModel(): Promise<Result<null>>;
+  transcribeAudio(input: {
+    pcm: Uint8Array;
+    final: boolean;
+    language: string;
+    hints: string[];
+  }): Promise<Result<{ text: string }>>;
+  onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
   enqueueTurn(input: { sessionId: string; prompt: string }): Promise<Result<QueuedTurn>>;
   cancelQueuedTurn(input: { turnId: string }): Promise<Result<null>>;
   listTurnQueue(): Promise<Result<QueuedTurn[]>>;
@@ -268,6 +288,10 @@ export const CHANNELS = {
   submitLoginCode: 'inova:submitLoginCode',
   cancelLogin: 'inova:cancelLogin',
   loginEvent: 'inova:login:event',
+  getVoiceStatus: 'inova:getVoiceStatus',
+  downloadVoiceModel: 'inova:downloadVoiceModel',
+  transcribeAudio: 'inova:transcribeAudio',
+  voiceModelProgress: 'inova:voice:model-progress',
 } as const;
 
 declare global {

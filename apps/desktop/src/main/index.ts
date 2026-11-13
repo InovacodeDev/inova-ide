@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
@@ -14,9 +15,13 @@ import { isAppUrl, registerIpc } from './ipc.js';
 import { killProcessGroup } from './process-group.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
-import { loginShellPath } from './shell-env.js';
+import { findBinary, loginShellPath } from './shell-env.js';
+import { createVoiceHandlers, createVoiceService } from './voice.js';
 
+const execFileAsync = promisify(execFile);
 const SHELL_TIMEOUT_MS = 5000;
+const WHISPER_TIMEOUT_MS = 120_000;
+const WHISPER_MAX_OUTPUT_BYTES = 1024 * 1024;
 const appUrl =
   process.env['ELECTRON_RENDERER_URL'] ??
   pathToFileURL(join(__dirname, '../renderer/index.html')).href;
@@ -174,7 +179,30 @@ void app.whenReady().then(async () => {
       pickFolder,
     });
     handlers = created;
-    registerIpc({ handlers: created, allowedOrigin: appUrl });
+    const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+    const voice = createVoiceService({
+      modelDir: join(dataRoot(process.env), 'models'),
+      binaryCandidates: [
+        join(process.resourcesPath, 'whisper', whisperName),
+        join(app.getAppPath(), 'resources', 'whisper', whisperName),
+      ],
+      findOnPath: async () => findBinary('whisper-cli', (await baseEnv())['PATH'] ?? ''),
+      runWhisper: async ({ file, args, signal }) => {
+        const { stdout } = await execFileAsync(file, args, {
+          signal,
+          timeout: WHISPER_TIMEOUT_MS,
+          maxBuffer: WHISPER_MAX_OUTPUT_BYTES,
+        });
+        return stdout;
+      },
+      fetch: (url) => globalThis.fetch(url),
+      onProgress: (progress) => sendToWindow(CHANNELS.voiceModelProgress, progress),
+    });
+    registerIpc({
+      handlers: created,
+      voice: createVoiceHandlers(voice),
+      allowedOrigin: appUrl,
+    });
     createWindow();
     return;
   }
