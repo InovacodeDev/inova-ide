@@ -6,8 +6,11 @@ import {
   groupByProvider,
   highlightedProvider,
   orderedUsageWindows,
+  primaryUsageWindows,
   providerHealth,
   usageLevel,
+  usageWindowKey,
+  usageWindowLabel,
 } from '../src/renderer/footer-state';
 
 const account = (
@@ -129,6 +132,49 @@ describe('orderedUsageWindows', () => {
       { kind: 'weekly', usedPercent: 25, resetsAt: null },
     ]);
     expect(result.map((w) => w.kind)).toEqual(['session', 'weekly', 'monthly']);
+  });
+
+  test('lists unscoped windows first, then each scope in order of appearance', () => {
+    const result = orderedUsageWindows([
+      { kind: 'weekly', usedPercent: 100, resetsAt: null, scope: 'Argon' },
+      { kind: 'weekly', usedPercent: 98, resetsAt: null },
+      { kind: 'weekly', usedPercent: 50, resetsAt: null, scope: 'Claude and GPT' },
+      { kind: 'session', usedPercent: 0, resetsAt: null, scope: 'Claude and GPT' },
+      { kind: 'session', usedPercent: 0, resetsAt: null },
+    ]);
+    expect(result.map((w) => usageWindowKey(w))).toEqual([
+      ':session',
+      ':weekly',
+      'Argon:weekly',
+      'Claude and GPT:session',
+      'Claude and GPT:weekly',
+    ]);
+  });
+});
+
+describe('primaryUsageWindows', () => {
+  test('keeps only unscoped windows', () => {
+    const result = primaryUsageWindows([
+      { kind: 'weekly', usedPercent: 0, resetsAt: null, scope: 'Fable' },
+      { kind: 'session', usedPercent: 5, resetsAt: null },
+    ]);
+    expect(result).toEqual([{ kind: 'session', usedPercent: 5, resetsAt: null }]);
+  });
+});
+
+describe('usageWindowLabel', () => {
+  const labels = { session: 'Sessão', weekly: 'Semana', monthly: 'Mês' };
+
+  test('prefixes the scope when present', () => {
+    expect(
+      usageWindowLabel({
+        window: { kind: 'weekly', usedPercent: 0, resetsAt: null, scope: 'Fable' },
+        labels,
+      }),
+    ).toBe('Fable · Semana');
+    expect(
+      usageWindowLabel({ window: { kind: 'session', usedPercent: 0, resetsAt: null }, labels }),
+    ).toBe('Sessão');
   });
 });
 

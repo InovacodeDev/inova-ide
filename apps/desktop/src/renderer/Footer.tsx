@@ -7,7 +7,10 @@ import {
   formatResetIn,
   groupByProvider,
   orderedUsageWindows,
+  primaryUsageWindows,
   usageLevel,
+  usageWindowKey,
+  usageWindowLabel,
 } from './footer-state';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
@@ -109,9 +112,11 @@ function PopoverAccountCard(props: {
             const color =
               usageLevel(percent) === 'critical' ? 'var(--error)' : `var(--${account.provider})`;
             return (
-              <div key={w.kind} className="footer-popover-win">
+              <div key={usageWindowKey(w)} className="footer-popover-win">
                 <div className="footer-popover-win-head">
-                  <span className="footer-popover-win-label">{POPOVER_WINDOW_LABEL[w.kind]}</span>
+                  <span className="footer-popover-win-label">
+                    {usageWindowLabel({ window: w, labels: POPOVER_WINDOW_LABEL })}
+                  </span>
                   <span className="mono footer-popover-win-percent">{Math.round(percent)}%</span>
                 </div>
                 <div className="footer-popover-track">
@@ -231,8 +236,8 @@ export function Footer(props: FooterProps) {
               </span>
             ) : null}
             {account.status === 'logged-in' ? (
-              readyWindows(usage[account.label]).map((w) => (
-                <FooterMeter key={w.kind} window={w} provider={group.provider} />
+              primaryUsageWindows(readyWindows(usage[account.label])).map((w) => (
+                <FooterMeter key={usageWindowKey(w)} window={w} provider={group.provider} />
               ))
             ) : (
               <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>

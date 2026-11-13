@@ -153,8 +153,29 @@ describe('readUsage claude response', () => {
       windows: [
         { kind: 'session', usedPercent: 9, resetsAt: '2026-11-13T01:00:00.858Z' },
         { kind: 'weekly', usedPercent: 2, resetsAt: '2026-11-19T20:00:00.858Z' },
+        {
+          kind: 'weekly',
+          usedPercent: 0,
+          resetsAt: '2026-11-19T20:00:00.000Z',
+          scope: 'Model Name',
+        },
       ],
     });
+  });
+
+  it('falls back to seven_day_opus and seven_day_sonnet without scoped limits', async () => {
+    const body = {
+      five_hour: { utilization: 5, resets_at: null },
+      seven_day_opus: { utilization: 30, resets_at: '2026-11-19T20:00:00Z' },
+      seven_day_sonnet: null,
+      limits: [{ kind: 'session', group: 'session', percent: 5, scope: null }],
+    };
+    const rec = recorder({ platform: 'linux', response: { ok: true, status: 200, body } });
+    const snapshot = await readUsage({ account: account('claude'), deps: rec.deps });
+    expect(snapshot.windows).toEqual([
+      { kind: 'session', usedPercent: 5, resetsAt: null },
+      { kind: 'weekly', usedPercent: 30, resetsAt: '2026-11-19T20:00:00.000Z', scope: 'Opus' },
+    ]);
   });
 
   it('clamps utilization and drops invalid windows', async () => {
@@ -291,6 +312,24 @@ describe('readUsage codex', () => {
     ]);
   });
 
+  it('classifies rollout windows by window_minutes', async () => {
+    await writeRollout({
+      day: '2026-11-12',
+      name: 'rollout-go.jsonl',
+      lines: [
+        tokenCount({
+          primary: { used_percent: 14, window_minutes: 43_200, resets_at: 1_795_637_480 },
+          secondary: null,
+        }),
+      ],
+      mtime: new Date('2026-11-12T11:00:00Z'),
+    });
+    const snapshot = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(snapshot.windows).toEqual([
+      { kind: 'monthly', usedPercent: 14, resetsAt: '2026-11-25T20:11:20.000Z' },
+    ]);
+  });
+
   it('only scans the three newest day directories', async () => {
     const line = tokenCount({ primary: { used_percent: 5 }, secondary: null });
     for (const day of ['2026-11-09', '2026-11-10', '2026-11-11']) {
@@ -303,6 +342,92 @@ describe('readUsage codex', () => {
       mtime: new Date('2026-11-12T11:00:00Z'),
     });
     const snapshot = await readUsage({ account: account('codex'), deps: recorder({}).deps });
+    expect(snapshot.source).toBe('unavailable');
+  });
+});
+
+describe('readUsage codex api', () => {
+  const CODEX_TOKEN = 'codex-secret-access-token';
+
+  beforeEach(async () => {
+    await writeFile(
+      join(homeDir, 'auth.json'),
+      JSON.stringify({ tokens: { access_token: CODEX_TOKEN, account_id: 'acc-1' } }),
+    );
+  });
+
+  it('reads every rate limit from the ChatGPT usage endpoint', async () => {
+    const body = {
+      rate_limit: {
+        primary_window: { used_percent: 20, limit_window_seconds: 18_000, reset_after_seconds: 60 },
+        secondary_window: {
+          used_percent: 40,
+          limit_window_seconds: 604_800,
+          reset_at: 1_794_484_800,
+        },
+      },
+      code_review_rate_limit: null,
+      additional_rate_limits: [
+        {
+          limit_name: 'GPT-5-Codex-Spark',
+          rate_limit: {
+            primary_window: { used_percent: 75, limit_window_seconds: 18_000, reset_at: null },
+            secondary_window: null,
+          },
+        },
+      ],
+    };
+    const rec = recorder({ response: { ok: true, status: 200, body } });
+    const snapshot = await readUsage({ account: account('codex'), deps: rec.deps });
+    expect(rec.requests.map((r) => [r.url, r.init.headers])).toEqual([
+      [
+        'https://chatgpt.com/backend-api/wham/usage',
+        { Authorization: `Bearer ${CODEX_TOKEN}`, 'ChatGPT-Account-Id': 'acc-1' },
+      ],
+    ]);
+    expect(snapshot).toEqual({
+      provider: 'codex',
+      source: 'api',
+      fetchedAt: NOW.toISOString(),
+      windows: [
+        { kind: 'session', usedPercent: 20, resetsAt: '2026-11-12T12:01:00.000Z' },
+        { kind: 'weekly', usedPercent: 40, resetsAt: '2026-11-12T12:00:00.000Z' },
+        { kind: 'session', usedPercent: 75, resetsAt: null, scope: 'GPT-5-Codex-Spark' },
+      ],
+    });
+  });
+
+  it('classifies a 30-day primary window as monthly', async () => {
+    const body = {
+      rate_limit: {
+        primary_window: { used_percent: 14, limit_window_seconds: 2_592_000, reset_at: null },
+        secondary_window: null,
+      },
+    };
+    const rec = recorder({ response: { ok: true, status: 200, body } });
+    const snapshot = await readUsage({ account: account('codex'), deps: rec.deps });
+    expect(snapshot.windows).toEqual([{ kind: 'monthly', usedPercent: 14, resetsAt: null }]);
+  });
+
+  it('falls back to rollout files when the endpoint fails', async () => {
+    await writeRollout({
+      day: '2026-11-12',
+      name: 'rollout-a.jsonl',
+      lines: [tokenCount({ primary: { used_percent: 5 }, secondary: null })],
+      mtime: new Date('2026-11-12T11:00:00Z'),
+    });
+    const rec = recorder({ response: { ok: false, status: 401, body: {} } });
+    const snapshot = await readUsage({ account: account('codex'), deps: rec.deps });
+    expect(snapshot).toMatchObject({
+      source: 'rollout',
+      windows: [{ kind: 'session', usedPercent: 5, resetsAt: null }],
+    });
+  });
+
+  it('falls back to rollout files when fetch rejects', async () => {
+    const rec = recorder({});
+    rec.deps.fetch = () => Promise.reject(new TypeError('fetch failed'));
+    const snapshot = await readUsage({ account: account('codex'), deps: rec.deps });
     expect(snapshot.source).toBe('unavailable');
   });
 });
@@ -372,6 +497,48 @@ describe('readUsage gemini', () => {
       source: 'api',
       fetchedAt: NOW.toISOString(),
     });
+  });
+
+  it('reads every agy group and scopes the non-primary ones by name', async () => {
+    await markGeminiLoggedIn();
+    const groups = [
+      {
+        name: 'Claude and GPT models',
+        buckets: [
+          { id: '3p-weekly', window: 'weekly', remaining_fraction: 0.5, reset_time: null },
+          { id: '3p-5h', window: '5h', remaining_fraction: 1, reset_time: null },
+        ],
+      },
+      {
+        name: 'Gemini Models',
+        buckets: [{ id: 'gemini-5h', window: '5h', remaining_fraction: 0.9, reset_time: null }],
+      },
+      {
+        name: 'Gemini 4 Argon',
+        buckets: [
+          {
+            id: 'gemini-argon-wtu-weekly',
+            window: 'weekly',
+            remaining_fraction: 0,
+            reset_time: '2026-11-14T01:10:40Z',
+          },
+        ],
+      },
+    ];
+    const stdout = JSON.stringify({ status: 'SUCCESS', command: { data: { groups } } });
+    const rec = recorder({ platform: 'darwin', runResult: { exitCode: 0, stdout } });
+    const snapshot = await readUsage({ account: account('gemini'), deps: rec.deps });
+    expect(snapshot.windows).toEqual([
+      { kind: 'session', usedPercent: 0, resetsAt: null, scope: 'Claude and GPT models' },
+      { kind: 'weekly', usedPercent: 50, resetsAt: null, scope: 'Claude and GPT models' },
+      { kind: 'session', usedPercent: 10, resetsAt: null },
+      {
+        kind: 'weekly',
+        usedPercent: 100,
+        resetsAt: '2026-11-14T01:10:40.000Z',
+        scope: 'Gemini 4 Argon',
+      },
+    ]);
   });
 
   it('returns unavailable when agy binary is missing', async () => {

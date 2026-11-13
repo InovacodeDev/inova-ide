@@ -1,6 +1,12 @@
 import type { AuthStatus } from '@inova/core/providers';
 import type { UsageSnapshot, UsageWindow } from '@inova/core/chat-types';
-import { formatResetIn, orderedUsageWindows, usageLevel } from './footer-state';
+import {
+  formatResetIn,
+  orderedUsageWindows,
+  usageLevel,
+  usageWindowKey,
+  usageWindowLabel,
+} from './footer-state';
 
 export type UsageState =
   | { status: 'loading' }
@@ -26,7 +32,7 @@ export function UsageBar({ window: usageWindow }: { window: UsageWindow }) {
   return (
     <div className="usage-row">
       <div className="usage-row-head">
-        <span>{WINDOW_TITLE[usageWindow.kind]}</span>
+        <span>{usageWindowLabel({ window: usageWindow, labels: WINDOW_TITLE })}</span>
         <span>{Math.round(percent)}%</span>
       </div>
       <div className="usage-track">
@@ -56,7 +62,7 @@ export function UsageSection({ state }: { state: UsageState | undefined }) {
   return (
     <div className="usage-bars">
       {windows.map((w) => (
-        <UsageBar key={w.kind} window={w} />
+        <UsageBar key={usageWindowKey(w)} window={w} />
       ))}
     </div>
   );

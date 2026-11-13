@@ -119,21 +119,80 @@ function claudeWindow(kind: UsageWindow['kind'], value: unknown): UsageWindow | 
   };
 }
 
-async function fetchClaudeBody(ctx: UsageContext, token: string): Promise<unknown> {
+async function fetchUsageJson(
+  ctx: UsageContext,
+  request: { url: string; headers: Record<string, string>; provider: string },
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), USAGE_TIMEOUT_MS);
   try {
-    const response = await ctx.deps.fetch(CLAUDE_USAGE_URL, {
-      headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': CLAUDE_OAUTH_BETA },
+    const response = await ctx.deps.fetch(request.url, {
+      headers: request.headers,
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new UsageError('http', `Claude usage request failed with status ${response.status}`);
+      throw new UsageError(
+        'http',
+        `${request.provider} usage request failed with status ${response.status}`,
+      );
     }
     return await response.json().catch(() => undefined);
   } finally {
     clearTimeout(timer);
   }
+}
+
+function fetchClaudeBody(ctx: UsageContext, token: string): Promise<unknown> {
+  return fetchUsageJson(ctx, {
+    url: CLAUDE_USAGE_URL,
+    headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': CLAUDE_OAUTH_BETA },
+    provider: 'Claude',
+  });
+}
+
+const CLAUDE_LIMIT_GROUP_KIND: Record<string, UsageWindow['kind']> = {
+  session: 'session',
+  weekly: 'weekly',
+  monthly: 'monthly',
+};
+
+function claudeLimitScope(limit: Record<string, unknown>): string | null {
+  const scope = limit['scope'];
+  if (!isRecord(scope)) return null;
+  const model = scope['model'];
+  const name = isRecord(model) ? model['display_name'] : undefined;
+  return typeof name === 'string' && name.trim() !== '' ? name.trim() : null;
+}
+
+function claudeScopedWindow(limit: unknown): UsageWindow | null {
+  if (!isRecord(limit)) return null;
+  const scope = claudeLimitScope(limit);
+  const group = limit['group'];
+  const kind = typeof group === 'string' ? CLAUDE_LIMIT_GROUP_KIND[group] : undefined;
+  const percent = finiteNumber(limit['percent']);
+  if (scope === null || kind === undefined || percent === null) return null;
+  const resetsAt = limit['resets_at'];
+  return {
+    kind,
+    usedPercent: clampPercent(percent),
+    resetsAt: typeof resetsAt === 'string' ? toIsoOrNull(new Date(resetsAt)) : null,
+    scope,
+  };
+}
+
+function claudeScopedWindows(body: Record<string, unknown>): UsageWindow[] {
+  const limits = body['limits'];
+  const scoped = Array.isArray(limits)
+    ? limits.map(claudeScopedWindow).filter((window): window is UsageWindow => window !== null)
+    : [];
+  if (scoped.length > 0) return scoped;
+  return [
+    { scope: 'Opus', value: body['seven_day_opus'] },
+    { scope: 'Sonnet', value: body['seven_day_sonnet'] },
+  ].flatMap(({ scope, value }) => {
+    const window = claudeWindow('weekly', value);
+    return window === null ? [] : [{ ...window, scope }];
+  });
 }
 
 function claudeExtraMonthlyWindow(extra: unknown): UsageWindow | null {
@@ -156,6 +215,7 @@ async function readClaudeUsage(ctx: UsageContext): Promise<UsageWindow[]> {
     claudeWindow('session', body['five_hour']),
     claudeWindow('weekly', body['seven_day']),
     claudeWindow('monthly', body['monthly']) ?? claudeExtraMonthlyWindow(body['extra_usage']),
+    ...claudeScopedWindows(body),
   ].filter((window): window is UsageWindow => window !== null);
 }
 
@@ -163,21 +223,112 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+const MINUTES_PER_DAY = 24 * 60;
+
+function kindForWindowMinutes(minutes: number): UsageWindow['kind'] {
+  if (minutes <= MINUTES_PER_DAY) return 'session';
+  if (minutes <= 8 * MINUTES_PER_DAY) return 'weekly';
+  return 'monthly';
+}
+
+function codexWindowMinutes(value: Record<string, unknown>): number | null {
+  const minutes = finiteNumber(value['window_minutes']);
+  if (minutes !== null) return minutes;
+  const seconds = finiteNumber(value['limit_window_seconds']);
+  return seconds === null ? null : seconds / 60;
+}
+
 function codexWindow(
-  kind: UsageWindow['kind'],
+  fallbackKind: UsageWindow['kind'],
   value: unknown,
   baseMs: number,
 ): UsageWindow | null {
   if (!isRecord(value)) return null;
   const used = finiteNumber(value['used_percent']);
   if (used === null) return null;
-  const resetsAtSeconds = finiteNumber(value['resets_at']);
-  const resetsInSeconds = finiteNumber(value['resets_in_seconds']);
+  const minutes = codexWindowMinutes(value);
+  const resetsAtSeconds = finiteNumber(value['resets_at']) ?? finiteNumber(value['reset_at']);
+  const resetsInSeconds =
+    finiteNumber(value['resets_in_seconds']) ?? finiteNumber(value['reset_after_seconds']);
   let resetsAt: string | null = null;
   if (resetsAtSeconds !== null) resetsAt = toIsoOrNull(new Date(resetsAtSeconds * 1000));
   else if (resetsInSeconds !== null)
     resetsAt = toIsoOrNull(new Date(baseMs + resetsInSeconds * 1000));
-  return { kind, usedPercent: clampPercent(used), resetsAt };
+  return {
+    kind: minutes === null ? fallbackKind : kindForWindowMinutes(minutes),
+    usedPercent: clampPercent(used),
+    resetsAt,
+  };
+}
+
+const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+
+interface CodexCredentials {
+  accessToken: string;
+  accountId: string | null;
+}
+
+async function codexCredentials(homeDir: string): Promise<CodexCredentials | null> {
+  let raw: string;
+  try {
+    raw = await readFile(join(homeDir, 'auth.json'), 'utf8');
+  } catch (error: unknown) {
+    if (isMissingPath(error)) return null;
+    throw error;
+  }
+  const parsed = parseJson(raw);
+  const tokens = isRecord(parsed) ? parsed['tokens'] : undefined;
+  if (!isRecord(tokens)) return null;
+  const accessToken = tokens['access_token'];
+  if (typeof accessToken !== 'string' || accessToken === '') return null;
+  const accountId = tokens['account_id'];
+  return { accessToken, accountId: typeof accountId === 'string' ? accountId : null };
+}
+
+function codexRateLimitWindows(
+  rateLimit: unknown,
+  input: { baseMs: number; scope?: string },
+): UsageWindow[] {
+  if (!isRecord(rateLimit)) return [];
+  return [
+    codexWindow('session', rateLimit['primary_window'], input.baseMs),
+    codexWindow('weekly', rateLimit['secondary_window'], input.baseMs),
+  ]
+    .filter((window): window is UsageWindow => window !== null)
+    .map((window) => (input.scope === undefined ? window : { ...window, scope: input.scope }));
+}
+
+function codexAdditionalWindows(additional: unknown, baseMs: number): UsageWindow[] {
+  if (!Array.isArray(additional)) return [];
+  return additional.filter(isRecord).flatMap((entry) => {
+    const name = entry['limit_name'] ?? entry['metered_feature'];
+    if (typeof name !== 'string' || name.trim() === '') return [];
+    return codexRateLimitWindows(entry['rate_limit'], { baseMs, scope: name.trim() });
+  });
+}
+
+function codexApiWindows(body: unknown, baseMs: number): UsageWindow[] {
+  if (!isRecord(body)) return [];
+  return [
+    ...codexRateLimitWindows(body['rate_limit'], { baseMs }),
+    ...codexRateLimitWindows(body['code_review_rate_limit'], { baseMs, scope: 'Code review' }),
+    ...codexAdditionalWindows(body['additional_rate_limits'], baseMs),
+  ];
+}
+
+async function readCodexApiUsage(ctx: UsageContext): Promise<UsageWindow[]> {
+  const credentials = await codexCredentials(ctx.account.homeDir);
+  if (credentials === null) return [];
+  const headers: Record<string, string> = { Authorization: `Bearer ${credentials.accessToken}` };
+  if (credentials.accountId !== null) headers['ChatGPT-Account-Id'] = credentials.accountId;
+  let body: unknown;
+  try {
+    body = await fetchUsageJson(ctx, { url: CODEX_USAGE_URL, headers, provider: 'Codex' });
+  } catch (error: unknown) {
+    if (error instanceof Error) return [];
+    throw error;
+  }
+  return codexApiWindows(body, ctx.deps.now().getTime());
 }
 
 function codexLineWindows(line: string, mtimeMs: number): UsageWindow[] {
@@ -268,16 +419,39 @@ function agyBucketWindow(
   };
 }
 
+const AGY_PRIMARY_GROUP = 'Gemini Models';
+const AGY_BUCKET_WINDOWS: readonly {
+  kind: UsageWindow['kind'];
+  window: string;
+  idSuffix: string;
+}[] = [
+  { kind: 'session', window: '5h', idSuffix: '-5h' },
+  { kind: 'weekly', window: 'weekly', idSuffix: '-weekly' },
+  { kind: 'monthly', window: 'monthly', idSuffix: '-monthly' },
+];
+
 function parseAgyUsageBuckets(buckets: unknown[]): UsageWindow[] {
   const records = buckets.filter(isRecord);
-  const fiveHour = records.find((b) => b['id'] === 'gemini-5h' || b['window'] === '5h');
-  const weekly = records.find((b) => b['id'] === 'gemini-weekly' || b['window'] === 'weekly');
-  const monthly = records.find((b) => b['id'] === 'gemini-monthly' || b['window'] === 'monthly');
-  return [
-    fiveHour !== undefined ? agyBucketWindow('session', fiveHour) : null,
-    weekly !== undefined ? agyBucketWindow('weekly', weekly) : null,
-    monthly !== undefined ? agyBucketWindow('monthly', monthly) : null,
-  ].filter((window): window is UsageWindow => window !== null);
+  return AGY_BUCKET_WINDOWS.map(({ kind, window, idSuffix }) => {
+    const bucket = records.find((b) => {
+      const id = b['id'];
+      return b['window'] === window || (typeof id === 'string' && id.endsWith(idSuffix));
+    });
+    return bucket !== undefined ? agyBucketWindow(kind, bucket) : null;
+  }).filter((usageWindow): usageWindow is UsageWindow => usageWindow !== null);
+}
+
+function parseAgyUsageGroups(groups: unknown[]): UsageWindow[] {
+  const records = groups.filter(isRecord);
+  const primary = records.find((g) => g['name'] === AGY_PRIMARY_GROUP) ?? records[0];
+  return records.flatMap((group) => {
+    const buckets = Array.isArray(group['buckets']) ? group['buckets'] : [];
+    const windows = parseAgyUsageBuckets(buckets);
+    const name = group['name'];
+    if (group === primary) return windows;
+    if (typeof name !== 'string' || name.trim() === '') return [];
+    return windows.map((usageWindow) => ({ ...usageWindow, scope: name.trim() }));
+  });
 }
 
 async function readGeminiUsage(
@@ -309,10 +483,7 @@ async function readGeminiUsage(
   if (groups === null) {
     throw new UsageError('bad-response', 'Gemini usage response missing groups');
   }
-  const group =
-    groups.find((g) => isRecord(g) && g['name'] === 'Gemini Models') ?? groups.find(isRecord);
-  const buckets = isRecord(group) && Array.isArray(group['buckets']) ? group['buckets'] : [];
-  return { windows: parseAgyUsageBuckets(buckets), source: 'api' };
+  return { windows: parseAgyUsageGroups(groups), source: 'api' };
 }
 
 export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
@@ -322,6 +493,8 @@ export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
     case 'claude':
       return { provider, windows: await readClaudeUsage(ctx), source: 'api', fetchedAt };
     case 'codex': {
+      const apiWindows = await readCodexApiUsage(ctx);
+      if (apiWindows.length > 0) return { provider, windows: apiWindows, source: 'api', fetchedAt };
       const windows = await readCodexUsage(ctx.account.homeDir);
       return {
         provider,
