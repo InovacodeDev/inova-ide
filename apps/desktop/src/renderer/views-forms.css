@@ -50,6 +50,10 @@
   background: var(--surface);
 }
 
+.accounts-new .btn {
+  height: 40px;
+}
+
 .accounts-new label,
 .new-session label {
   display: flex;
@@ -254,6 +258,11 @@
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.new-session-folder .btn {
+  flex: none;
+  height: 40px;
 }
 
 .new-session-path {

@@ -1030,12 +1030,14 @@
   font-size: 11px;
   cursor: pointer;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
 .chat-row:hover .chat-fork-btn,
 .chat-fork-btn:focus-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .chat-fork-btn:hover:not(:disabled) {

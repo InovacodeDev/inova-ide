@@ -231,6 +231,7 @@
 
 .login-code-row {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -240,6 +241,11 @@
   height: 36px;
   font-family: var(--font-mono);
   font-size: 12.5px;
+}
+
+.login-code-row .btn {
+  flex: none;
+  height: 36px;
 }
 
 .select-root {

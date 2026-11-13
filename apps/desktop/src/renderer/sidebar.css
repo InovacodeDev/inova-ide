@@ -75,6 +75,7 @@
 }
 
 .sidebar .project-header {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -137,14 +138,29 @@
 }
 
 .sidebar .project-actions {
-  display: none;
+  position: absolute;
+  right: 4px;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
   gap: 2px;
-  flex: none;
+  padding: 0 2px 0 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--surface) 45%, var(--panel)) 10px
+  );
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
 }
 
 .sidebar .project-header:hover .project-actions,
 .sidebar .project-header:focus-within .project-actions {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar .session-tree,
@@ -273,28 +289,34 @@
   flex: none;
   font-size: 11px;
   color: var(--faint);
+  transition: opacity 0.1s ease;
 }
 
 .sidebar .session-actions {
   position: absolute;
   right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: none;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
   gap: 2px;
-  padding: 2px 2px 2px 6px;
+  padding: 0 2px 0 10px;
   border-radius: var(--radius-sm);
-  background: var(--row-selected);
+  background: linear-gradient(90deg, transparent, var(--row-selected) 10px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
 }
 
 .sidebar .session-row:hover .session-actions,
 .sidebar .session-row:focus-within .session-actions {
-  display: flex;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sidebar .session-row:hover .session-time,
 .sidebar .session-row:focus-within .session-time {
-  visibility: hidden;
+  opacity: 0;
 }
 
 .sidebar .session-action {

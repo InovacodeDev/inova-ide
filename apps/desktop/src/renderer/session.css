@@ -280,8 +280,23 @@
 
 .session-details-add-check {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin-top: 8px;
+}
+
+.session-details-add-check .field {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.session-details-add-check .btn {
+  flex: none;
+  height: 32px;
 }
 
 .new-session-check {
