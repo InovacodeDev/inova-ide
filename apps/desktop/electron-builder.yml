@@ -18,8 +18,14 @@ extraResources:
     to: cli
   - from: resources/bin
     to: bin
+  - from: resources/whisper
+    to: whisper
+    filter:
+      - whisper-cli*
 mac:
   category: public.app-category.developer-tools
+  extendInfo:
+    NSMicrophoneUsageDescription: O InovaIDE usa o microfone para transcrever o ditado no chat.
   icon: build/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false

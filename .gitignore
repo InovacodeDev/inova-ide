@@ -6,4 +6,5 @@ dist
 .superpowers/
 .vitest/
 apps/desktop/out
+apps/desktop/resources/whisper/
 release/
