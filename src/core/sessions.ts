@@ -3,6 +3,7 @@ import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
 import { loadStore, saveStore } from './store.js';
 import type {
+  Account,
   ExecutionMode,
   Project,
   ProviderId,
@@ -138,11 +139,32 @@ function normalizeModel(model: string | null): string | null {
   return trimmed;
 }
 
-function providerForProject(store: Store, projectId: string): ProviderId | null {
+function providerForSession(
+  store: Store,
+  projectId: string,
+  accountIdOverride?: string | null,
+): ProviderId | null {
+  if (accountIdOverride) {
+    const overridden = store.accounts.find((item) => item.id === accountIdOverride);
+    if (overridden) return overridden.provider;
+  }
   const project = store.projects.find((item) => item.id === projectId);
   if (!project) return null;
   const account = store.accounts.find((item) => item.id === project.accountId);
   return account?.provider ?? null;
+}
+
+export function resolveSessionAccount(input: {
+  session: Pick<Session, 'accountIdOverride'>;
+  project: Pick<Project, 'accountId'>;
+  accounts: readonly Account[];
+}): Account | undefined {
+  const { session, project, accounts } = input;
+  if (session.accountIdOverride) {
+    const found = accounts.find((account) => account.id === session.accountIdOverride);
+    if (found) return found;
+  }
+  return accounts.find((account) => account.id === project.accountId);
 }
 
 export function effectiveCwd(
@@ -157,6 +179,8 @@ export async function createSession(ctx: {
   projectId: string;
   parentId?: string | null;
   title?: string;
+  accountIdOverride?: string | null;
+  handoffContext?: string | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
   now?: () => Date;
@@ -168,14 +192,18 @@ export async function createSession(ctx: {
   }
   const parentId = ctx.parentId ?? null;
   let parentWorktree: SessionWorktree | null = null;
+  let parentAccountOverride: string | null = null;
   if (parentId !== null) {
     const parent = sessionsOf(store).find((item) => item.id === parentId);
     if (parent?.projectId !== ctx.projectId) {
       throw new SessionError('parent-not-found', `Parent session not found: ${parentId}`);
     }
     parentWorktree = parent.worktree ?? null;
+    parentAccountOverride = parent.accountIdOverride ?? null;
   }
-  const provider = providerForProject(store, ctx.projectId);
+  const resolvedAccountOverride =
+    ctx.accountIdOverride !== undefined ? ctx.accountIdOverride : parentAccountOverride;
+  const provider = providerForSession(store, ctx.projectId, resolvedAccountOverride);
   const inheritedMode =
     ctx.mode !== undefined ? ctx.mode : provider ? (store.defaultModes?.[provider] ?? null) : null;
   if (
@@ -191,6 +219,8 @@ export async function createSession(ctx: {
     parentId,
     title: ctx.title ?? (parentId === null ? 'Nova sessão' : 'Subsessão'),
     providerSessionId: null,
+    ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
+    ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
     model: null,
     effort: null,
     mode: inheritedMode,
@@ -217,7 +247,17 @@ export async function updateSession(ctx: {
   root: string;
   sessionId: string;
   patch: Partial<
-    Pick<Session, 'title' | 'providerSessionId' | 'model' | 'effort' | 'mode' | 'worktree'>
+    Pick<
+      Session,
+      | 'title'
+      | 'providerSessionId'
+      | 'accountIdOverride'
+      | 'handoffContext'
+      | 'model'
+      | 'effort'
+      | 'mode'
+      | 'worktree'
+    >
   > & {
     archived?: boolean;
   };
@@ -225,10 +265,28 @@ export async function updateSession(ctx: {
 }): Promise<Session> {
   const store = await loadStore(ctx.root);
   const session = requireSession(store, ctx.sessionId);
-  const { title, providerSessionId, model, effort, mode, worktree, archived } = ctx.patch;
+  const {
+    title,
+    providerSessionId,
+    accountIdOverride,
+    handoffContext,
+    model,
+    effort,
+    mode,
+    worktree,
+    archived,
+  } = ctx.patch;
   const timestamp = (ctx.now?.() ?? new Date()).toISOString();
   if (title !== undefined) session.title = normalizeTitle(title);
   if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
+  if (accountIdOverride !== undefined) {
+    session.accountIdOverride = accountIdOverride;
+    const newProvider = providerForSession(store, session.projectId, accountIdOverride);
+    if (session.mode && newProvider && !isModeSupported(newProvider, session.mode)) {
+      session.mode = store.defaultModes?.[newProvider] ?? null;
+    }
+  }
+  if (handoffContext !== undefined) session.handoffContext = handoffContext;
   if (model !== undefined) session.model = normalizeModel(model);
   if (worktree !== undefined) session.worktree = worktree;
   if (effort !== undefined) {
@@ -238,7 +296,7 @@ export async function updateSession(ctx: {
     session.effort = effort;
   }
   if (mode !== undefined) {
-    const provider = providerForProject(store, session.projectId);
+    const provider = providerForSession(store, session.projectId, session.accountIdOverride);
     if (
       mode !== null &&
       (!isExecutionMode(mode) || (provider && !isModeSupported(provider, mode)))

@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
-import type { EffortLevel, ExecutionMode, ProviderId } from '@inova/core/types';
-import type { ProjectCommandView } from '../shared/api';
+import type { EffortLevel, ExecutionMode, ProviderId, QueuedTurn } from '@inova/core/types';
+import type { AccountView, ProjectCommandView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
 import {
@@ -12,7 +13,9 @@ import {
   type ComposerTrigger,
 } from './composer-trigger';
 import {
+  ClockIcon,
   FileIcon,
+  GitForkIcon,
   PencilIcon,
   PlayIcon,
   RotateCcwIcon,
@@ -41,10 +44,19 @@ export interface ChatViewProps {
   inWorktree?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
+  queuedTurns?: readonly QueuedTurn[];
+  busyConflict?: { prompt: string; exhausted: boolean } | null;
+  alternativeAccounts?: readonly AccountView[];
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onChangeMode: (mode: ExecutionMode) => void;
   onSetDefaultMode: (mode: ExecutionMode) => void;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
+  onForkTurn?: (turnIndex: number) => void;
+  onOpenHandoff?: () => void;
+  onEnqueuePrompt?: (prompt: string) => void;
+  onCancelQueuedTurn?: (turnId: string) => void;
+  onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
+  onDismissBusyConflict?: () => void;
   onSend: (prompt: string) => void;
   onCancel: () => void;
 }
@@ -186,11 +198,14 @@ function VerificationCard({
 
 interface MessageProps {
   item: ChatItem;
+  turnIndex: number;
   showAgentLabel: boolean;
   provider: ProviderId | null;
   busy: boolean;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onFixVerification?: (prompt: string) => void;
+  onForkTurn?: (turnIndex: number) => void;
+  onOpenHandoff?: () => void;
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
@@ -204,18 +219,35 @@ function AgentLabel({ provider }: { provider: ProviderId | null }) {
 
 function Message({
   item,
+  turnIndex,
   showAgentLabel,
   provider,
   busy,
   onRestoreCheckpoint,
   onFixVerification,
+  onForkTurn,
+  onOpenHandoff,
 }: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   switch (item.type) {
     case 'user':
       return (
         <div className="chat-row">
-          <div className="chat-label">Você</div>
+          <div className="chat-label chat-user-header">
+            <span>Você</span>
+            {onForkTurn ? (
+              <button
+                type="button"
+                className="chat-fork-btn"
+                disabled={busy}
+                title="Bifurcar sessão a partir deste turno"
+                onClick={() => onForkTurn(turnIndex)}
+              >
+                <GitForkIcon size={12} />
+                Bifurcar daqui
+              </button>
+            ) : null}
+          </div>
           <div className="chat-user-bubble">{item.text}</div>
         </div>
       );
@@ -281,7 +313,14 @@ function Message({
       return (
         <div className="chat-row">
           <div className="chat-error" role="alert">
-            {item.message}
+            <div>{item.message}</div>
+            {onOpenHandoff && isRateLimitMessage(item.message) ? (
+              <div className="chat-error-actions">
+                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                  Continuar com resumo em outra conta
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       );
@@ -304,10 +343,19 @@ export function ChatView({
   inWorktree = false,
   catalog,
   readOnly = false,
+  queuedTurns = [],
+  busyConflict = null,
+  alternativeAccounts = [],
   onChangeModelConfig,
   onChangeMode,
   onSetDefaultMode,
   onRestoreCheckpoint,
+  onForkTurn,
+  onOpenHandoff,
+  onEnqueuePrompt,
+  onCancelQueuedTurn,
+  onSwitchAccountAndRetry,
+  onDismissBusyConflict,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -329,6 +377,13 @@ export function ChatView({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
+  const userTurnIndices = useMemo(() => {
+    let counter = -1;
+    return items.map((item) => {
+      if (item.type === 'user') counter += 1;
+      return counter;
+    });
+  }, [items]);
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
 
@@ -544,9 +599,12 @@ export function ChatView({
             <Message
               key={item.id}
               item={item}
+              turnIndex={userTurnIndices[index] ?? 0}
               provider={provider}
               busy={running || readOnly}
               onRestoreCheckpoint={onRestoreCheckpoint}
+              onForkTurn={onForkTurn}
+              onOpenHandoff={onOpenHandoff}
               onFixVerification={(fixPrompt) => {
                 if (!running && !readOnly) onSend(fixPrompt);
               }}
@@ -555,6 +613,28 @@ export function ChatView({
                 (index === 0 || items[index - 1]?.type === 'user')
               }
             />
+          ))}
+          {queuedTurns.map((queued) => (
+            <div key={queued.turnId} className="chat-row">
+              <div className="chat-queued">
+                <div className="chat-queued-head">
+                  <span className="chat-queued-label">
+                    <ClockIcon size={13} />
+                    Na fila — aguardando conta ficar livre
+                  </span>
+                  {onCancelQueuedTurn ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => onCancelQueuedTurn(queued.turnId)}
+                    >
+                      Cancelar
+                    </button>
+                  ) : null}
+                </div>
+                <div className="chat-queued-prompt">{queued.prompt}</div>
+              </div>
+            </div>
           ))}
           {thinking ? (
             <div className="chat-row chat-thinking" aria-live="polite">
@@ -569,6 +649,49 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {busyConflict ? (
+          <div className="chat-busy-banner" role="alert">
+            <div className="chat-busy-text">
+              {busyConflict.exhausted
+                ? 'Esta conta atingiu o limite de uso.'
+                : 'Esta conta está ocupada em outra sessão.'}
+            </div>
+            <div className="chat-busy-actions">
+              {!busyConflict.exhausted && onEnqueuePrompt ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  onClick={() => onEnqueuePrompt(busyConflict.prompt)}
+                >
+                  Enfileirar turno
+                </button>
+              ) : null}
+              {onSwitchAccountAndRetry &&
+                alternativeAccounts.slice(0, 3).map((alt) => (
+                  <button
+                    key={alt.id}
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() =>
+                      onSwitchAccountAndRetry({ accountId: alt.id, prompt: busyConflict.prompt })
+                    }
+                  >
+                    Mover para {PROVIDER_NAME[alt.provider]} · {alt.label}
+                  </button>
+                ))}
+              {onOpenHandoff ? (
+                <button type="button" className="btn btn-sm" onClick={onOpenHandoff}>
+                  Handoff
+                </button>
+              ) : null}
+              {onDismissBusyConflict ? (
+                <button type="button" className="btn btn-sm" onClick={onDismissBusyConflict}>
+                  Fechar
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         {popupModel ? <ComposerPopup model={popupModel} /> : null}
         <div className="chat-composer">
           <textarea

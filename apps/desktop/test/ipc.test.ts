@@ -41,6 +41,15 @@ function setup() {
       'saveWorkspace',
       'loadTranscript',
       'sendMessage',
+      'enqueueTurn',
+      'cancelQueuedTurn',
+      'listTurnQueue',
+      'switchSessionAccount',
+      'handoffSession',
+      'forkSession',
+      'listInbox',
+      'markInboxRead',
+      'clearReadInbox',
       'getUsage',
       'listModels',
       'startLogin',
@@ -54,6 +63,7 @@ function setup() {
   );
   handlers['cancelTurn'] = vi.fn();
   handlers['cancelLogin'] = vi.fn();
+  handlers['reportUiFocus'] = vi.fn();
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
     allowedOrigin: APP,
@@ -152,6 +162,15 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:detectProjectChecks', trusted, { projectId: 'p' });
   await invoke('inova:updateProjectVerification', trusted, { projectId: 'p', autoVerify: true });
   await invoke('inova:runVerification', trusted, { sessionId: 's' });
+  await invoke('inova:enqueueTurn', trusted, input);
+  await invoke('inova:cancelQueuedTurn', trusted, { turnId: 't1' });
+  await invoke('inova:listTurnQueue', trusted);
+  await invoke('inova:switchSessionAccount', trusted, { sessionId: 's', accountId: 'a2' });
+  await invoke('inova:handoffSession', trusted, { sessionId: 's', targetAccountId: 'a2' });
+  await invoke('inova:forkSession', trusted, { sessionId: 's', turnIndex: 0 });
+  await invoke('inova:listInbox', trusted);
+  await invoke('inova:markInboxRead', trusted, { sessionId: 's' });
+  await invoke('inova:clearReadInbox', trusted);
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);

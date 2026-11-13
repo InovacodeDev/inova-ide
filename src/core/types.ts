@@ -42,6 +42,8 @@ export interface Session {
   parentId: string | null;
   title: string;
   providerSessionId: string | null;
+  accountIdOverride?: string | null;
+  handoffContext?: string | null;
   model?: string | null;
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
@@ -49,6 +51,28 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
+}
+
+export type InboxAttentionKind = 'completed' | 'failed' | 'waiting-input';
+
+export interface InboxItem {
+  sessionId: string;
+  projectId: string;
+  sessionTitle: string;
+  projectName: string;
+  provider: ProviderId;
+  kind: InboxAttentionKind;
+  summary: string;
+  at: string;
+  unread: boolean;
+}
+
+export interface QueuedTurn {
+  turnId: string;
+  sessionId: string;
+  accountId: string;
+  prompt: string;
+  enqueuedAt: string;
 }
 
 export interface Workspace {

@@ -244,6 +244,70 @@ export function parseMessage(input: unknown): { sessionId: string; prompt: strin
   return { sessionId: input['sessionId'], prompt };
 }
 
+export function parseTurnRef(input: unknown): { turnId: string } | undefined {
+  return isRecord(input) && isSafeId(input['turnId']) ? { turnId: input['turnId'] } : undefined;
+}
+
+export function parseSwitchAccount(
+  input: unknown,
+): { sessionId: string; accountId: string; generateHandoff?: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId']) || !isSafeId(input['accountId'])) {
+    return undefined;
+  }
+  const { generateHandoff } = input;
+  if (generateHandoff !== undefined && typeof generateHandoff !== 'boolean') return undefined;
+  return {
+    sessionId: input['sessionId'],
+    accountId: input['accountId'],
+    ...(generateHandoff === undefined ? {} : { generateHandoff }),
+  };
+}
+
+export function parseHandoffSession(
+  input: unknown,
+): { sessionId: string; targetAccountId: string; createWorktree?: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId']) || !isSafeId(input['targetAccountId'])) {
+    return undefined;
+  }
+  const { createWorktree } = input;
+  if (createWorktree !== undefined && typeof createWorktree !== 'boolean') return undefined;
+  return {
+    sessionId: input['sessionId'],
+    targetAccountId: input['targetAccountId'],
+    ...(createWorktree === undefined ? {} : { createWorktree }),
+  };
+}
+
+export function parseForkSession(
+  input: unknown,
+):
+  | { sessionId: string; turnIndex: number; targetAccountId?: string; copyWorktreeFiles?: boolean }
+  | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { turnIndex, targetAccountId, copyWorktreeFiles } = input;
+  if (typeof turnIndex !== 'number' || !Number.isInteger(turnIndex) || turnIndex < 0) {
+    return undefined;
+  }
+  if (targetAccountId !== undefined && !isSafeId(targetAccountId)) return undefined;
+  if (copyWorktreeFiles !== undefined && typeof copyWorktreeFiles !== 'boolean') return undefined;
+  return {
+    sessionId: input['sessionId'],
+    turnIndex,
+    ...(targetAccountId === undefined ? {} : { targetAccountId }),
+    ...(copyWorktreeFiles === undefined ? {} : { copyWorktreeFiles }),
+  };
+}
+
+export function parseUiFocus(
+  input: unknown,
+): { activeSessionId: string | null; windowFocused: boolean } | undefined {
+  if (!isRecord(input)) return undefined;
+  const { activeSessionId, windowFocused } = input;
+  if (typeof windowFocused !== 'boolean') return undefined;
+  if (activeSessionId !== null && !isSafeId(activeSessionId)) return undefined;
+  return { activeSessionId, windowFocused };
+}
+
 export function parseUsageRequest(input: unknown): { accountLabel: string } | undefined {
   return isRecord(input) && isText(input['accountLabel'])
     ? { accountLabel: input['accountLabel'] }

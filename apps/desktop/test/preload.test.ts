@@ -144,4 +144,28 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   });
   void api.runVerification({ sessionId: 's' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:runVerification', { sessionId: 's' });
+  void api.enqueueTurn({ sessionId: 's', prompt: 'oi' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:enqueueTurn', { sessionId: 's', prompt: 'oi' });
+  void api.cancelQueuedTurn({ turnId: 't1' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:cancelQueuedTurn', { turnId: 't1' });
+  void api.listTurnQueue();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listTurnQueue');
+  void api.switchSessionAccount({ sessionId: 's', accountId: 'a2' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:switchSessionAccount', {
+    sessionId: 's',
+    accountId: 'a2',
+  });
+  void api.handoffSession({ sessionId: 's', targetAccountId: 'a2' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:handoffSession', {
+    sessionId: 's',
+    targetAccountId: 'a2',
+  });
+  void api.forkSession({ sessionId: 's', turnIndex: 0 });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:forkSession', { sessionId: 's', turnIndex: 0 });
+  void api.listInbox();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listInbox');
+  void api.markInboxRead({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:markInboxRead', { sessionId: 's' });
+  void api.clearReadInbox();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:clearReadInbox');
 });

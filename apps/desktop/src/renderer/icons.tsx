@@ -1,14 +1,18 @@
 import { Archive } from 'pulsoicon-react/icons/archive';
+import { ArrowLeftRight } from 'pulsoicon-react/icons/arrow-left-right';
 import { ArrowRight } from 'pulsoicon-react/icons/arrow-right';
 import { Check } from 'pulsoicon-react/icons/check';
 import { ChevronDown } from 'pulsoicon-react/icons/chevron-down';
 import { ChevronRight } from 'pulsoicon-react/icons/chevron-right';
+import { Clock } from 'pulsoicon-react/icons/clock';
 import { Copy } from 'pulsoicon-react/icons/copy';
 import { ExternalLink } from 'pulsoicon-react/icons/external-link';
 import { Eye } from 'pulsoicon-react/icons/eye';
 import { File } from 'pulsoicon-react/icons/file';
 import { Folder } from 'pulsoicon-react/icons/folder';
 import { GitBranch } from 'pulsoicon-react/icons/git-branch';
+import { GitFork } from 'pulsoicon-react/icons/git-fork';
+import { Inbox } from 'pulsoicon-react/icons/inbox';
 import { Key } from 'pulsoicon-react/icons/key';
 import { LayoutGrid } from 'pulsoicon-react/icons/layout-grid';
 import { ListTodo } from 'pulsoicon-react/icons/list-todo';
@@ -170,4 +174,20 @@ export function RotateCcwIcon({ size = 16 }: IconProps) {
 
 export function PlayIcon({ size = 16 }: IconProps) {
   return <Play size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function InboxIcon({ size = 16 }: IconProps) {
+  return <Inbox size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function GitForkIcon({ size = 16 }: IconProps) {
+  return <GitFork size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SwitchIcon({ size = 16 }: IconProps) {
+  return <ArrowLeftRight size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ClockIcon({ size = 16 }: IconProps) {
+  return <Clock size={size} strokeWidth={1.7} aria-hidden="true" />;
 }

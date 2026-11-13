@@ -50,6 +50,15 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
   handle(CHANNELS.saveWorkspace, (input) => handlers.saveWorkspace(input));
   handle(CHANNELS.loadTranscript, (input) => handlers.loadTranscript(input));
   handle(CHANNELS.sendMessage, (input) => handlers.sendMessage(input));
+  handle(CHANNELS.enqueueTurn, (input) => handlers.enqueueTurn(input));
+  handle(CHANNELS.cancelQueuedTurn, (input) => handlers.cancelQueuedTurn(input));
+  handle(CHANNELS.listTurnQueue, () => handlers.listTurnQueue());
+  handle(CHANNELS.switchSessionAccount, (input) => handlers.switchSessionAccount(input));
+  handle(CHANNELS.handoffSession, (input) => handlers.handoffSession(input));
+  handle(CHANNELS.forkSession, (input) => handlers.forkSession(input));
+  handle(CHANNELS.listInbox, () => handlers.listInbox());
+  handle(CHANNELS.markInboxRead, (input) => handlers.markInboxRead(input));
+  handle(CHANNELS.clearReadInbox, () => handlers.clearReadInbox());
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
   handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
@@ -59,6 +68,9 @@ export function registerIpc(deps: { handlers: Handlers; allowedOrigin: string })
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);
+  });
+  listen(CHANNELS.reportUiFocus, (payload) => {
+    handlers.reportUiFocus(payload);
   });
   listen(CHANNELS.cancelLogin, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelLogin(sessionId);

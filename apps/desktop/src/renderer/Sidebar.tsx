@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Session } from '@inova/core/types';
+import type { InboxItem, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
+import { InboxView } from './InboxView';
 import { accountDisplayName } from './provider-meta';
 import {
   ArchiveIcon,
@@ -36,8 +37,11 @@ export interface SidebarProps {
   accounts: AccountView[];
   projects: ProjectView[];
   sessions: Record<string, Session[]>;
+  inboxItems?: readonly InboxItem[];
   activeSessionId: string | null;
   statusOf: (sessionId: string) => SessionStatus;
+  onOpenInboxItem?: (sessionId: string) => void;
+  onClearReadInbox?: () => void;
   onOpenSession: (session: Session) => void;
   onNewSession: (input: { project: ProjectView; parent: Session | null }) => void;
   onUnbind: (project: ProjectView) => void;
@@ -388,7 +392,17 @@ function ProjectSection(props: ProjectSectionProps) {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { view, onNavigate, accounts, projects, sessions, activeSessionId } = props;
+  const {
+    view,
+    onNavigate,
+    accounts,
+    projects,
+    sessions,
+    inboxItems = [],
+    activeSessionId,
+    onOpenInboxItem,
+    onClearReadInbox,
+  } = props;
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const emailByLabel = useMemo(
     () => new Map(accounts.map((account) => [account.label, account.email] as const)),
@@ -416,6 +430,13 @@ export function Sidebar(props: SidebarProps) {
             </li>
           ))}
         </ul>
+        {onOpenInboxItem && onClearReadInbox ? (
+          <InboxView
+            items={inboxItems}
+            onOpenItem={onOpenInboxItem}
+            onClearRead={onClearReadInbox}
+          />
+        ) : null}
         <div className="sidebar-projects">
           {projects.length === 0 && (
             <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>

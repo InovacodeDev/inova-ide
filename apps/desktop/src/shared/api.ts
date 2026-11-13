@@ -5,7 +5,9 @@ import type { ProviderModels } from '@inova/core/models';
 import type {
   EffortLevel,
   ExecutionMode,
+  InboxItem,
   ProviderId,
+  QueuedTurn,
   Session,
   VerificationCheck,
   Workspace,
@@ -115,6 +117,29 @@ export interface InovaApi {
   saveWorkspace(input: WorkspaceView): Promise<Result<null>>;
   loadTranscript(input: { sessionId: string }): Promise<Result<ChatEvent[]>>;
   sendMessage(input: { sessionId: string; prompt: string }): Promise<Result<null>>;
+  enqueueTurn(input: { sessionId: string; prompt: string }): Promise<Result<QueuedTurn>>;
+  cancelQueuedTurn(input: { turnId: string }): Promise<Result<null>>;
+  listTurnQueue(): Promise<Result<QueuedTurn[]>>;
+  switchSessionAccount(input: {
+    sessionId: string;
+    accountId: string;
+    generateHandoff?: boolean;
+  }): Promise<Result<{ session: SessionView; hadHistory: boolean }>>;
+  handoffSession(input: {
+    sessionId: string;
+    targetAccountId: string;
+    createWorktree?: boolean;
+  }): Promise<Result<{ session: SessionView; handoffContext: string }>>;
+  forkSession(input: {
+    sessionId: string;
+    turnIndex: number;
+    targetAccountId?: string;
+    copyWorktreeFiles?: boolean;
+  }): Promise<Result<{ session: SessionView; strategy: 'native-claude' | 'summary-handoff' }>>;
+  listInbox(): Promise<Result<InboxItem[]>>;
+  markInboxRead(input: { sessionId: string }): Promise<Result<InboxItem[]>>;
+  clearReadInbox(): Promise<Result<InboxItem[]>>;
+  reportUiFocus(input: { activeSessionId: string | null; windowFocused: boolean }): void;
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
@@ -126,6 +151,8 @@ export interface InovaApi {
   }): Promise<Result<ProjectFileSearchResult>>;
   listCommands(input: { projectId: string }): Promise<Result<ProjectCommandView[]>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
+  onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
+  onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
   startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
   cancelLogin(sessionId: string): void;
@@ -156,12 +183,24 @@ export const CHANNELS = {
   saveWorkspace: 'inova:saveWorkspace',
   loadTranscript: 'inova:loadTranscript',
   sendMessage: 'inova:sendMessage',
+  enqueueTurn: 'inova:enqueueTurn',
+  cancelQueuedTurn: 'inova:cancelQueuedTurn',
+  listTurnQueue: 'inova:listTurnQueue',
+  switchSessionAccount: 'inova:switchSessionAccount',
+  handoffSession: 'inova:handoffSession',
+  forkSession: 'inova:forkSession',
+  listInbox: 'inova:listInbox',
+  markInboxRead: 'inova:markInboxRead',
+  clearReadInbox: 'inova:clearReadInbox',
+  reportUiFocus: 'inova:reportUiFocus',
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
   listModels: 'inova:listModels',
   searchFiles: 'inova:searchFiles',
   listCommands: 'inova:listCommands',
   chatEvent: 'inova:chat:event',
+  inboxEvent: 'inova:inbox:event',
+  queueEvent: 'inova:queue:event',
   startLogin: 'inova:startLogin',
   submitLoginCode: 'inova:submitLoginCode',
   cancelLogin: 'inova:cancelLogin',

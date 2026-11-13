@@ -1047,3 +1047,120 @@ test('worktrees isolate turns, searchFiles sees worktree files, checkpoints rest
   expect(nonForcedDelete.ok).toBe(false);
   unwrap(await handlers.deleteSession({ sessionId: isolated.id, force: true }));
 });
+
+test('turn queue rejects busy account, drains FIFO on done, and tracks inbox notifications', async () => {
+  const { root, handlers, send, chatInUse } = await setup();
+  const { project, session: s1 } = await seedSession(root);
+  const s2 = unwrap(await handlers.createSession({ projectId: project.id }));
+  const store = await loadStore(root);
+  const accountId = store.accounts[0]!.id;
+
+  unwrap(await handlers.sendMessage({ sessionId: s1.id, prompt: 'Primeiro' }));
+  chatInUse.add(accountId);
+  const busy = await handlers.sendMessage({ sessionId: s2.id, prompt: 'Na fila' });
+  expect(busy.ok).toBe(false);
+  if (!busy.ok) expect(busy.message).toContain('CONTA_OCUPADA:');
+
+  const queued = unwrap(await handlers.enqueueTurn({ sessionId: s2.id, prompt: 'Na fila' }));
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+
+  const queuedCancel = unwrap(await handlers.enqueueTurn({ sessionId: s2.id, prompt: 'Cancelar' }));
+  unwrap(await handlers.cancelQueuedTurn({ turnId: queuedCancel.turnId }));
+  expect(unwrap(await handlers.listTurnQueue())).toEqual([queued]);
+
+  chatInUse.delete(accountId);
+
+  handlers.reportUiFocus({ activeSessionId: null, windowFocused: false });
+  handlers.handleChatEvent(s1.id, { kind: 'text', blockId: 'b1', text: 'Concluido' });
+  handlers.handleChatEvent(s1.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 10,
+  });
+  await new Promise((r) => setTimeout(r, 80));
+
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(s2.id);
+
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.some((item) => item.sessionId === s1.id && item.unread)).toBe(true);
+  const afterRead = unwrap(await handlers.markInboxRead({ sessionId: s1.id }));
+  expect(afterRead.find((item) => item.sessionId === s1.id)?.unread).toBe(false);
+  const afterClear = unwrap(await handlers.clearReadInbox());
+  expect(afterClear.some((item) => item.sessionId === s1.id)).toBe(false);
+});
+
+test('switchSessionAccount, handoffSession, and forkSession preserve context across turns and providers', async () => {
+  const { root, handlers, send } = await setup();
+  const { project, session } = await seedSession(root);
+  const altAccount = await addAccount({ root, provider: 'codex', label: 'codex-alt' });
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'session',
+    providerSessionId: 'cli-sess-1',
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b0', text: 'Resp 0' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 5,
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 1', at: 't1' });
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b1', text: 'Resp 1' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 5,
+  });
+
+  const nativeFork = unwrap(await handlers.forkSession({ sessionId: session.id, turnIndex: 1 }));
+  expect(nativeFork.strategy).toBe('native-claude');
+
+  const partialFork = unwrap(
+    await handlers.forkSession({
+      sessionId: session.id,
+      turnIndex: 0,
+      targetAccountId: altAccount.id,
+    }),
+  );
+  expect(partialFork.strategy).toBe('summary-handoff');
+  expect(partialFork.session.handoffContext).toContain('Turno 0');
+  expect(partialFork.session.handoffContext).not.toContain('Turno 1');
+
+  const handoff = unwrap(
+    await handlers.handoffSession({ sessionId: session.id, targetAccountId: altAccount.id }),
+  );
+  expect(handoff.handoffContext).toContain('Contexto de handoff');
+
+  const s2 = unwrap(await handlers.createSession({ projectId: project.id }));
+  handlers.handleChatEvent(s2.id, { kind: 'user', text: 'Inicio', at: 't0' });
+  handlers.handleChatEvent(s2.id, {
+    kind: 'error',
+    message: '429 rate_limit_exceeded',
+  });
+  handlers.handleChatEvent(s2.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 5,
+  });
+  await new Promise((r) => setTimeout(r, 40));
+
+  const switched = unwrap(
+    await handlers.switchSessionAccount({
+      sessionId: s2.id,
+      accountId: altAccount.id,
+      generateHandoff: true,
+    }),
+  );
+  expect(switched.hadHistory).toBe(true);
+  expect(switched.session.accountIdOverride).toBe(altAccount.id);
+
+  unwrap(await handlers.sendMessage({ sessionId: s2.id, prompt: 'Continuar' }));
+  expect(send.mock.calls[0]?.[0].provider).toBe('codex');
+  expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
+});

@@ -4,7 +4,9 @@ import { PROVIDER_MODELS, type ProviderModels } from '@inova/core/models';
 import type {
   EffortLevel,
   ExecutionMode,
+  InboxItem,
   ProviderId,
+  QueuedTurn,
   Session,
   VerificationCheck,
 } from '@inova/core/types';
@@ -17,6 +19,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
 import { Footer, type UsageState } from './Footer';
+import { ForkModal } from './ForkModal';
+import { HandoffModal } from './HandoffModal';
 import { Header } from './Header';
 import { AlertIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
@@ -73,6 +77,20 @@ export function App() {
     session: Session;
     status: WorktreeStatusView;
   } | null>(null);
+  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
+  const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
+  const [busyConflicts, setBusyConflicts] = useState<
+    Record<string, { prompt: string; exhausted: boolean }>
+  >({});
+  const [pendingFork, setPendingFork] = useState<{
+    session: Session;
+    turnIndex: number;
+    isLatestTurn: boolean;
+  } | null>(null);
+  const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
+  const [windowFocused, setWindowFocused] = useState(() =>
+    typeof document !== 'undefined' ? document.hasFocus() : true,
+  );
   const { warning, dismiss, guard, call } = useWarning();
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
@@ -168,6 +186,12 @@ export function App() {
     void call(() => window.inova.getDefaultModes()).then((loadedModes) => {
       if (loadedModes) setDefaultModes(loadedModes.value);
     });
+    void call(() => window.inova.listInbox()).then((loadedInbox) => {
+      if (loadedInbox) setInboxItems(loadedInbox.value);
+    });
+    void call(() => window.inova.listTurnQueue()).then((loadedQueue) => {
+      if (loadedQueue) setTurnQueue(loadedQueue.value);
+    });
     void (async () => {
       const loaded = await reloadProjects();
       if (!loaded) return;
@@ -200,16 +224,26 @@ export function App() {
 
   useEffect(() => {
     return window.inova.onChatEvent(({ sessionId, event }) => {
+      if (event.kind === 'user') dispatchChat({ sessionId, action: { type: 'started' } });
       dispatchChat({ sessionId, action: { type: 'event', event } });
       if (event.kind !== 'done') return;
-      const { projects: knownProjects, sessions: knownSessions } = latest.current;
+      const {
+        accounts: knownAccounts,
+        projects: knownProjects,
+        sessions: knownSessions,
+      } = latest.current;
       const projectId = Object.keys(knownSessions).find((id) =>
         knownSessions[id]?.some((session) => session.id === sessionId),
       );
       if (!projectId) return;
       void reloadSessions(projectId);
+      const session = knownSessions[projectId]?.find((item) => item.id === sessionId);
       const project = knownProjects.find((candidate) => candidate.id === projectId);
-      if (project) void loadUsage(project.accountLabel);
+      const overridden = session?.accountIdOverride
+        ? knownAccounts.find((candidate) => candidate.id === session.accountIdOverride)
+        : undefined;
+      const usageLabel = overridden?.label ?? project?.accountLabel;
+      if (usageLabel) void loadUsage(usageLabel);
     });
   }, [reloadSessions, loadUsage]);
 
@@ -234,10 +268,56 @@ export function App() {
     });
   }, [reloadAccounts, reloadProjects]);
 
+  useEffect(() => {
+    return window.inova.onInboxEvent((items) => setInboxItems(items));
+  }, []);
+
+  useEffect(() => {
+    return window.inova.onQueueEvent((queue) => setTurnQueue(queue));
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => setWindowFocused(true);
+    const onBlur = () => setWindowFocused(false);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  useEffect(() => {
+    window.inova.reportUiFocus({
+      activeSessionId: view === 'workspace' ? tabs.active : null,
+      windowFocused,
+    });
+  }, [view, tabs.active, windowFocused]);
+
+  const effectiveAccountOf = (
+    session: Session | null | undefined,
+    project: ProjectView | undefined,
+  ): AccountView | undefined => {
+    if (session?.accountIdOverride) {
+      const overridden = accounts.find((candidate) => candidate.id === session.accountIdOverride);
+      if (overridden) return overridden;
+    }
+    return project
+      ? accounts.find((candidate) => candidate.label === project.accountLabel)
+      : undefined;
+  };
+
   const openChatTab = async (session: Session, knownProject?: ProjectView) => {
     const project =
       knownProject ??
       latest.current.projects.find((candidate) => candidate.id === session.projectId);
+    const effective =
+      (session.accountIdOverride
+        ? latest.current.accounts.find((candidate) => candidate.id === session.accountIdOverride)
+        : undefined) ??
+      (project
+        ? latest.current.accounts.find((candidate) => candidate.label === project.accountLabel)
+        : undefined);
     setView('workspace');
     dispatch({
       type: 'open',
@@ -245,9 +325,10 @@ export function App() {
         sessionId: session.id,
         title: session.title,
         kind: 'chat',
-        provider: project?.provider ?? null,
+        provider: effective?.provider ?? project?.provider ?? null,
       },
     });
+    void window.inova.markInboxRead({ sessionId: session.id });
     if (latest.current.chats[session.id]) return;
     await loadChat(session.id);
   };
@@ -274,8 +355,8 @@ export function App() {
 
   const sendMessage = async (sessionId: string, prompt: string) => {
     dispatchChat({ sessionId, action: { type: 'started' } });
-    const result = await call(() => window.inova.sendMessage({ sessionId, prompt }));
-    if (!result) {
+    const result = await guard(() => window.inova.sendMessage({ sessionId, prompt }));
+    if (!result || !result.ok) {
       dispatchChat({
         sessionId,
         action: {
@@ -283,7 +364,112 @@ export function App() {
           event: { kind: 'done', isError: true, costUsd: null, durationMs: null },
         },
       });
+      if (result && !result.ok) {
+        if (result.message.startsWith('CONTA_OCUPADA:')) {
+          setBusyConflicts((current) => ({
+            ...current,
+            [sessionId]: { prompt, exhausted: false },
+          }));
+        } else if (result.message.startsWith('CONTA_ESGOTADA:')) {
+          setBusyConflicts((current) => ({ ...current, [sessionId]: { prompt, exhausted: true } }));
+        } else {
+          await call(() => Promise.resolve(result));
+        }
+      }
+      return;
     }
+    setBusyConflicts((current) => {
+      if (!(sessionId in current)) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+  };
+
+  const clearBusyConflict = (sessionId: string) => {
+    setBusyConflicts((current) => {
+      if (!(sessionId in current)) return current;
+      const next = { ...current };
+      delete next[sessionId];
+      return next;
+    });
+  };
+
+  const enqueuePrompt = async (sessionId: string, prompt: string) => {
+    const result = await call(() => window.inova.enqueueTurn({ sessionId, prompt }));
+    if (result) clearBusyConflict(sessionId);
+  };
+
+  const cancelQueuedTurn = async (turnId: string) => {
+    await call(() => window.inova.cancelQueuedTurn({ turnId }));
+  };
+
+  const switchAccountAndRetry = async (input: {
+    sessionId: string;
+    accountId: string;
+    prompt: string;
+  }) => {
+    const switched = await call(() =>
+      window.inova.switchSessionAccount({
+        sessionId: input.sessionId,
+        accountId: input.accountId,
+        generateHandoff: true,
+      }),
+    );
+    if (!switched) return;
+    clearBusyConflict(input.sessionId);
+    const updated = switched.value.session;
+    const matched = accounts.find((candidate) => candidate.id === input.accountId);
+    await reloadSessions(updated.projectId);
+    dispatch({
+      type: 'open',
+      tab: {
+        sessionId: updated.id,
+        title: updated.title,
+        kind: 'chat',
+        provider: matched?.provider ?? null,
+      },
+    });
+    await sendMessage(updated.id, input.prompt);
+  };
+
+  const confirmForkSession = async (input: {
+    session: Session;
+    turnIndex: number;
+    targetAccountId?: string;
+    copyWorktreeFiles: boolean;
+  }) => {
+    const result = await call(() =>
+      window.inova.forkSession({
+        sessionId: input.session.id,
+        turnIndex: input.turnIndex,
+        ...(input.targetAccountId ? { targetAccountId: input.targetAccountId } : {}),
+        copyWorktreeFiles: input.copyWorktreeFiles,
+      }),
+    );
+    if (!result) return;
+    const created = result.value.session;
+    await reloadSessions(created.projectId);
+    await openChatTab(created);
+  };
+
+  const confirmHandoffSession = async (input: {
+    session: Session;
+    targetAccountId: string;
+    createWorktree: boolean;
+  }) => {
+    const result = await call(() =>
+      window.inova.handoffSession({
+        sessionId: input.session.id,
+        targetAccountId: input.targetAccountId,
+        createWorktree: input.createWorktree,
+      }),
+    );
+    if (!result) return;
+    clearBusyConflict(input.session.id);
+    const created = result.value.session;
+    await reloadSessions(created.projectId);
+    await openChatTab(created);
   };
 
   const startAccountLogin = async (account: AccountView) => {
@@ -493,7 +679,13 @@ export function App() {
     await Promise.all([reloadAccounts(), reloadProjects()]);
   };
 
-  const accountDisplayOf = (project: ProjectView | undefined): string | null => {
+  const accountDisplayOf = (
+    account: AccountView | undefined,
+    project: ProjectView | undefined,
+  ): string | null => {
+    if (account) {
+      return accountDisplayName({ label: account.label, email: account.email });
+    }
     if (!project) return null;
     const matched = accounts.find((candidate) => candidate.label === project.accountLabel);
     return accountDisplayName({
@@ -527,8 +719,9 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
-  const activeAccountLabel = activeProject?.accountLabel ?? null;
+  const activeAccountLabel = activeAccount?.label ?? activeProject?.accountLabel ?? null;
 
   useEffect(() => {
     if (activeAccountLabel && !modelsByAccount[activeAccountLabel]) {
@@ -554,8 +747,19 @@ export function App() {
           accounts={accounts}
           projects={projects}
           sessions={sessions}
+          inboxItems={inboxItems}
           activeSessionId={inWorkspace ? tabs.active : null}
           statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+          onOpenInboxItem={(sessionId) => {
+            const target = sessionById.get(sessionId);
+            if (target) void openChatTab(target);
+            else void call(() => window.inova.markInboxRead({ sessionId }));
+          }}
+          onClearReadInbox={() => {
+            void call(() => window.inova.clearReadInbox()).then((res) => {
+              if (res) setInboxItems(res.value);
+            });
+          }}
           onOpenSession={(session) => void openChatTab(session)}
           onNewSession={(input) => void newSession(input)}
           onUnbind={async (project) => {
@@ -573,13 +777,15 @@ export function App() {
           {view === 'agents' && (
             <AgentsView
               agents={chatTabs.map((tab) => {
+                const session = sessionById.get(tab.sessionId);
                 const project = projectOf(tab.sessionId);
+                const account = effectiveAccountOf(session, project);
                 return {
                   sessionId: tab.sessionId,
                   title: tab.title,
-                  provider: tab.provider,
+                  provider: account?.provider ?? tab.provider,
                   where: project
-                    ? `${folderName(project.path)} · ${accountDisplayOf(project)}`
+                    ? `${folderName(project.path)} · ${accountDisplayOf(account, project)}`
                     : '',
                   status: sessionStatus(chats[tab.sessionId]),
                   tail: agentTail({ items: chats[tab.sessionId]?.items ?? [], lines: 3 }),
@@ -588,6 +794,7 @@ export function App() {
               onOpen={(sessionId) => {
                 setView('workspace');
                 dispatch({ type: 'activate', sessionId });
+                void window.inova.markInboxRead({ sessionId });
               }}
               onNewSession={() => setView('new-session')}
             />
@@ -634,8 +841,8 @@ export function App() {
                 kind={activeSession?.parentId ? 'subsession' : 'session'}
                 sectionName={activeProject ? folderName(activeProject.path) : null}
                 parentTitle={activeParentTitle}
-                provider={activeTab.provider}
-                accountDisplay={accountDisplayOf(activeProject)}
+                provider={activeAccount?.provider ?? activeTab.provider}
+                accountDisplay={accountDisplayOf(activeAccount, activeProject)}
                 path={activeProject?.path ?? null}
                 worktreeBranch={activeSession?.worktree?.branch ?? null}
                 worktreeBusy={
@@ -656,6 +863,7 @@ export function App() {
                 onApplyWorktree={
                   activeSession?.worktree ? () => void applyWorktree(activeSession) : undefined
                 }
+                onHandoff={activeSession ? () => setPendingHandoff(activeSession) : undefined}
                 onClose={() => {
                   if (chats[activeTab.sessionId]?.running) setPendingCloseTab(activeTab);
                   else closeTab(activeTab);
@@ -667,18 +875,26 @@ export function App() {
             {tabs.tabs.map((tab) => {
               const tabSession = sessionById.get(tab.sessionId);
               const tabProject = projectOf(tab.sessionId);
+              const tabAccount = effectiveAccountOf(tabSession, tabProject);
+              const tabProvider = tabAccount?.provider ?? tab.provider;
+              const tabAccountLabel = tabAccount?.label ?? tabProject?.accountLabel;
               const tabCatalog =
-                (tabProject ? modelsByAccount[tabProject.accountLabel] : undefined) ??
-                PROVIDER_MODELS[tab.provider ?? 'claude'];
+                (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
+                PROVIDER_MODELS[tabProvider ?? 'claude'];
+              const tabState = chats[tab.sessionId] ?? initialChatState;
+              const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
+              const alternativeAccounts = accounts.filter(
+                (candidate) => candidate.id !== tabAccount?.id,
+              );
               return (
                 <ChatView
                   key={tab.sessionId}
                   sessionId={tab.sessionId}
                   projectId={tabProject?.id ?? null}
-                  state={chats[tab.sessionId] ?? initialChatState}
+                  state={tabState}
                   visible={inWorkspace && tab.sessionId === tabs.active}
-                  provider={tab.provider}
-                  accountDisplay={accountDisplayOf(tabProject)}
+                  provider={tabProvider}
+                  accountDisplay={accountDisplayOf(tabAccount, tabProject)}
                   model={tabSession?.model ?? null}
                   effort={tabSession?.effort ?? null}
                   mode={tabSession?.mode ?? null}
@@ -686,6 +902,9 @@ export function App() {
                   inWorktree={Boolean(tabSession?.worktree)}
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
+                  queuedTurns={tabQueuedTurns}
+                  busyConflict={busyConflicts[tab.sessionId] ?? null}
+                  alternativeAccounts={alternativeAccounts}
                   onChangeModelConfig={(patch) =>
                     void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
                   }
@@ -693,7 +912,7 @@ export function App() {
                     void updateSessionModelConfig({ sessionId: tab.sessionId, patch: { mode } })
                   }
                   onSetDefaultMode={(mode) => {
-                    if (tab.provider) void setDefaultProviderMode(tab.provider, mode);
+                    if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
                   }}
                   onRestoreCheckpoint={(cp) =>
                     setPendingRestore({
@@ -702,6 +921,31 @@ export function App() {
                       skippedLargeFiles: cp.skippedLargeFiles,
                     })
                   }
+                  onForkTurn={
+                    tabSession
+                      ? (turnIndex) => {
+                          const totalUserTurns = tabState.items.filter(
+                            (item) => item.type === 'user',
+                          ).length;
+                          setPendingFork({
+                            session: tabSession,
+                            turnIndex,
+                            isLatestTurn: turnIndex >= totalUserTurns - 1,
+                          });
+                        }
+                      : undefined
+                  }
+                  onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
+                  onEnqueuePrompt={(prompt) => void enqueuePrompt(tab.sessionId, prompt)}
+                  onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
+                  onSwitchAccountAndRetry={({ accountId, prompt }) =>
+                    void switchAccountAndRetry({
+                      sessionId: tab.sessionId,
+                      accountId,
+                      prompt,
+                    })
+                  }
+                  onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
                   onSend={(prompt) => void sendMessage(tab.sessionId, prompt)}
                   onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
@@ -714,8 +958,8 @@ export function App() {
             session={activeSession}
             parentTitle={activeParentTitle}
             project={activeProject}
-            account={accounts.find((account) => account.label === activeProject.accountLabel)}
-            usage={usage[activeProject.accountLabel]}
+            account={activeAccount}
+            usage={activeAccountLabel ? usage[activeAccountLabel] : undefined}
             running={Boolean(chats[activeSession.id]?.running)}
             onDetectChecks={() => void detectChecks(activeProject)}
             onRunVerification={() => void runVerification(activeSession.id)}
@@ -727,7 +971,7 @@ export function App() {
       </div>
       <Footer
         accounts={accounts}
-        focusedAccountLabel={inWorkspace ? (activeProject?.accountLabel ?? null) : null}
+        focusedAccountLabel={inWorkspace ? activeAccountLabel : null}
         usage={usage}
         onLoadUsage={(account) => void loadUsage(account.label)}
         onManageAccounts={() => setView('accounts')}
@@ -851,6 +1095,43 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+      {pendingFork && (
+        <ForkModal
+          session={pendingFork.session}
+          turnIndex={pendingFork.turnIndex}
+          isLatestTurn={pendingFork.isLatestTurn}
+          sourceAccount={effectiveAccountOf(pendingFork.session, projectOf(pendingFork.session.id))}
+          accounts={accounts}
+          onCancel={() => setPendingFork(null)}
+          onConfirm={({ targetAccountId, copyWorktreeFiles }) => {
+            const target = pendingFork;
+            setPendingFork(null);
+            void confirmForkSession({
+              session: target.session,
+              turnIndex: target.turnIndex,
+              ...(targetAccountId ? { targetAccountId } : {}),
+              copyWorktreeFiles,
+            });
+          }}
+        />
+      )}
+      {pendingHandoff && (
+        <HandoffModal
+          session={pendingHandoff}
+          sourceAccount={effectiveAccountOf(pendingHandoff, projectOf(pendingHandoff.id))}
+          accounts={accounts}
+          onCancel={() => setPendingHandoff(null)}
+          onConfirm={({ targetAccountId, createWorktree }) => {
+            const target = pendingHandoff;
+            setPendingHandoff(null);
+            void confirmHandoffSession({
+              session: target,
+              targetAccountId,
+              createWorktree,
+            });
+          }}
+        />
       )}
     </div>
   );

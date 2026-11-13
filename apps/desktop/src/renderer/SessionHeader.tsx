@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
-import { CloseIcon, FolderIcon, GitBranchIcon, PencilIcon } from './icons';
+import { CloseIcon, FolderIcon, GitBranchIcon, PencilIcon, SwitchIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import { STATUS_LABEL, type SessionStatus } from './session-status';
@@ -21,6 +21,7 @@ interface SessionHeaderProps {
   onRename?: (title: string) => void;
   onInspectWorktree?: () => void;
   onApplyWorktree?: () => void;
+  onHandoff?: () => void;
   onClose: () => void;
 }
 
@@ -40,6 +41,7 @@ export function SessionHeader(props: SessionHeaderProps) {
     onRename,
     onInspectWorktree,
     onApplyWorktree,
+    onHandoff,
     onClose,
   } = props;
   const [editing, setEditing] = useState(false);
@@ -160,6 +162,17 @@ export function SessionHeader(props: SessionHeaderProps) {
               <span className={status === 'running' ? 'dot pulse' : 'dot'} />
               {STATUS_LABEL[status]}
             </span>
+          ) : null}
+          {onHandoff ? (
+            <button
+              type="button"
+              className="btn btn-sm"
+              title="Transferir sessão para outra conta ou provedor"
+              onClick={onHandoff}
+            >
+              <SwitchIcon size={13} />
+              Transferir
+            </button>
           ) : null}
         </div>
       </div>

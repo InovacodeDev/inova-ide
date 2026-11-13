@@ -3,6 +3,8 @@ import {
   parseBinding,
   parseDefaultMode,
   parseFileSearch,
+  parseForkSession,
+  parseHandoffSession,
   parseLoginCode,
   parseNewAccount,
   parseMessage,
@@ -15,6 +17,9 @@ import {
   parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
+  parseSwitchAccount,
+  parseTurnRef,
+  parseUiFocus,
   parseUsageRequest,
   parseWorkspace,
 } from '../src/main/validation.js';
@@ -238,4 +243,32 @@ test('worktree, checkpoint restore, and project verification validation', () => 
     verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
   });
   expect(parseProjectVerification({ projectId: 'p1' })).toBeUndefined();
+});
+
+test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
+  expect(parseTurnRef({ turnId: 't1' })).toEqual({ turnId: 't1' });
+  expect(parseTurnRef({ turnId: '../x' })).toBeUndefined();
+  expect(parseSwitchAccount({ sessionId: 's1', accountId: 'a2', generateHandoff: false })).toEqual({
+    sessionId: 's1',
+    accountId: 'a2',
+    generateHandoff: false,
+  });
+  expect(parseHandoffSession({ sessionId: 's1', targetAccountId: 'a2', createWorktree: true })).toEqual({
+    sessionId: 's1',
+    targetAccountId: 'a2',
+    createWorktree: true,
+  });
+  expect(
+    parseForkSession({ sessionId: 's1', turnIndex: 0, targetAccountId: 'a2', copyWorktreeFiles: true }),
+  ).toEqual({
+    sessionId: 's1',
+    turnIndex: 0,
+    targetAccountId: 'a2',
+    copyWorktreeFiles: true,
+  });
+  expect(parseForkSession({ sessionId: 's1', turnIndex: -1 })).toBeUndefined();
+  expect(parseUiFocus({ activeSessionId: null, windowFocused: false })).toEqual({
+    activeSessionId: null,
+    windowFocused: false,
+  });
 });

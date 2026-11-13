@@ -76,12 +76,25 @@ function isStringOrNull(value: unknown): boolean {
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
-  const { id, parentId, providerSessionId, model, effort, mode, worktree, archivedAt } = value;
+  const {
+    id,
+    parentId,
+    providerSessionId,
+    accountIdOverride,
+    handoffContext,
+    model,
+    effort,
+    mode,
+    worktree,
+    archivedAt,
+  } = value;
   return (
     typeof id === 'string' &&
     isSafeSegment(id) &&
     isStringOrNull(parentId) &&
     isStringOrNull(providerSessionId) &&
+    (accountIdOverride === undefined || isSafeIdOrNull(accountIdOverride)) &&
+    (handoffContext === undefined || isStringOrNull(handoffContext)) &&
     (model === undefined || isStringOrNull(model)) &&
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (mode === undefined || mode === null || isExecutionMode(mode)) &&

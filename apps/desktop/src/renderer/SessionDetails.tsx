@@ -40,8 +40,9 @@ export function SessionDetails({
 }: SessionDetailsProps) {
   const [newCommand, setNewCommand] = useState('');
   const now = new Date();
+  const effectiveProvider = account?.provider ?? project.provider;
   const displayAccount = accountDisplayName({
-    label: project.accountLabel,
+    label: account?.label ?? project.accountLabel,
     email: account?.email ?? project.accountEmail,
   });
   const isSubsession = session.parentId !== null;
@@ -79,9 +80,9 @@ export function SessionDetails({
         <h2 className="section-label">Conta</h2>
         <div className="session-details-account">
           <span className="session-details-account-label" title={displayAccount}>
-            <ProviderBadge provider={project.provider} size={18} />
+            <ProviderBadge provider={effectiveProvider} size={18} />
             <span className="session-details-account-text">
-              {PROVIDER_NAME[project.provider]} · {displayAccount}
+              {PROVIDER_NAME[effectiveProvider]} · {displayAccount}
             </span>
           </span>
           {account ? (
@@ -115,8 +116,8 @@ export function SessionDetails({
           ) : null}
           <dt>Provedor</dt>
           <dd className="session-details-provider mono">
-            <ProviderBadge provider={project.provider} size={16} />
-            {PROVIDER_NAME[project.provider]}
+            <ProviderBadge provider={effectiveProvider} size={16} />
+            {PROVIDER_NAME[effectiveProvider]}
           </dd>
           <dt>Criada</dt>
           <dd className="mono">{relativeTime({ iso: session.createdAt, now })}</dd>
