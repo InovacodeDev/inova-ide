@@ -28,11 +28,9 @@ export function GeneralSection(props: {
       >
         {PROVIDERS.map((provider) => {
           const catalog = PROVIDER_MODES[provider];
-          const id = `default-mode-${provider}`;
           return (
-            <SettingRow key={provider} htmlFor={id} title={PROVIDER_NAME[provider]}>
+            <SettingRow key={provider} title={PROVIDER_NAME[provider]}>
               <PlatformSelect
-                id={id}
                 ariaLabel={`Modo padrão: ${PROVIDER_NAME[provider]}`}
                 value={effectiveModeForSession({ provider, defaultModes })}
                 options={catalog.options.map((option) => ({
