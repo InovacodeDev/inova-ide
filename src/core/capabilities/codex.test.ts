@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { CommandRunner } from '../providers.js';
 import { codexCapabilities } from './codex.js';
@@ -96,6 +99,61 @@ describe('codexCapabilities.list', () => {
     const ctx = contextWith({ overrides: { mcp: { notFound: true }, plugin: { notFound: true } } });
     expect((await categoryOf(ctx, 'mcp'))?.error).toBe('codex não encontrado.');
     expect((await categoryOf(ctx, 'plugin'))?.error).toBe('codex não encontrado.');
+  });
+});
+
+describe('codexCapabilities.setEnabled', () => {
+  async function withAccountDir<T>(run: (ctx: CapabilityContext) => Promise<T>): Promise<T> {
+    const root = await mkdtemp(join(tmpdir(), 'codex-cap-'));
+    try {
+      const base = contextWith({});
+      const homeDir = join(root, 'acc');
+      await mkdir(homeDir);
+      return await run({
+        ...base,
+        account: { ...base.account, homeDir },
+        backupRoot: join(root, 'backups'),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it('creates config.toml with a disabled plugin table when the file is missing', async () => {
+    await withAccountDir(async (ctx) => {
+      const ref = { kind: 'plugin', id: 'github@openai-curated-remote' } as const;
+      await codexCapabilities.setEnabled({ ctx, ref, enabled: false });
+      const toml = await readFile(join(ctx.account.homeDir, 'config.toml'), 'utf8');
+      expect(toml).toBe('[plugins."github@openai-curated-remote"]\nenabled = false\n');
+    });
+  });
+
+  it('backs up the existing config.toml before editing a skill', async () => {
+    await withAccountDir(async (ctx) => {
+      const file = join(ctx.account.homeDir, 'config.toml');
+      await writeFile(file, 'model = "x"\n');
+      await codexCapabilities.setEnabled({
+        ctx,
+        ref: { kind: 'skill', id: 'docs' },
+        enabled: false,
+      });
+      expect(await readFile(file, 'utf8')).toBe(
+        'model = "x"\n\n[[skills.config]]\nname = "docs"\nenabled = false\n',
+      );
+      const backups = await readdir(ctx.backupRoot);
+      expect(backups).toHaveLength(1);
+      expect(await readFile(join(ctx.backupRoot, backups[0] ?? ''), 'utf8')).toBe('model = "x"\n');
+    });
+  });
+
+  it('rejects MCP refs because MCP only supports launch mode', async () => {
+    await expect(
+      codexCapabilities.setEnabled({
+        ctx: contextWith({}),
+        ref: { kind: 'mcp', id: 'docs' },
+        enabled: false,
+      }),
+    ).rejects.toThrow('MCP do Codex usa só o modo launch.');
   });
 });
 

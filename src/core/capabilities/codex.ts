@@ -1,5 +1,12 @@
+import { join } from 'node:path';
 import type { CommandRunner } from '../providers.js';
-import { tomlTableHeader } from './file-edit.js';
+import {
+  serialize,
+  setTomlSkillConfig,
+  setTomlTableKey,
+  tomlTableHeader,
+  updateTomlFile,
+} from './file-edit.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -7,6 +14,7 @@ import type {
   CapabilityItem,
   CapabilityListing,
   CapabilityRef,
+  SetEnabledInput,
 } from './types.js';
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -130,8 +138,23 @@ function launchArgs(disabled: readonly CapabilityRef[]): string[] {
     .flatMap((ref) => ['-c', `${tomlTableHeader(['mcp_servers', ref.id])}.enabled=false`]);
 }
 
-export const codexCapabilities: CapabilityAdapter = {
-  list,
-  launchArgs,
-  setEnabled: () => Promise.reject(new Error('MCP do Codex usa só o modo launch.')),
-};
+function tomlUpdateFor(input: SetEnabledInput): ((toml: string) => string) | null {
+  const { ref, enabled } = input;
+  if (ref.kind === 'plugin') {
+    const table = tomlTableHeader(['plugins', ref.id]);
+    return (toml) => setTomlTableKey({ toml, table, key: 'enabled', value: enabled });
+  }
+  if (ref.kind === 'skill') {
+    return (toml) => setTomlSkillConfig({ toml, name: ref.id, enabled });
+  }
+  return null;
+}
+
+function setEnabled(input: SetEnabledInput): Promise<void> {
+  const update = tomlUpdateFor(input);
+  if (update === null) return Promise.reject(new Error('MCP do Codex usa só o modo launch.'));
+  const file = join(input.ctx.account.homeDir, 'config.toml');
+  return serialize(file, () => updateTomlFile({ file, backupRoot: input.ctx.backupRoot, update }));
+}
+
+export const codexCapabilities: CapabilityAdapter = { list, launchArgs, setEnabled };
