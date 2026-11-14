@@ -26,13 +26,13 @@ export function ModelEffortPicker({
   onChange,
 }: ModelEffortPickerProps) {
   const [open, setOpen] = useState(false);
+  const [customDraft, setCustomDraft] = useState('');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isOpen = open && !disabled;
 
   useEffect(() => {
     if (openRequest > 0) setOpen(true);
   }, [openRequest]);
-  const [customDraft, setCustomDraft] = useState('');
-  const containerRef = useRef<HTMLDivElement>(null);
-  const isOpen = open && !disabled;
 
   useEffect(() => {
     if (!isOpen) return;

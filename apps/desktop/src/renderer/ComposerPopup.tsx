@@ -41,7 +41,7 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
     <div
       className="composer-popup"
       role="listbox"
-      aria-label={model.kind === 'file' ? 'Arquivos do projeto' : 'Comandos'}
+      aria-label={model.kind === 'file' ? 'Arquivos do projeto' : 'Comandos e skills'}
       ref={listRef}
     >
       {model.loading && model.items.length === 0 ? (

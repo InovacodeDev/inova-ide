@@ -1,5 +1,6 @@
 import { splitLeadingSlash } from '@inova/core/command-prompt';
-import type { NativeSlashCommand } from '@inova/core/slash-commands';
+import { nativeSlashCommands, type NativeSlashCommand } from '@inova/core/slash-commands';
+import type { ProviderId } from '@inova/core/types';
 import type { ProjectCommandView } from '../shared/api';
 
 export type ComposerTrigger =
@@ -133,7 +134,23 @@ export function buildPromptWithAttachedFiles(input: {
     .map(formatFileMention);
   if (prefixTokens.length === 0) return body;
   const prefix = prefixTokens.join(' ');
-  return body === '' ? prefix : `${prefix}\n${body}`;
+  if (body === '') return prefix;
+  const slash = splitLeadingSlash(body);
+  if (slash !== null) {
+    return [`/${slash.name}`, prefix, slash.rest].filter((part) => part !== '').join(' ');
+  }
+  return `${prefix}\n${body}`;
+}
+
+export function nativeActionForSubmit(input: {
+  text: string;
+  provider: ProviderId | null;
+}): NativeSlashCommand | null {
+  if (input.provider === null) return null;
+  const parsed = splitLeadingSlash(input.text.trim());
+  if (parsed === null || parsed.rest !== '') return null;
+  const command = nativeSlashCommands(input.provider).find((item) => item.name === parsed.name);
+  return command !== undefined && command.action !== 'passthrough' ? command : null;
 }
 
 function appendTextSegment(segments: MessageFileSegment[], value: string): void {

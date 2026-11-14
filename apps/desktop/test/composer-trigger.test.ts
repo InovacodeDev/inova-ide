@@ -9,6 +9,7 @@ import {
   filterSlashSuggestions,
   formatFileMention,
   isSameComposerTrigger,
+  nativeActionForSubmit,
   parseLeadingSlashTag,
   parseMessageFileSegments,
   resolveDroppedPath,
@@ -55,6 +56,25 @@ test('applyFileSuggestion replaces @query with @path and trailing space', () => 
     text: 'ver @src/app.ts hoje',
     cursor: 16,
   });
+});
+
+test('buildPromptWithAttachedFiles keeps a leading slash token first', () => {
+  expect(buildPromptWithAttachedFiles({ text: '/review agora', files: ['a.ts', 'b.ts'] })).toBe(
+    '/review @a.ts @b.ts agora',
+  );
+  expect(buildPromptWithAttachedFiles({ text: '/review', files: ['a.ts'] })).toBe('/review @a.ts');
+  expect(buildPromptWithAttachedFiles({ text: 'oi', files: ['a.ts'] })).toBe('@a.ts\noi');
+});
+
+test('nativeActionForSubmit returns only clear and model-picker commands for the exact text', () => {
+  expect(nativeActionForSubmit({ text: ' /clear ', provider: 'claude' })?.name).toBe('clear');
+  expect(nativeActionForSubmit({ text: '/model', provider: 'claude' })?.action).toBe(
+    'model-picker',
+  );
+  expect(nativeActionForSubmit({ text: '/compact', provider: 'claude' })).toBeNull();
+  expect(nativeActionForSubmit({ text: '/clear now', provider: 'claude' })).toBeNull();
+  expect(nativeActionForSubmit({ text: '/clear', provider: 'gemini' })).toBeNull();
+  expect(nativeActionForSubmit({ text: '/clear', provider: null })).toBeNull();
 });
 
 test('filterSlashSuggestions lists provider commands before project commands', () => {

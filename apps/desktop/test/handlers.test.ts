@@ -1795,6 +1795,23 @@ test('sendMessage expands a project command for a codex session but records the 
   );
 });
 
+test('sendMessage expands a codex project command that carries file mentions', async () => {
+  const { root, send, handlers } = await setup();
+  await addAccount({ root, provider: 'codex', label: 'cx' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'cx' });
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  const session = await createSession({ root, projectId: project.id });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill @a.ts arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.join(' ')).toContain('Faça isto: @a.ts arg');
+});
+
 test('sendMessage passes a project command through literally for a claude session', async () => {
   const { root, send, handlers } = await setup();
   const { project, session } = await seedSession(root);

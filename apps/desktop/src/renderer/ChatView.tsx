@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
-import { nativeSlashCommands } from '@inova/core/slash-commands';
+import { nativeSlashCommands, type SlashCommandAction } from '@inova/core/slash-commands';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -35,6 +35,7 @@ import {
   detectComposerTrigger,
   filterSlashSuggestions,
   isSameComposerTrigger,
+  nativeActionForSubmit,
   parseLeadingSlashTag,
   parseMessageFileSegments,
   resolveDroppedPath,
@@ -865,6 +866,11 @@ export function ChatView({
     editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: tag });
   };
 
+  const runNativeAction = (action: SlashCommandAction) => {
+    if (action === 'clear') setConfirmingClear(true);
+    else if (action === 'model-picker') setPickerOpenRequest((current) => current + 1);
+  };
+
   const applySelectedCommand = (suggestion: SlashSuggestion) => {
     const editor = editorRef.current;
     if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
@@ -873,8 +879,7 @@ export function ChatView({
       insertCommandTag(suggestion.command);
     } else {
       editor.clear();
-      if (action === 'clear') setConfirmingClear(true);
-      else setPickerOpenRequest((current) => current + 1);
+      runNativeAction(action);
     }
     commitTrigger(null);
     setActiveIndex(0);
@@ -1031,6 +1036,14 @@ export function ChatView({
   const submit = () => {
     const editor = editorRef.current;
     const markdown = editor === null ? draft : editor.getMarkdown();
+    const nativeAction = nativeActionForSubmit({ text: markdown, provider });
+    if (nativeAction !== null && attachedFiles.length === 0 && !running && !readOnly) {
+      editor?.clear();
+      setDraft('');
+      commitTrigger(null);
+      runNativeAction(nativeAction.action);
+      return;
+    }
     const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });
     if (prompt === '' || running || readOnly) return;
     stickRef.current = true;
