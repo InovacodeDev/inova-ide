@@ -139,6 +139,47 @@ describe('claudeCapabilities.list', () => {
     expect(categories.map((entry) => entry.error !== null)).toEqual([false, false, false, true]);
   });
 
+  it('runs the three commands with the account env, timeout and cwd', async () => {
+    const calls: unknown[] = [];
+    const base = contextWith();
+    const recording: CommandRunner = {
+      run: (cmd) => {
+        calls.push(cmd);
+        return base.runner.run(cmd);
+      },
+    };
+    await claudeCapabilities.list({
+      ...base,
+      runner: recording,
+      env: { A: '1' },
+      projectPath: '/p',
+    });
+    const common = { command: 'claude', env: { A: '1' }, timeoutMs: 30_000 };
+    expect(calls).toEqual([
+      {
+        ...common,
+        args: ['-p', '--output-format', 'json', '--no-session-persistence', '--', '/context'],
+        cwd: '/p',
+      },
+      { ...common, args: ['mcp', 'list'], cwd: undefined },
+      { ...common, args: ['plugin', 'list', '--json'], cwd: undefined },
+    ]);
+  });
+
+  it('derives enabled from the account disabled list', async () => {
+    const disabledCtx = contextWith();
+    disabledCtx.account.disabledCapabilities = [
+      { kind: 'connector', id: 'claude.ai Gmail' },
+      { kind: 'skill', id: 'dataviz' },
+      { kind: 'mcp', id: 'graft' },
+    ];
+    const { categories } = await claudeCapabilities.list(disabledCtx);
+    const disabledIds = categories.flatMap((entry) =>
+      entry.items.filter((item) => !item.enabled).map((item) => item.id),
+    );
+    expect(disabledIds.sort()).toEqual(['claude.ai Gmail', 'dataviz', 'graft']);
+  });
+
   it('marks connectors disabled by the wildcard', async () => {
     const wildcard = contextWith();
     wildcard.account.disabledCapabilities = [{ kind: 'connector', id: '*' }];
