@@ -1,8 +1,25 @@
-import type { UpdateInfo } from '../shared/api';
+import type { UpdateInfo, UpdateInstallStage } from '../shared/api';
 
 export const UPDATE_DISMISSED_KEY = 'inova.update.dismissed';
 export const LAST_SEEN_VERSION_KEY = 'inova.lastSeenVersion';
 export const UPGRADE_COMMAND = 'brew update && brew upgrade --cask inova-ide';
+
+export interface InstallStageView {
+  label: string;
+  percent: number;
+}
+
+const INSTALL_STAGES: Record<UpdateInstallStage, InstallStageView> = {
+  preparing: { label: 'Preparando a atualização…', percent: 5 },
+  fetching: { label: 'Atualizando o Homebrew…', percent: 15 },
+  downloading: { label: 'Baixando e instalando a versão nova…', percent: 35 },
+  finalizing: { label: 'Finalizando a instalação…', percent: 90 },
+  restarting: { label: 'Reiniciando o Inova…', percent: 100 },
+};
+
+export function installStageView(stage: UpdateInstallStage | null): InstallStageView {
+  return stage === null ? { label: 'Iniciando…', percent: 0 } : INSTALL_STAGES[stage];
+}
 
 export function isUpdateDismissed(input: { dismissed: string | null; latest: string | null }) {
   return input.latest !== null && input.dismissed === input.latest;

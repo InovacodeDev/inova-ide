@@ -267,6 +267,7 @@ void app.whenReady().then(async () => {
         app.relaunch();
         app.quit();
       },
+      onProgress: (stage) => sendToWindow(CHANNELS.updateProgress, stage),
     });
     const created = createHandlers({
       root: dataRoot(process.env),

@@ -35,6 +35,7 @@ const api: InovaApi = {
   installUpdate: () => ipcRenderer.invoke(CHANNELS.installUpdate),
   openExternalUrl: (input) => ipcRenderer.invoke(CHANNELS.openExternalUrl, input),
   onUpdateAvailable: (callback) => subscribe(CHANNELS.updateAvailable, callback),
+  onUpdateProgress: (callback) => subscribe(CHANNELS.updateProgress, callback),
   deleteSession: (input) => ipcRenderer.invoke(CHANNELS.deleteSession, input),
   getWorktreeStatus: (input) => ipcRenderer.invoke(CHANNELS.getWorktreeStatus, input),
   applyWorktree: (input) => ipcRenderer.invoke(CHANNELS.applyWorktree, input),

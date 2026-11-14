@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { UpdateInfo } from '../shared/api';
+import type { UpdateInfo, UpdateInstallStage } from '../shared/api';
 import {
   LAST_SEEN_VERSION_KEY,
   UPDATE_DISMISSED_KEY,
@@ -11,6 +11,7 @@ import type { WarningCall } from './useWarning';
 export function useUpdates(call: WarningCall) {
   const [version, setVersion] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [installStage, setInstallStage] = useState<UpdateInstallStage | null>(null);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(UPDATE_DISMISSED_KEY));
   const [changelog, setChangelog] = useState<{ whatsNew: boolean } | null>(null);
@@ -28,10 +29,12 @@ export function useUpdates(call: WarningCall) {
     void window.inova.checkForUpdate().then((result) => {
       if (active && result.ok) setInfo(result.value);
     });
-    const unsubscribe = window.inova.onUpdateAvailable(setInfo);
+    const unsubscribeAvailable = window.inova.onUpdateAvailable(setInfo);
+    const unsubscribeProgress = window.inova.onUpdateProgress(setInstallStage);
     return () => {
       active = false;
-      unsubscribe();
+      unsubscribeAvailable();
+      unsubscribeProgress();
     };
   }, []);
 
@@ -43,14 +46,19 @@ export function useUpdates(call: WarningCall) {
 
   const install = useCallback(async () => {
     setInstalling(true);
+    setInstallStage(null);
     const result = await call(() => window.inova.installUpdate());
-    if (!result) setInstalling(false);
+    if (!result) {
+      setInstalling(false);
+      setInstallStage(null);
+    }
   }, [call]);
 
   return {
     version,
     info,
     installing,
+    installStage,
     install,
     updateAvailable: info?.available === true,
     toastVisible: shouldShowUpdateToast({ info, dismissed }),

@@ -1,4 +1,4 @@
-import type { Result, UpdateInfo } from '../shared/api.js';
+import type { Result, UpdateInfo, UpdateInstallStage } from '../shared/api.js';
 import { compareVersions, fetchUpdateInfo } from './updates-core.js';
 import type { FetchLike } from './updates-core.js';
 import { fail, ok } from './validation.js';
@@ -61,6 +61,7 @@ export interface UpdateInstallerDeps {
   run: (file: string, args: string[]) => Promise<void>;
   readBundleVersion: (bundle: string) => Promise<string>;
   relaunch: () => void;
+  onProgress: (stage: UpdateInstallStage) => void;
 }
 
 export function appBundlePath(execPath: string): string | null {
@@ -75,14 +76,18 @@ export function createUpdateInstaller(deps: UpdateInstallerDeps) {
     if (deps.platform !== 'darwin' || !deps.isPackaged || bundle === null) {
       return fail('A atualização automática só funciona no app instalado no macOS.');
     }
+    deps.onProgress('preparing');
     const brew = await deps.findBrew();
     if (brew === undefined) {
       return fail('Homebrew não encontrado. Instale a atualização pelo terminal.');
     }
     let installed: string;
     try {
+      deps.onProgress('fetching');
       await deps.run(brew, ['update']);
+      deps.onProgress('downloading');
       await deps.run(brew, ['upgrade', '--cask', CASK_NAME]);
+      deps.onProgress('finalizing');
       await deps.run(XATTR_PATH, ['-dr', 'com.apple.quarantine', bundle]);
       installed = await deps.readBundleVersion(bundle);
     } catch (error: unknown) {
@@ -95,6 +100,7 @@ export function createUpdateInstaller(deps: UpdateInstallerDeps) {
     if (compareVersions(installed, deps.current) <= 0) {
       return fail('A versão nova ainda não chegou ao Homebrew. Tente de novo em alguns minutos.');
     }
+    deps.onProgress('restarting');
     deps.relaunch();
     return ok(null);
   }

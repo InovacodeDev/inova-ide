@@ -46,6 +46,7 @@ import { isAccountBusyElsewhere } from './queue-state';
 import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
+import { UpdateProgress } from './UpdateProgress';
 import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
 import { refreshableUsageLabels, settleUsage, USAGE_REFRESH_INTERVAL_MS } from './usage-refresh';
@@ -1482,8 +1483,11 @@ export function App() {
         updateAvailable={updates.updateAvailable}
         onOpenChangelog={updates.openChangelog}
       />
-      {updates.toastVisible && updates.info && (
-        <UpdateToast info={updates.info} onDismiss={updates.dismissToast} />
+      {updates.installing ? (
+        <UpdateProgress latest={updates.info?.latest ?? null} stage={updates.installStage} />
+      ) : (
+        updates.toastVisible &&
+        updates.info && <UpdateToast info={updates.info} onDismiss={updates.dismissToast} />
       )}
       {updates.changelog && (
         <ChangelogModal

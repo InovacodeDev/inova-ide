@@ -150,6 +150,7 @@ function installerDeps(overrides: Partial<UpdateInstallerDeps> = {}): UpdateInst
     run: vi.fn(async () => undefined),
     readBundleVersion: vi.fn(async () => '0.5.6'),
     relaunch: vi.fn(),
+    onProgress: vi.fn(),
     ...overrides,
   };
 }
@@ -173,6 +174,47 @@ describe('createUpdateInstaller', () => {
       ['/usr/bin/xattr', ['-dr', 'com.apple.quarantine', '/Applications/InovaIDE.app']],
     ]);
     expect(deps.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  test('reports each install stage before the step runs', async () => {
+    const order: string[] = [];
+    const deps = installerDeps({
+      run: vi.fn(async (_file: string, args: string[]) => {
+        order.push(`run:${args[0] ?? ''}`);
+      }),
+      onProgress: vi.fn((stage) => {
+        order.push(stage);
+      }),
+      relaunch: vi.fn(() => {
+        order.push('relaunch');
+      }),
+    });
+    await createUpdateInstaller(deps).install();
+    expect(order).toEqual([
+      'preparing',
+      'fetching',
+      'run:update',
+      'downloading',
+      'run:upgrade',
+      'finalizing',
+      'run:-dr',
+      'restarting',
+      'relaunch',
+    ]);
+  });
+
+  test('stops reporting progress when a step fails', async () => {
+    const deps = installerDeps({
+      run: vi.fn(async (_file: string, args: string[]) => {
+        if (args[0] === 'upgrade') throw new Error('brew exited with 1');
+      }),
+    });
+    await createUpdateInstaller(deps).install();
+    expect(vi.mocked(deps.onProgress).mock.calls.map(([stage]) => stage)).toEqual([
+      'preparing',
+      'fetching',
+      'downloading',
+    ]);
   });
 
   test('refuses outside a packaged macOS app', async () => {

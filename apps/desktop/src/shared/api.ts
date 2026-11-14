@@ -79,6 +79,9 @@ export interface UpdateInfo {
   releaseUrl: string | null;
 }
 
+export type UpdateInstallStage =
+  'preparing' | 'fetching' | 'downloading' | 'finalizing' | 'restarting';
+
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
 export type AccountStatus = AuthStatus | 'expired';
@@ -180,6 +183,7 @@ export interface InovaApi {
   installUpdate(): Promise<Result<null>>;
   openExternalUrl(input: { url: string }): Promise<Result<null>>;
   onUpdateAvailable(cb: (info: UpdateInfo) => void): () => void;
+  onUpdateProgress(cb: (stage: UpdateInstallStage) => void): () => void;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
   getWorktreeStatus(input: { sessionId: string }): Promise<Result<WorktreeStatusView>>;
   applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
@@ -335,6 +339,7 @@ export const CHANNELS = {
   installUpdate: 'inova:installUpdate',
   openExternalUrl: 'inova:openExternalUrl',
   updateAvailable: 'inova:update:available',
+  updateProgress: 'inova:update:progress',
   deleteSession: 'inova:deleteSession',
   getWorktreeStatus: 'inova:getWorktreeStatus',
   applyWorktree: 'inova:applyWorktree',

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { UpdateInfo } from '../src/shared/api';
 import {
   changelogTitle,
+  installStageView,
   isUpdateDismissed,
   publishedChangelog,
   shouldShowUpdateToast,
@@ -92,5 +93,20 @@ describe('publishedChangelog', () => {
   test('keeps text without an unreleased section', () => {
     const source = '# Changelog\n\n## [0.5.1]\n\n- A.\n';
     expect(publishedChangelog(source)).toBe(source);
+  });
+});
+
+describe('installStageView', () => {
+  test('starts empty before the first stage arrives', () => {
+    expect(installStageView(null).percent).toBe(0);
+  });
+
+  test('advances monotonically through the install stages', () => {
+    const percents = (
+      ['preparing', 'fetching', 'downloading', 'finalizing', 'restarting'] as const
+    ).map((stage) => installStageView(stage).percent);
+    expect(percents).toEqual([...percents].sort((a, b) => a - b));
+    expect(new Set(percents).size).toBe(percents.length);
+    expect(percents.at(-1)).toBe(100);
   });
 });

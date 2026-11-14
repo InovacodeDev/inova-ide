@@ -46,6 +46,62 @@
   gap: 6px;
 }
 
+.update-progress {
+  width: min(360px, calc(100vw - 32px));
+}
+
+.update-progress-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  overflow: hidden;
+}
+
+.update-progress-fill {
+  position: relative;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  overflow: hidden;
+  transition: width 0.6s ease-out;
+}
+
+.update-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: update-progress-shimmer 1.4s ease-in-out infinite;
+}
+
+.update-progress-hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@keyframes update-progress-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-progress-fill {
+    transition: none;
+  }
+
+  .update-progress-fill::after {
+    animation: none;
+  }
+}
+
 .changelog-card {
   width: min(640px, 100%);
   max-height: min(720px, 90vh);

@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Ao clicar em "Reiniciar para atualizar", um cartão com barra de progresso mostra cada etapa da instalação (preparar, atualizar o Homebrew, baixar e instalar, finalizar, reiniciar).
+
 ## [0.6.1] - 2026-11-14
 
 ### Adicionado
