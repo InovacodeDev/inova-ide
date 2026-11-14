@@ -1,14 +1,5 @@
 import { execFile } from 'node:child_process';
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -1452,18 +1443,22 @@ test('rewindSession rejects an unknown turn and invalid input without side effec
 
 test('rewindSession leaves state intact when checkpoint restore throws', async () => {
   const { root, handlers } = await setup();
-  const { repoDir, session } = await seedRewindSession(root, handlers);
-  const lockedDir = join(repoDir, 'locked');
-  await mkdir(lockedDir);
-  await writeFile(join(lockedDir, 'stray.txt'), 'x');
-  await chmod(lockedDir, 0o500);
+  const { repoDir, session, refs } = await seedRewindSession(root, handlers);
+  const exec = promisify(execFile);
+  const commitFile = join(await tmp(), 'broken-commit');
+  await writeFile(
+    commitFile,
+    `tree ${'1'.repeat(40)}\nauthor T <t@inova.dev> 0 +0000\ncommitter T <t@inova.dev> 0 +0000\n\nbroken\n`,
+  );
+  const { stdout: brokenCommit } = await exec(
+    'git',
+    ['hash-object', '-t', 'commit', '-w', '--literally', commitFile],
+    { cwd: repoDir },
+  );
+  await exec('git', ['update-ref', refs[1] ?? '', brokenCommit.trim()], { cwd: repoDir });
   const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
 
-  try {
-    await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 1 })).rejects.toThrow();
-  } finally {
-    await chmod(lockedDir, 0o700);
-  }
+  await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 1 })).rejects.toThrow();
 
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
   const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
