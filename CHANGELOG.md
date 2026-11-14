@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-11-14
+
 ### Adicionado
 
 - Botão "Reiniciar para atualizar" no topo, ao lado da engrenagem, quando há versão nova. Ele instala a atualização pelo Homebrew e reinicia o app na versão nova. Se houver sessão executando, o app pede confirmação antes.
