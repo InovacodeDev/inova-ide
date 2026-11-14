@@ -1,6 +1,19 @@
-import type { CapabilityAdapter, CapabilityListing, CapabilityRef } from './types.js';
+import type { ContextBreakdown } from '../chat-types.js';
+import { parseClaudeContextOutput } from '../context-report.js';
+import type { CommandRunner } from '../providers.js';
+import type {
+  CapabilityAdapter,
+  CapabilityContext,
+  CapabilityItem,
+  CapabilityListing,
+  CapabilityRef,
+} from './types.js';
 
+const COMMAND_TIMEOUT_MS = 30_000;
+const CONNECTOR_PREFIX = 'claude.ai ';
 const ALL_CONNECTORS_ID = '*';
+// REGEX: "<name>: <command or url> - <status>" from `claude mcp list`; the name ends at the first ": "
+const MCP_LINE_PATTERN = /^(.+?): .+ - .+$/;
 
 export function normalizeMcpName(name: string): string {
   return name.replaceAll(/[^A-Za-z0-9_-]/g, '_');
@@ -10,8 +23,94 @@ function isDisabled(disabled: readonly CapabilityRef[], ref: CapabilityRef): boo
   return disabled.some((entry) => entry.kind === ref.kind && entry.id === ref.id);
 }
 
-function list(): Promise<CapabilityListing> {
-  return Promise.reject(new Error('Claude capability listing is not implemented.'));
+function parseMcpNames(stdout: string): string[] {
+  return stdout.split('\n').flatMap((line) => {
+    const match = MCP_LINE_PATTERN.exec(line.trim());
+    return match?.[1] === undefined ? [] : [match[1]];
+  });
+}
+
+function serverTokens(breakdown: ContextBreakdown): Map<string, number> {
+  const totals = new Map<string, number>();
+  const section = breakdown.sections.find((entry) => entry.title === 'MCP Tools');
+  for (const row of section?.rows ?? []) {
+    const server = row.cells[1];
+    if (server === undefined || row.tokens === null) continue;
+    totals.set(server, (totals.get(server) ?? 0) + row.tokens);
+  }
+  return totals;
+}
+
+function serverItems(input: {
+  names: readonly string[];
+  tokens: Map<string, number> | null;
+  disabled: readonly CapabilityRef[];
+}): { mcp: CapabilityItem[]; connectors: CapabilityItem[] } {
+  const allConnectorsOff = isDisabled(input.disabled, {
+    kind: 'connector',
+    id: ALL_CONNECTORS_ID,
+  });
+  const mcp: CapabilityItem[] = [];
+  const connectors: CapabilityItem[] = [];
+  for (const name of input.names) {
+    const isConnector = name.startsWith(CONNECTOR_PREFIX);
+    const kind = isConnector ? 'connector' : 'mcp';
+    const tokens = input.tokens?.get(normalizeMcpName(name)) ?? null;
+    const item: CapabilityItem = {
+      kind,
+      id: name,
+      name,
+      description: null,
+      source: isConnector ? 'connector' : 'user',
+      enabled:
+        !(isConnector && allConnectorsOff) && !isDisabled(input.disabled, { kind, id: name }),
+      applyMode: 'launch',
+      unsupportedReason: null,
+      tokens,
+      group: null,
+    };
+    (isConnector ? connectors : mcp).push(item);
+  }
+  return { mcp, connectors };
+}
+
+function runClaude(
+  ctx: CapabilityContext,
+  command: { args: string[]; cwd?: string },
+): ReturnType<CommandRunner['run']> {
+  return ctx.runner.run({
+    command: 'claude',
+    args: command.args,
+    env: ctx.env,
+    cwd: command.cwd,
+    timeoutMs: COMMAND_TIMEOUT_MS,
+  });
+}
+
+async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
+  const [context, mcp] = await Promise.all([
+    runClaude(ctx, {
+      args: ['-p', '--output-format', 'json', '--no-session-persistence', '--', '/context'],
+      cwd: ctx.projectPath ?? ctx.account.homeDir,
+    }),
+    runClaude(ctx, { args: ['mcp', 'list'] }),
+  ]);
+  const breakdown =
+    'exitCode' in context && context.exitCode === 0
+      ? parseClaudeContextOutput(context.stdout)
+      : null;
+  const servers = serverItems({
+    names: 'exitCode' in mcp ? parseMcpNames(mcp.stdout) : [],
+    tokens: breakdown === null ? null : serverTokens(breakdown),
+    disabled: ctx.account.disabledCapabilities ?? [],
+  });
+  return {
+    categories: [
+      { kind: 'mcp', items: servers.mcp, error: null },
+      { kind: 'connector', items: servers.connectors, error: null },
+    ],
+    cost: null,
+  };
 }
 
 function launchArgs(disabled: readonly CapabilityRef[]): string[] {

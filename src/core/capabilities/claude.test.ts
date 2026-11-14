@@ -1,6 +1,51 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { CommandRunner } from '../providers.js';
 import { claudeCapabilities, normalizeMcpName } from './claude.js';
 import type { CapabilityContext } from './types.js';
+
+function fixture(name: string): string {
+  return readFileSync(new URL(`../fixtures/capabilities/${name}`, import.meta.url), 'utf8');
+}
+const runner: CommandRunner = {
+  run: async (cmd) => ({
+    exitCode: 0,
+    stdout: cmd.args.includes('/context')
+      ? JSON.stringify({ result: fixture('claude-context.md') })
+      : fixture('claude-mcp-list.txt'),
+  }),
+};
+
+const ctx: CapabilityContext = {
+  account: {
+    id: 'acc-1',
+    provider: 'claude',
+    label: 'Claude',
+    homeDir: '/home/acc',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+  runner,
+  env: {},
+  projectPath: null,
+  backupRoot: '/tmp/backups',
+};
+
+describe('claudeCapabilities.list', () => {
+  it('lists connectors and MCP servers with summed tokens', async () => {
+    const { categories } = await claudeCapabilities.list(ctx);
+    const tokensOf = (kind: string): unknown[] =>
+      (categories.find((entry) => entry.kind === kind)?.items ?? []).map((item) => [
+        item.id,
+        item.tokens,
+      ]);
+    expect(tokensOf('connector')).toEqual([
+      ['claude.ai Claude Docs', 383],
+      ['claude.ai Gmail', 6041],
+      ['claude.ai Slack', null],
+    ]);
+    expect(tokensOf('mcp')).toEqual([['graft', 800]]);
+  });
+});
 
 describe('normalizeMcpName', () => {
   it('replaces characters outside [A-Za-z0-9_-]', () => {
