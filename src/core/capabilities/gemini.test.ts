@@ -113,8 +113,49 @@ describe('geminiCapabilities.list', () => {
   });
 });
 
-describe('geminiCapabilities.launchArgs', () => {
-  it('is empty', () => {
+describe('geminiCapabilities.setEnabled', () => {
+  it('runs agy mcp disable with the account env', async () => {
+    const calls: Call[] = [];
+    const ctx = contextWith({ calls });
+    await geminiCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'rea' }, enabled: false });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe('agy');
+    expect(calls[0]?.args).toEqual(['mcp', 'disable', 'rea']);
+    expect(calls[0]?.env?.['HOME']).toBe('/nonexistent/acc');
+  });
+
+  it('runs agy plugin enable', async () => {
+    const calls: Call[] = [];
+    const ctx = contextWith({ calls });
+    await geminiCapabilities.setEnabled({
+      ctx,
+      ref: { kind: 'plugin', id: 'dummyplug' },
+      enabled: true,
+    });
+    expect(calls[0]?.args).toEqual(['plugin', 'enable', 'dummyplug']);
+  });
+
+  it('throws a Portuguese error on non-zero exit', async () => {
+    const ctx = contextWith({ overrides: { mcp: { exitCode: 1, stdout: '' } } });
+    await expect(
+      geminiCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'rea' }, enabled: false }),
+    ).rejects.toThrow('Falha ao desligar rea.');
+    await expect(
+      geminiCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'rea' }, enabled: true }),
+    ).rejects.toThrow('Falha ao ligar rea.');
+  });
+
+  it('rejects skills, which follow their plugin', async () => {
+    await expect(
+      geminiCapabilities.setEnabled({
+        ctx: contextWith({}),
+        ref: { kind: 'skill', id: 'dummyplug:hello' },
+        enabled: false,
+      }),
+    ).rejects.toThrow('Desligue o plugin');
+  });
+
+  it('launchArgs is empty', () => {
     expect(geminiCapabilities.launchArgs([{ kind: 'mcp', id: 'rea' }])).toEqual([]);
   });
 });

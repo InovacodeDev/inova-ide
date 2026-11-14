@@ -1,4 +1,5 @@
 import type { CommandRunner } from '../providers.js';
+import { serialize } from './file-edit.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -150,9 +151,22 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   };
 }
 
+async function setEnabled(input: SetEnabledInput): Promise<void> {
+  const { ctx, ref, enabled } = input;
+  if (ref.kind !== 'mcp' && ref.kind !== 'plugin') {
+    throw new Error(`Desligue o plugin que contém ${ref.id}.`);
+  }
+  const result = await serialize(`agy:${ctx.account.id}`, () =>
+    runAgy(ctx, [ref.kind, enabled ? 'enable' : 'disable', ref.id]),
+  );
+  if (!('exitCode' in result)) throw new Error(NOT_FOUND_MESSAGE);
+  if (result.exitCode !== 0) {
+    throw new Error(`Falha ao ${enabled ? 'ligar' : 'desligar'} ${ref.id}.`);
+  }
+}
+
 export const geminiCapabilities: CapabilityAdapter = {
   list,
   launchArgs: () => [],
-  setEnabled: (input: SetEnabledInput) =>
-    Promise.reject(new Error(`Falha ao desligar ${input.ref.id}.`)),
+  setEnabled,
 };
