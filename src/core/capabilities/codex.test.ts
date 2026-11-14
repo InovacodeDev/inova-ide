@@ -59,6 +59,19 @@ describe('codexCapabilities.list', () => {
       ['search', false, 'launch'],
     ]);
   });
+
+  it('reports a failing or unparsable command in the category', async () => {
+    const failed = contextWith({ overrides: { mcp: { exitCode: 1, stdout: '' } } });
+    const garbage = contextWith({ overrides: { mcp: { exitCode: 0, stdout: 'not json' } } });
+    const message = 'Não foi possível listar os servidores MCP do Codex.';
+    expect((await categoryOf(failed, 'mcp'))?.error).toBe(message);
+    expect((await categoryOf(garbage, 'mcp'))?.error).toBe(message);
+  });
+
+  it('reports not found when the binary is missing', async () => {
+    const ctx = contextWith({ overrides: { mcp: { notFound: true } } });
+    expect((await categoryOf(ctx, 'mcp'))?.error).toBe('codex não encontrado.');
+  });
 });
 
 describe('codexCapabilities.launchArgs', () => {
