@@ -51,6 +51,8 @@ async function setup(
   const inUse = new Set<string>();
   const running = new Set<string>();
   const chatInUse = new Set<string>();
+  const idleListeners: ((accountId: string) => void)[] = [];
+  const pausedSnapshots: string[][] = [];
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
   const loginEvents: LoginEvent[] = [];
   const send = vi.fn<ChatRunner['send']>();
@@ -60,6 +62,10 @@ async function setup(
     cancel,
     isRunning: (sessionId) => running.has(sessionId),
     accountsInUse: () => chatInUse,
+    onAccountIdle: (listener) => {
+      idleListeners.push(listener);
+      return () => undefined;
+    },
     closeAll: vi.fn(),
   };
   const fetch = vi.fn<UsageDeps['fetch']>();
@@ -104,6 +110,7 @@ async function setup(
     },
     emit: (sessionId, event) => emitted.push({ sessionId, event }),
     emitLogin: (event) => loginEvents.push(event),
+    emitQueuePaused: (sessionIds) => pausedSnapshots.push(sessionIds),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
     pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
@@ -118,6 +125,8 @@ async function setup(
     inUse,
     running,
     chatInUse,
+    idleListeners,
+    pausedSnapshots,
     emitted,
     loginEvents,
     send,
@@ -1228,6 +1237,126 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
   expect(afterRead.find((item) => item.sessionId === s1.id)?.unread).toBe(false);
   const afterClear = unwrap(await handlers.clearReadInbox());
   expect(afterClear.some((item) => item.sessionId === s1.id)).toBe(false);
+});
+
+const OK_DONE = { kind: 'done', isError: false, costUsd: null, durationMs: 1 } as const;
+const ERROR_DONE = { kind: 'done', isError: true, costUsd: null, durationMs: 1 } as const;
+const settle = () => new Promise((resolve) => setTimeout(resolve, 80));
+
+async function startQueuedSession() {
+  const ctx = await setup();
+  const { project, session } = await seedSession(ctx.root);
+  const accountId = (await loadStore(ctx.root)).accounts[0]!.id;
+  unwrap(await ctx.handlers.sendMessage({ sessionId: session.id, prompt: 'Primeiro' }));
+  ctx.chatInUse.add(accountId);
+  return { ...ctx, project, session, accountId };
+}
+
+test('session queue sends one item after each successful final output', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Terceiro' }));
+  expect(send).toHaveBeenCalledTimes(1);
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+
+  chatInUse.add(accountId);
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(3);
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(0);
+});
+
+test('session queue pauses after an error done and resumes on request', async () => {
+  const { handlers, send, chatInUse, session, accountId, pausedSnapshots } =
+    await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await settle();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+  expect(pausedSnapshots.at(-1)).toEqual([]);
+});
+
+test('session queue pauses after a cancelled turn and ignores empty queues', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.cancelTurn(session.id);
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+});
+
+test('session queue does not pause when an error done leaves the queue empty', async () => {
+  const { handlers, chatInUse, session, accountId } = await startQueuedSession();
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('account idle does not drain a paused session but drains others', async () => {
+  const { handlers, send, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Pausada' }));
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(1);
+
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Livre' }));
+  await settle();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(other.id);
+  expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([
+    session.id,
+  ]);
+});
+
+test('deleting a session clears its queue pause', async () => {
+  const { handlers, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  unwrap(await handlers.deleteSession({ sessionId: session.id, force: true }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('queued turn passes its extra directories to the claude args', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(
+    await handlers.enqueueTurn({
+      sessionId: session.id,
+      prompt: '@/Users/me/Downloads/doc.pdf resuma',
+      extraDirs: ['/Users/me/Downloads'],
+    }),
+  );
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await settle();
+  const args = send.mock.calls[1]?.[0]?.spec.args ?? [];
+  expect(args[args.indexOf('--add-dir') + 1]).toBe('/Users/me/Downloads');
 });
 
 test('switchSessionAccount, handoffSession, and forkSession preserve context across turns and providers', async () => {

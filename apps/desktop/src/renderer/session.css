@@ -56,6 +56,19 @@
   background: var(--accent);
 }
 
+.tab-bar-queue {
+  flex: none;
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+}
+
 .tab-bar-close {
   flex: none;
 }

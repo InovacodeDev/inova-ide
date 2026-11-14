@@ -70,6 +70,7 @@ import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
 import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
+import { queueCountLabel, queuedCardLabel } from './queue-state';
 import {
   agentTurnFooters,
   groupChatItems,
@@ -107,6 +108,8 @@ export interface ChatViewProps {
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
+  queuePaused?: boolean;
+  queueWaitingForAccount?: boolean;
   busyConflict?: { prompt: string; exhausted: boolean; message?: string } | null;
   alternativeAccounts?: readonly AccountView[];
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
@@ -120,7 +123,8 @@ export interface ChatViewProps {
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
-  onEnqueuePrompt?: (prompt: string) => void;
+  onEnqueuePrompt?: (input: { prompt: string; extraDirs?: string[] }) => void;
+  onResumeQueue?: () => void;
   onCancelQueuedTurn?: (turnId: string) => void;
   onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
   onDismissBusyConflict?: () => void;
@@ -649,6 +653,8 @@ export function ChatView({
   catalog,
   readOnly = false,
   queuedTurns = [],
+  queuePaused = false,
+  queueWaitingForAccount = false,
   busyConflict = null,
   alternativeAccounts = [],
   onChangeModelConfig,
@@ -663,6 +669,7 @@ export function ChatView({
   onWarn,
   onOpenHandoff,
   onEnqueuePrompt,
+  onResumeQueue,
   onCancelQueuedTurn,
   onSwitchAccountAndRetry,
   onDismissBusyConflict,
@@ -1055,9 +1062,14 @@ export function ChatView({
       return;
     }
     const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });
-    if (prompt === '' || running || readOnly) return;
-    stickRef.current = true;
-    onSend(prompt, grantedDirs);
+    if (prompt === '' || readOnly) return;
+    if (running) {
+      if (nativeAction !== null || !onEnqueuePrompt) return;
+      onEnqueuePrompt({ prompt, extraDirs: grantedDirs });
+    } else {
+      stickRef.current = true;
+      onSend(prompt, grantedDirs);
+    }
     editor?.clear();
     setDraft('');
     setAttachedFiles([]);
@@ -1172,7 +1184,7 @@ export function ChatView({
                 <div className="chat-queued-head">
                   <span className="chat-queued-label">
                     <ClockIcon size={13} />
-                    Na fila — aguardando conta ficar livre
+                    {queuedCardLabel(queueWaitingForAccount)}
                   </span>
                   {onCancelQueuedTurn ? (
                     <button
@@ -1202,6 +1214,23 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {queuedTurns.length > 0 ? (
+          <div
+            className={
+              queuePaused ? 'chat-queue-strip chat-queue-strip-paused' : 'chat-queue-strip'
+            }
+          >
+            <span>
+              {queueCountLabel(queuedTurns.length)}
+              {queuePaused ? ' · Fila pausada' : ''}
+            </span>
+            {queuePaused && onResumeQueue ? (
+              <button type="button" className="btn btn-sm" onClick={onResumeQueue}>
+                Retomar fila
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {busyConflict ? (
           <div className="chat-busy-banner" role="alert">
             <div className="chat-busy-text">
@@ -1215,7 +1244,7 @@ export function ChatView({
                   type="button"
                   className="btn btn-sm btn-primary"
                   data-tooltip="Enviar este turno quando a conta ficar livre"
-                  onClick={() => onEnqueuePrompt(busyConflict.prompt)}
+                  onClick={() => onEnqueuePrompt({ prompt: busyConflict.prompt })}
                 >
                   Enfileirar turno
                 </button>
@@ -1343,12 +1372,13 @@ export function ChatView({
               >
                 <StopFilledIcon size={12} />
               </button>
-            ) : (
+            ) : null}
+            {running && !onEnqueuePrompt ? null : (
               <button
                 type="button"
                 className="chat-send"
-                aria-label="Enviar mensagem"
-                data-tooltip="Enviar mensagem"
+                aria-label={running ? 'Adicionar à fila' : 'Enviar mensagem'}
+                data-tooltip={running ? 'Adicionar à fila' : 'Enviar mensagem'}
                 data-shortcut-text="Enter"
                 disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}

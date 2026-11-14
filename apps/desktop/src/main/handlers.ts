@@ -160,6 +160,7 @@ export interface HandlerDeps {
   emitLogin?: (event: LoginEvent) => void;
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
+  emitQueuePaused?: (sessionIds: string[]) => void;
   notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
   openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
@@ -277,6 +278,8 @@ export function createHandlers(deps: HandlerDeps) {
   const cancelledTurns = new Set<string>();
   const verificationControllers = new Map<string, AbortController>();
   const turnQueue = createTurnQueue();
+  const pausedQueues = new Set<string>();
+  const preferredQueueSession = new Map<string, string>();
   const inboxMap = new Map<string, InboxItem>();
   const lastErrorBySession = new Map<string, string>();
   const exhaustedAccounts = new Map<string, string | null>();
@@ -347,6 +350,13 @@ export function createHandlers(deps: HandlerDeps) {
 
   function emitQueueSnapshot(): void {
     deps.emitQueue?.(turnQueue.list());
+  }
+
+  function setQueuePaused(input: { sessionId: string; paused: boolean }): void {
+    if (pausedQueues.has(input.sessionId) === input.paused) return;
+    if (input.paused) pausedQueues.add(input.sessionId);
+    else pausedQueues.delete(input.sessionId);
+    deps.emitQueuePaused?.([...pausedQueues]);
   }
 
   function exhaustionEntry(accountId: string): { resetsAt: string | null } | null {
@@ -463,6 +473,7 @@ export function createHandlers(deps: HandlerDeps) {
       lastErrorBySession.delete(id);
       sessionProjects.delete(id);
       turnQueue.cancelBySession(id);
+      setQueuePaused({ sessionId: id, paused: false });
     }
     emitQueueSnapshot();
     const deleteWork = inboxChain.then(() => {
@@ -479,7 +490,12 @@ export function createHandlers(deps: HandlerDeps) {
 
   async function drainAccountQueue(accountId: string): Promise<void> {
     if (deps.chat.accountsInUse().has(accountId) || isAccountExhausted(accountId)) return;
-    const next = turnQueue.dequeueNext(accountId);
+    const preferred = preferredQueueSession.get(accountId);
+    preferredQueueSession.delete(accountId);
+    const next =
+      (preferred !== undefined && !pausedQueues.has(preferred)
+        ? turnQueue.dequeueNextForSession(preferred)
+        : undefined) ?? turnQueue.dequeueNext(accountId, { skipSessions: pausedQueues });
     if (!next) return;
     emitQueueSnapshot();
     const store = await loadStore(deps.root);
@@ -517,6 +533,7 @@ export function createHandlers(deps: HandlerDeps) {
         project,
         file,
         baseEnv,
+        ...(next.extraDirs ? { extraDirs: next.extraDirs } : {}),
       });
     });
   }
@@ -750,6 +767,13 @@ export function createHandlers(deps: HandlerDeps) {
       const lastError = lastErrorBySession.get(sessionId);
       lastErrorBySession.delete(sessionId);
       invalidateProjectFiles(sessionId);
+      const hasQueued = turnQueue.forSession(sessionId).length > 0;
+      if (event.isError || wasCancelled) {
+        if (hasQueued) setQueuePaused({ sessionId, paused: true });
+      } else {
+        setQueuePaused({ sessionId, paused: false });
+        if (owner && hasQueued) preferredQueueSession.set(owner.accountId, sessionId);
+      }
       if (event.isError && !wasCancelled) {
         const rateLimited = lastError ? isRateLimitMessage(lastError) : false;
         enqueueInboxUpdate({
@@ -1401,7 +1425,7 @@ export function createHandlers(deps: HandlerDeps) {
         });
       }),
     enqueueTurn: (input: unknown): Promise<Result<QueuedTurn>> =>
-      validated(input, parseMessage, async ({ sessionId, prompt }) => {
+      validated(input, parseMessage, async ({ sessionId, prompt, extraDirs }) => {
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
         if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
@@ -1410,7 +1434,12 @@ export function createHandlers(deps: HandlerDeps) {
           ? resolveSessionAccount({ session, project, accounts: store.accounts })
           : undefined;
         if (!project || !account) return fail('Projeto não encontrado.');
-        const queued = turnQueue.enqueue({ sessionId, accountId: account.id, prompt });
+        const queued = turnQueue.enqueue({
+          sessionId,
+          accountId: account.id,
+          prompt,
+          extraDirs,
+        });
         emitQueueSnapshot();
         if (!deps.chat.accountsInUse().has(account.id) && !isAccountExhausted(account.id)) {
           void drainAccountQueue(account.id).catch((error: unknown) => {
@@ -1426,6 +1455,19 @@ export function createHandlers(deps: HandlerDeps) {
         return ok(null);
       }),
     listTurnQueue: (): Promise<Result<QueuedTurn[]>> => guarded(async () => ok(turnQueue.list())),
+    listPausedQueues: (): Promise<Result<string[]>> => guarded(async () => ok([...pausedQueues])),
+    resumeSessionQueue: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        setQueuePaused({ sessionId, paused: false });
+        const head = turnQueue.forSession(sessionId)[0];
+        if (head) {
+          preferredQueueSession.set(head.accountId, sessionId);
+          void drainAccountQueue(head.accountId).catch((error: unknown) => {
+            console.error(`inova: failed to drain turn queue for ${head.accountId}`, error);
+          });
+        }
+        return ok(null);
+      }),
     switchSessionAccount: (
       input: unknown,
     ): Promise<Result<{ session: Session; hadHistory: boolean }>> =>

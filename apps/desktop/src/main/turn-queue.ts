@@ -2,12 +2,21 @@ import { randomUUID } from 'node:crypto';
 import type { QueuedTurn } from '@inova/core/types';
 
 export interface TurnQueue {
-  enqueue(input: { sessionId: string; accountId: string; prompt: string }): QueuedTurn;
+  enqueue(input: {
+    sessionId: string;
+    accountId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }): QueuedTurn;
   requeueFront(entry: QueuedTurn): void;
   reassignSessionAccount(input: { sessionId: string; accountId: string }): boolean;
   cancelByTurnId(turnId: string): boolean;
   cancelBySession(sessionId: string): number;
-  dequeueNext(accountId: string): QueuedTurn | undefined;
+  dequeueNext(
+    accountId: string,
+    input?: { skipSessions: ReadonlySet<string> },
+  ): QueuedTurn | undefined;
+  dequeueNextForSession(sessionId: string): QueuedTurn | undefined;
   list(accountId?: string): QueuedTurn[];
   forSession(sessionId: string): QueuedTurn[];
 }
@@ -23,6 +32,7 @@ export function createTurnQueue(now: () => Date = () => new Date()): TurnQueue {
         accountId: input.accountId,
         prompt: input.prompt,
         enqueuedAt: now().toISOString(),
+        ...(input.extraDirs && input.extraDirs.length > 0 ? { extraDirs: input.extraDirs } : {}),
       };
       entries.push(entry);
       return entry;
@@ -61,8 +71,16 @@ export function createTurnQueue(now: () => Date = () => new Date()): TurnQueue {
       return removed;
     },
 
-    dequeueNext(accountId) {
-      const index = entries.findIndex((item) => item.accountId === accountId);
+    dequeueNext(accountId, input) {
+      const index = entries.findIndex(
+        (item) => item.accountId === accountId && !input?.skipSessions.has(item.sessionId),
+      );
+      if (index === -1) return undefined;
+      return entries.splice(index, 1)[0];
+    },
+
+    dequeueNextForSession(sessionId) {
+      const index = entries.findIndex((item) => item.sessionId === sessionId);
       if (index === -1) return undefined;
       return entries.splice(index, 1)[0];
     },

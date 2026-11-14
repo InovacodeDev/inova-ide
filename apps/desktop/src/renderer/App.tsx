@@ -41,6 +41,7 @@ import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
+import { isAccountBusyElsewhere } from './queue-state';
 import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
@@ -103,6 +104,7 @@ export function App() {
   } | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
+  const [pausedQueueIds, setPausedQueueIds] = useState<string[]>([]);
   const [busyConflicts, setBusyConflicts] = useState<
     Record<string, { prompt: string; exhausted: boolean; message?: string }>
   >({});
@@ -245,6 +247,9 @@ export function App() {
     void call(() => window.inova.listTurnQueue()).then((loadedQueue) => {
       if (loadedQueue) setTurnQueue(loadedQueue.value);
     });
+    void call(() => window.inova.listPausedQueues()).then((loadedPaused) => {
+      if (loadedPaused) setPausedQueueIds(loadedPaused.value);
+    });
     void (async () => {
       const loaded = await reloadProjects();
       if (!loaded) return;
@@ -331,6 +336,10 @@ export function App() {
 
   useEffect(() => {
     return window.inova.onQueueEvent((queue) => setTurnQueue(queue));
+  }, []);
+
+  useEffect(() => {
+    return window.inova.onQueuePausedEvent((sessionIds) => setPausedQueueIds(sessionIds));
   }, []);
 
   useEffect(() => {
@@ -497,9 +506,20 @@ export function App() {
     });
   };
 
-  const enqueuePrompt = async (sessionId: string, prompt: string) => {
-    const result = await call(() => window.inova.enqueueTurn({ sessionId, prompt }));
+  const enqueuePrompt = async (input: {
+    sessionId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }) => {
+    const { sessionId, prompt, extraDirs } = input;
+    const result = await call(() =>
+      window.inova.enqueueTurn({ sessionId, prompt, ...(extraDirs ? { extraDirs } : {}) }),
+    );
     if (result) clearBusyConflict(sessionId);
+  };
+
+  const resumeQueue = async (sessionId: string) => {
+    await call(() => window.inova.resumeSessionQueue({ sessionId }));
   };
 
   const cancelQueuedTurn = async (turnId: string) => {
@@ -1200,6 +1220,9 @@ export function App() {
                 tabs={chatTabs}
                 active={tabs.active}
                 statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+                queuedCountOf={(sessionId) =>
+                  turnQueue.filter((item) => item.sessionId === sessionId).length
+                }
                 onActivate={activateTab}
                 onClose={requestCloseTab}
               />
@@ -1259,6 +1282,20 @@ export function App() {
                 : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
               const tabState = chats[tab.sessionId] ?? initialChatState;
               const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
+              const tabWaitingForAccount =
+                tabQueuedTurns.length > 0 &&
+                isAccountBusyElsewhere({
+                  sessionId: tab.sessionId,
+                  accountId: tabAccount?.id,
+                  runningAccounts: new Map(
+                    Object.entries(chats)
+                      .filter(([, chat]) => chat.running)
+                      .map(([sessionId]) => [
+                        sessionId,
+                        effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))?.id,
+                      ]),
+                  ),
+                });
               const alternativeAccounts = accounts.filter(
                 (candidate) => candidate.id !== tabAccount?.id,
               );
@@ -1287,6 +1324,8 @@ export function App() {
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   queuedTurns={tabQueuedTurns}
+                  queuePaused={pausedQueueIds.includes(tab.sessionId)}
+                  queueWaitingForAccount={tabWaitingForAccount}
                   busyConflict={busyConflicts[tab.sessionId] ?? null}
                   alternativeAccounts={alternativeAccounts}
                   onChangeModelConfig={(patch) =>
@@ -1343,7 +1382,10 @@ export function App() {
                   }
                   onWarn={warn}
                   onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
-                  onEnqueuePrompt={(prompt) => void enqueuePrompt(tab.sessionId, prompt)}
+                  onEnqueuePrompt={(input) =>
+                    void enqueuePrompt({ sessionId: tab.sessionId, ...input })
+                  }
+                  onResumeQueue={() => void resumeQueue(tab.sessionId)}
                   onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
                   onSwitchAccountAndRetry={({ accountId, prompt }) =>
                     void switchAccountAndRetry({

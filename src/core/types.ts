@@ -76,6 +76,7 @@ export interface QueuedTurn {
   accountId: string;
   prompt: string;
   enqueuedAt: string;
+  extraDirs?: string[];
 }
 
 export interface Workspace {

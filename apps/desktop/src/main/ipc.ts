@@ -67,6 +67,8 @@ export function registerIpc(deps: {
   handle(CHANNELS.enqueueTurn, (input) => handlers.enqueueTurn(input));
   handle(CHANNELS.cancelQueuedTurn, (input) => handlers.cancelQueuedTurn(input));
   handle(CHANNELS.listTurnQueue, () => handlers.listTurnQueue());
+  handle(CHANNELS.listPausedQueues, () => handlers.listPausedQueues());
+  handle(CHANNELS.resumeSessionQueue, (input) => handlers.resumeSessionQueue(input));
   handle(CHANNELS.switchSessionAccount, (input) => handlers.switchSessionAccount(input));
   handle(CHANNELS.handoffSession, (input) => handlers.handoffSession(input));
   handle(CHANNELS.forkSession, (input) => handlers.forkSession(input));

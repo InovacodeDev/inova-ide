@@ -210,9 +210,15 @@ export interface InovaApi {
     hints: string[];
   }): Promise<Result<{ text: string }>>;
   onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
-  enqueueTurn(input: { sessionId: string; prompt: string }): Promise<Result<QueuedTurn>>;
+  enqueueTurn(input: {
+    sessionId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }): Promise<Result<QueuedTurn>>;
   cancelQueuedTurn(input: { turnId: string }): Promise<Result<null>>;
   listTurnQueue(): Promise<Result<QueuedTurn[]>>;
+  listPausedQueues(): Promise<Result<string[]>>;
+  resumeSessionQueue(input: { sessionId: string }): Promise<Result<null>>;
   switchSessionAccount(input: {
     sessionId: string;
     accountId: string;
@@ -292,6 +298,7 @@ export interface InovaApi {
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
   onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
   onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
+  onQueuePausedEvent(cb: (sessionIds: string[]) => void): () => void;
   startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
   cancelLogin(sessionId: string): void;
@@ -335,6 +342,8 @@ export const CHANNELS = {
   enqueueTurn: 'inova:enqueueTurn',
   cancelQueuedTurn: 'inova:cancelQueuedTurn',
   listTurnQueue: 'inova:listTurnQueue',
+  listPausedQueues: 'inova:listPausedQueues',
+  resumeSessionQueue: 'inova:resumeSessionQueue',
   switchSessionAccount: 'inova:switchSessionAccount',
   handoffSession: 'inova:handoffSession',
   forkSession: 'inova:forkSession',
@@ -360,6 +369,7 @@ export const CHANNELS = {
   chatEvent: 'inova:chat:event',
   inboxEvent: 'inova:inbox:event',
   queueEvent: 'inova:queue:event',
+  queuePausedEvent: 'inova:queue:paused-event',
   startLogin: 'inova:startLogin',
   submitLoginCode: 'inova:submitLoginCode',
   cancelLogin: 'inova:cancelLogin',

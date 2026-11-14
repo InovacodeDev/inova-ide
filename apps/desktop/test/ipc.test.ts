@@ -50,6 +50,8 @@ function setup() {
       'enqueueTurn',
       'cancelQueuedTurn',
       'listTurnQueue',
+      'listPausedQueues',
+      'resumeSessionQueue',
       'switchSessionAccount',
       'handoffSession',
       'forkSession',
@@ -211,6 +213,8 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:enqueueTurn', trusted, input);
   await invoke('inova:cancelQueuedTurn', trusted, { turnId: 't1' });
   await invoke('inova:listTurnQueue', trusted);
+  await invoke('inova:listPausedQueues', trusted);
+  await invoke('inova:resumeSessionQueue', trusted, { sessionId: 's' });
   await invoke('inova:switchSessionAccount', trusted, { sessionId: 's', accountId: 'a2' });
   await invoke('inova:handoffSession', trusted, { sessionId: 's', targetAccountId: 'a2' });
   await invoke('inova:forkSession', trusted, { sessionId: 's', turnIndex: 0 });
