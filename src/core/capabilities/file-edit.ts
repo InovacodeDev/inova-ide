@@ -82,8 +82,25 @@ interface Section {
   end: number;
 }
 
-function findSection(lines: readonly string[], header: string): Section | null {
-  const start = lines.findIndex((line) => line.trim() === header);
+function tablePathSegments(path: string): string[] {
+  return [...path.matchAll(/"(?:[^"\\]|\\.)*"|[^.\s"]+/g)].map((match) =>
+    match[0].startsWith('"') ? parseTomlBasicString(path, match[0]) : match[0],
+  );
+}
+
+function canonicalTablePath(path: string): string {
+  return tomlTableHeader(tablePathSegments(path));
+}
+
+function headerLinePath(line: string): string | null {
+  // REGEX: single-bracket table header, quoted segments allowed, optional trailing comment
+  const match = /^\s*\[\s*((?:"(?:[^"\\]|\\.)*"|[^"\]#])+?)\s*\]\s*(?:#.*)?$/.exec(line);
+  return match ? canonicalTablePath(match[1] ?? '') : null;
+}
+
+function findSection(lines: readonly string[], table: string): Section | null {
+  const target = canonicalTablePath(table);
+  const start = lines.findIndex((line) => headerLinePath(line) === target);
   if (start === -1) return null;
   let end = start + 1;
   while (end < lines.length && !(lines[end] ?? '').trimStart().startsWith('[')) end += 1;
@@ -95,14 +112,29 @@ function escapeRegExp(text: string): string {
 }
 
 function assertKnownTableForm(lines: readonly string[], table: string): void {
-  const firstSegment = table.split('.')[0] ?? table;
-  const inline = new RegExp(`^\\s*(${escapeRegExp(firstSegment)}|${escapeRegExp(table)})\\s*=`);
-  for (const line of lines) {
-    if (line.trimStart().startsWith('[')) return;
-    if (inline.test(line)) {
-      throw new CapabilityFileError(table, 'table defined inline; cannot edit safely');
+  const segments = tablePathSegments(table);
+  for (let depth = 0; depth < segments.length; depth += 1) {
+    const ancestor = segments.slice(0, depth);
+    const section =
+      depth === 0
+        ? { header: -1, end: firstHeaderIndex(lines) }
+        : findSection(lines, tomlTableHeader(ancestor));
+    if (!section) continue;
+    const next = segments[depth] ?? '';
+    const definesNext = new RegExp(
+      `^\\s*(${escapeRegExp(next)}|${escapeRegExp(JSON.stringify(next))})\\s*[=.]`,
+    );
+    for (let index = section.header + 1; index < section.end; index += 1) {
+      if (definesNext.test(lines[index] ?? '')) {
+        throw new CapabilityFileError(table, 'table defined inline; cannot edit safely');
+      }
     }
   }
+}
+
+function firstHeaderIndex(lines: readonly string[]): number {
+  const index = lines.findIndex((line) => line.trimStart().startsWith('['));
+  return index === -1 ? lines.length : index;
 }
 
 function appendBlock(toml: string, block: string): string {
@@ -118,7 +150,7 @@ export function setTomlTableKey(input: {
   value: boolean;
 }): string {
   const lines = input.toml.split('\n');
-  const section = findSection(lines, `[${input.table}]`);
+  const section = findSection(lines, input.table);
   const assignment = `${input.key} = ${input.value}`;
   if (!section) {
     assertKnownTableForm(lines, input.table);
@@ -166,7 +198,7 @@ export function setTomlArrayMembership(input: {
   present: boolean;
 }): string {
   const lines = input.toml.split('\n');
-  const section = findSection(lines, `[${input.table}]`);
+  const section = findSection(lines, input.table);
   const render = (members: readonly string[]): string =>
     `${input.key} = [${members.map((entry) => JSON.stringify(entry)).join(', ')}]`;
 

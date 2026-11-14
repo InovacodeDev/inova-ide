@@ -123,6 +123,44 @@ describe('setTomlTableKey', () => {
       setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false }),
     ).toThrow(CapabilityFileError);
   });
+
+  it('finds a header with a trailing comment', () => {
+    expect(
+      setTomlTableKey({
+        toml: '[t] # note\nenabled = true\n',
+        table: 't',
+        key: 'enabled',
+        value: false,
+      }),
+    ).toBe('[t] # note\nenabled = false\n');
+  });
+
+  it('finds a header with spaces inside the brackets', () => {
+    expect(
+      setTomlTableKey({ toml: '  [ t ]\nname = "n"\n', table: 't', key: 'enabled', value: false }),
+    ).toBe('  [ t ]\nenabled = false\nname = "n"\n');
+  });
+
+  it('throws when an ancestor table defines the target as an inline key', () => {
+    const toml = '[mcp_servers]\nx = { command = "a" }\n';
+    expect(() =>
+      setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false }),
+    ).toThrow(CapabilityFileError);
+  });
+
+  it('throws when the root defines the target as a dotted key', () => {
+    const toml = 'mcp_servers.x.command = "a"\n';
+    expect(() =>
+      setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false }),
+    ).toThrow(CapabilityFileError);
+  });
+
+  it('appends when ancestor sections do not define the target', () => {
+    const toml = '[mcp_servers]\ny = 1\n';
+    expect(setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false })).toBe(
+      `${toml}\n[mcp_servers.x]\nenabled = false\n`,
+    );
+  });
 });
 
 describe('setTomlArrayMembership', () => {
