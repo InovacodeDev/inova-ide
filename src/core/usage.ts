@@ -506,7 +506,13 @@ export function exhaustionVerdict(input: {
 }): 'exhausted' | 'available' {
   const { fresh, resetsAt, now } = input;
   if (fresh !== null && fresh.source !== 'unavailable') {
-    return fresh.windows.some((window) => window.usedPercent >= 100) ? 'exhausted' : 'available';
+    const stillLimited = fresh.windows.some((window) => {
+      if (window.usedPercent < 100) return false;
+      if (window.resetsAt === null) return true;
+      const windowReset = Date.parse(window.resetsAt);
+      return Number.isNaN(windowReset) || windowReset > now.getTime();
+    });
+    return stillLimited ? 'exhausted' : 'available';
   }
   if (resetsAt === null) return 'available';
   const resetMs = Date.parse(resetsAt);

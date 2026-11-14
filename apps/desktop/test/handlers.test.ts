@@ -712,6 +712,11 @@ async function exhaustAccount(input: { resetsAt: string | null }) {
   return { ...ctx, session };
 }
 
+function localHm(iso: string): string {
+  const date = new Date(iso);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 function apiUsage(utilization: number, resetsAt: string | null) {
   return {
     ok: true,
@@ -726,7 +731,9 @@ test('sendMessage blocks an exhausted account with a future reset without hittin
   });
   const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
   expect(result).toMatchObject({ ok: false });
-  expect(result.ok ? '' : result.message).toMatch(/^CONTA_ESGOTADA: .*Libera às \d{2}:\d{2}\./);
+  expect(result.ok ? '' : result.message).toBe(
+    `CONTA_ESGOTADA: A conta atingiu o limite de uso. Libera às ${localHm('2026-01-01T05:00:00.000Z')}. Troque de conta ou execute handoff.`,
+  );
   expect(fetch).not.toHaveBeenCalled();
   expect(send).not.toHaveBeenCalled();
 });
@@ -750,7 +757,9 @@ test('sendMessage still blocks when the reset passed but fresh usage is at the l
   });
   fetch.mockResolvedValue(apiUsage(100, '2026-01-01T07:00:00.000Z'));
   const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
-  expect(result.ok ? '' : result.message).toMatch(/^CONTA_ESGOTADA: .*Libera às \d{2}:\d{2}\./);
+  expect(result.ok ? '' : result.message).toBe(
+    `CONTA_ESGOTADA: A conta atingiu o limite de uso. Libera às ${localHm('2026-01-01T07:00:00.000Z')}. Troque de conta ou execute handoff.`,
+  );
   expect(send).not.toHaveBeenCalled();
   fetch.mockClear();
   const again = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });

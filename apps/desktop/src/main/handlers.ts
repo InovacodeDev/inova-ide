@@ -1370,12 +1370,10 @@ export function createHandlers(deps: HandlerDeps) {
           );
         }
         const entry = exhaustionEntry(account.id);
-        let recovered = false;
         if (entry !== null) {
           if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
           const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
           if (blocked !== null) return fail(blocked);
-          recovered = true;
         }
         const adapter = providers[account.provider];
         const baseEnv = await deps.baseEnv();
@@ -1391,7 +1389,7 @@ export function createHandlers(deps: HandlerDeps) {
               'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
             );
           }
-          const started = await runTurn({
+          return runTurn({
             sessionId,
             prompt,
             account,
@@ -1400,12 +1398,6 @@ export function createHandlers(deps: HandlerDeps) {
             baseEnv,
             extraDirs,
           });
-          if (recovered) {
-            void drainAccountQueue(account.id).catch((error: unknown) => {
-              console.error(`inova: failed to drain turn queue for ${account.id}`, error);
-            });
-          }
-          return started;
         });
       }),
     enqueueTurn: (input: unknown): Promise<Result<QueuedTurn>> =>

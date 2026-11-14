@@ -609,6 +609,16 @@ describe('exhaustion helpers', () => {
     );
   });
 
+  it('ignores fresh windows whose reset already passed', () => {
+    const stale: UsageSnapshot = {
+      provider: 'codex',
+      source: 'rollout',
+      fetchedAt: NOW.toISOString(),
+      windows: [{ kind: 'session', usedPercent: 100, resetsAt: past }],
+    };
+    expect(exhaustionVerdict({ resetsAt: past, now: NOW, fresh: stale })).toBe('available');
+  });
+
   it('falls back to the stored reset without useful fresh data', () => {
     const none = snapshot('unavailable', []);
     expect(exhaustionVerdict({ resetsAt: past, now: NOW, fresh: none })).toBe('available');
