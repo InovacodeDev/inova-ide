@@ -1,8 +1,10 @@
 import type { Dirent } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandRunner } from '../providers.js';
 import {
+  isMissingFile,
+  readIfExists,
   serialize,
   setTomlSkillConfig,
   setTomlTableKey,
@@ -103,19 +105,6 @@ function category(input: {
   return input.items === null
     ? { kind: input.kind, items: [], error: input.error }
     : { kind: input.kind, items: input.items, error: null };
-}
-
-function isMissingFile(error: unknown): boolean {
-  return isRecord(error) && error['code'] === 'ENOENT';
-}
-
-async function readIfExists(file: string): Promise<string | null> {
-  try {
-    return await readFile(file, 'utf8');
-  } catch (error: unknown) {
-    if (isMissingFile(error)) return null;
-    throw error;
-  }
 }
 
 function disabledSkillNames(toml: string): Set<string> {

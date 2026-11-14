@@ -9,7 +9,7 @@ export class CapabilityFileError extends Error {
   }
 }
 
-function isMissingFile(error: unknown): boolean {
+export function isMissingFile(error: unknown): boolean {
   return (
     typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT'
   );
@@ -22,7 +22,7 @@ export async function writeAtomic(file: string, content: string): Promise<void> 
   await rename(temp, file);
 }
 
-async function readIfExists(file: string): Promise<string | null> {
+export async function readIfExists(file: string): Promise<string | null> {
   try {
     return await readFile(file, 'utf8');
   } catch (error: unknown) {
