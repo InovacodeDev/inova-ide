@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.5.4] - 2026-11-14
+
 ### Alterado
 
 - Campo de mensagem com o agente trabalhando: mostra só o botão de parar. Ao digitar ou ditar algo, ele vira o botão de enviar, que adiciona a mensagem à fila. Depois de enfileirar, volta a ser o botão de parar.
