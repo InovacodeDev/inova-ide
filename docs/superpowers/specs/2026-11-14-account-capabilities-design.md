@@ -21,7 +21,7 @@ A tela "Contas e providers" ganha um botão de engrenagem em cada conta. O botã
 
 - Instalar, desinstalar ou editar a definição de um item (comando, URL, headers).
 - Regras por projeto.
-- Estimar quantos tokens cada item gasta.
+- Estimar tokens em providers sem um relatório de contexto gratuito. No Claude, o modal mostra os tokens do `/context` (ver "Custo em tokens").
 - Autorizar conectores claude.ai que pedem OAuth.
 
 ## Anti-objetivos
@@ -58,25 +58,40 @@ Fonte: pesquisa de 2026-11-14 nas docs oficiais e no `--help` local. Claude, Cod
 
 ### Claude (`CLAUDE_CONFIG_DIR`)
 
+Spikes 1 e 2 rodados em 2026-11-14 (Claude Code 2.1.322). Resultados na seção "Resultado dos spikes".
+
 | Categoria | Listar | Desligar | Modo |
 | --- | --- | --- | --- |
-| Skills (pessoais) | Pastas `$CFG/skills/*/SKILL.md` (nome e `description` do frontmatter) | `skillOverrides: { "<nome>": "off" }` no `--settings` do turno | `launch` |
-| Skills (de plugin) | Pasta `skills/` dentro do `installPath` de cada plugin de `claude plugin list --json` | `permissions.deny: ["Skill(<plugin>:<nome>)"]` no `--settings` **[spike]** | `launch` |
-| MCP (escopo de usuário) | `mcpServers` no topo de `$CFG/.claude.json` (só nomes e tipo) | `permissions.deny: ["mcp__<nome-normalizado>"]` no `--settings` **[spike]** | `launch` |
-| Conectores claude.ai | Linhas `claude.ai <Nome>` de `claude mcp list` (texto). Rodar com `CLAUDE_CONFIG_DIR` da conta. | Igual a MCP, com o prefixo `mcp__claude_ai_<Nome>`. Se todos os conectores estiverem desligados, use também `disableClaudeAiConnectors: true`. | `launch` |
-| Plugins | `claude plugin list --json` → `{ id, enabled, installPath, scope, version }` | `enabledPlugins: { "<id>": false }` no `--settings` **[spike]** | `launch` |
+| Skills (pessoais e nativas) | Tabela "Skills" do `/context` headless (colunas Skill, Source, Tokens) | `skillOverrides: { "<nome>": "off" }` no `--settings` do turno | `launch` |
+| Skills (de plugin) | Mesma tabela, `Source` = `Plugin (<plugin>)` | Sem chave por skill. Só desliga com o plugin. Mostre agrupada sob o plugin. | `unsupported` (motivo: "Desligue o plugin <plugin>") |
+| MCP (escopo de usuário) | `claude mcp list` (nomes) + tabela "MCP Tools" do `/context` (tokens por servidor) | `permissions.deny: ["mcp__<nome-normalizado>"]` no `--settings` | `launch` |
+| Conectores claude.ai | Linhas `claude.ai <Nome>` de `claude mcp list` + tokens da tabela "MCP Tools" | `permissions.deny: ["mcp__claude_ai_<Nome>"]`. Se todos os conectores estiverem desligados, use `disableClaudeAiConnectors: true` em vez da lista. | `launch` |
+| Plugins | `claude plugin list --json` → `{ id, enabled, installPath, scope, version }` | `enabledPlugins: { "<id>": false }` no `--settings` | `launch` |
+
+Plugins gerenciados pela organização (ex.: `cc-plugin-*`) não aparecem em `claude plugin list --json`. Eles ficam fora do modal.
 
 Montagem: o adaptador de turno do Claude adiciona `--settings '<json>'` só quando a conta tem algum item desligado. O JSON junta `skillOverrides`, `permissions.deny`, `enabledPlugins` e `disableClaudeAiConnectors`.
 
-Normalização do nome MCP: copie a regra do Claude Code. Troque todo caractere fora de `[A-Za-z0-9_-]` por `_`. Exemplo: `claude.ai Gmail` → `claude_ai_Gmail`. **[spike]** confirma a regra com os nomes reais da conta.
+Normalização do nome MCP: troque todo caractere fora de `[A-Za-z0-9_-]` por `_`. Exemplo: `claude.ai Gmail` → `claude_ai_Gmail`. Confirmado no spike: a coluna Server do `/context` mostra `claude_ai_Gmail`.
+
+Listagem do `/context`: rode `claude -p --output-format json --no-session-persistence -- /context` com o env da conta. Custo $0. O cwd precisa ser um projeto confiável para o Claude carregar MCPs e conectores: use o caminho do primeiro projeto vinculado à conta. Se a conta não tem projeto, rode no `homeDir` da conta. Nesse caso, MCP e conectores aparecem sem tokens (só pela lista de `claude mcp list`). Reuse `parseClaudeContextOutput` de `src/core/context-report.ts`.
+
+### Custo em tokens (só Claude)
+
+- Cada item mostra `tokens`: para MCP e conectores, a soma da coluna Tokens da tabela "MCP Tools" para aquele servidor. Para skills, a coluna Tokens da tabela "Skills".
+- O valor de MCP é o tamanho das definições, não o custo por mensagem. Com a busca de ferramentas ativa, a maior parte é adiada. Tooltip do valor: "Tamanho das definições. Com a busca de ferramentas, só os nomes entram em cada mensagem."
+- O topo das abas MCP e Conectores mostra o custo real da conta, vindo da tabela de categorias: "MCP tools", "MCP server instructions" e "MCP tools (deferred)". Rótulos: "Carregado em cada mensagem", "Instruções dos servidores" e "Adiado (não conta por mensagem)".
+- A aba Conectores mostra o aviso: "As instruções de um conector só saem do contexto quando todos os conectores estão desligados."
+- Ordene cada aba por `tokens`, do maior para o menor. Itens sem `tokens` ficam no fim, em ordem alfabética.
+- Outros providers: `tokens` é `null` e a coluna não aparece.
 
 ### Codex (`CODEX_HOME`)
 
 | Categoria | Listar | Desligar | Modo |
 | --- | --- | --- | --- |
-| MCP | `codex mcp list --json` | `-c mcp_servers.<nome>.enabled=false` | `launch` |
-| Plugins | `codex plugin list --json` | `-c 'plugins."<id>".enabled=false'` **[spike]** | `launch` |
-| Skills | Pastas `~/.agents/skills/*/SKILL.md` e `$CODEX_HOME/skills/*/SKILL.md` | `-c` com `skills.config` (array de tabelas inline com `name` e `enabled=false`) **[spike]**. Se `-c` não aceitar, use `account-file`: bloco `[[skills.config]]` no `config.toml` da conta. | `launch` (fallback `account-file`) |
+| MCP | `codex mcp list --json` → `[{ name, enabled, … }]` | `-c mcp_servers.<nome>.enabled=false` (confirmado: `mcp list` reflete o override) | `launch` |
+| Plugins | `codex plugin list --json` → `{ installed: [{ pluginId, name, enabled, … }], available: [...] }`. Use só `installed`. | Tabela `[plugins."<pluginId>"]` com `enabled = false` no `config.toml` da conta. O spike mostrou que `-c` não muda o `plugin list`. | `account-file` |
+| Skills | Pastas `~/.agents/skills/*/SKILL.md` e `$CODEX_HOME/skills/*/SKILL.md` | Bloco `[[skills.config]]` com `name = "<nome>"` e `enabled = false` no `config.toml` da conta. O efeito de `-c` não pôde ser confirmado sem rodar um turno. | `account-file` |
 | Conectores (apps) | Não confirmado | — | `unsupported` |
 
 ### Gemini / Antigravity (`agy`, `HOME` falso por conta)
@@ -93,8 +108,10 @@ Se o **[spike]** mostrar que `agy --settings` aceita desligar MCP, mude MCP para
 
 | Categoria | Listar | Desligar | Modo |
 | --- | --- | --- | --- |
-| MCP | `mcpServers` em `~/.qwen/settings.json` | `--allowed-mcp-server-names <lista dos ligados>` no turno **[spike]**. Fallback: `mcp.excluded` no `settings.json` da conta. | `launch` (fallback `account-file`) |
-| Extensões (plugins) | Pastas `~/.qwen/extensions/*/qwen-extension.json` | `-e <nome>` repetido para cada extensão ligada. Se todas estiverem desligadas, use `-e none`. | `launch` |
+| MCP | `mcpServers` em `~/.qwen/settings.json` | `mcp.excluded` (lista) no `settings.json` da conta | `account-file` |
+| Extensões (plugins) | Pastas `~/.qwen/extensions/*/qwen-extension.json` | `qwen extensions disable <nome>` / `enable <nome>` | `account-file` |
+
+As flags `--allowed-mcp-server-names` e `-e` do Qwen são listas de permitidos. Para usá-las, o Inova precisaria saber a lista completa em cada turno. Por isso, o Qwen usa só `account-file`.
 | Skills | Pastas de skills de usuário em `~/.qwen` **[spike]** | `skills.disabled` (lista) no `settings.json` da conta | `account-file` |
 
 ### OpenCode (`XDG_DATA_HOME` por conta)
@@ -176,6 +193,14 @@ export interface CapabilityItem {
   enabled: boolean;
   applyMode: 'launch' | 'account-file' | 'global-file' | 'unsupported';
   unsupportedReason: string | null;
+  tokens: number | null;
+  group: string | null;
+}
+
+export interface CapabilityCostSummary {
+  loadedTokens: number | null;
+  instructionTokens: number | null;
+  deferredTokens: number | null;
 }
 ```
 
@@ -230,6 +255,18 @@ Rode cada spike no CLI real. Registre o resultado no plano. Spikes que dependem 
 3. Codex: `-c 'plugins."<id>".enabled=false'` e `-c` com `skills.config` funcionam?
 4. `agy`: `agy mcp disable` grava onde? `--settings` aceita restrição de MCP?
 5. Qwen, OpenCode, Kimi, Grok: só se o CLI for instalado. Senão, use os fallbacks.
+
+## Resultado dos spikes (2026-11-14)
+
+| # | Resultado |
+| --- | --- |
+| 1 | `deny` de um servidor tira as ferramentas dele, mas o servidor continua conectado e as instruções ficam. Input de uma mensagem curta: base ~41,0k; deny de 9 conectores ~38,1k; `disableClaudeAiConnectors` ~36,1k. O "MCP tools (deferred)" de 78,4k do `/context` não entra em cada mensagem. |
+| 2 | `enabledPlugins: false` funciona. `skillOverrides: off` funciona para skills nativas e pessoais, mas não para skills de plugin. `deny Skill(plugin:skill)` não esconde a skill. |
+| 3 | `-c mcp_servers.<n>.enabled=false` funciona. `-c plugins."<id>".enabled=false` não muda o `plugin list`. O `-c` de skills foi aceito, mas o efeito não foi confirmado. Plugins e skills do Codex ficam `account-file`. |
+| 4 | `agy --settings` aceita chaves de `settings.json`, mas não ficou confirmado que desliga MCP. MCP e plugins do `agy` ficam `account-file` via `agy mcp/plugin enable/disable`. O construtor confirma onde `agy mcp disable` grava, com uma pasta `HOME` temporária. |
+| 5 | Não verificado (CLIs não instalados). Use os fallbacks da matriz. |
+
+Decisão 3 da seção "Decisões fechadas": o fallback não é necessário. O comportamento parcial (tira ferramentas, mantém instruções) é aceito, com o aviso na aba Conectores.
 
 ## Testes
 
