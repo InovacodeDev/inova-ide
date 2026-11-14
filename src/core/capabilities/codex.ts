@@ -1,3 +1,5 @@
+import type { Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandRunner } from '../providers.js';
 import {
@@ -21,6 +23,7 @@ const COMMAND_TIMEOUT_MS = 30_000;
 const NOT_FOUND_MESSAGE = 'codex não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Codex.';
 const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Codex.';
+const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Codex.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -102,21 +105,98 @@ function category(input: {
     : { kind: input.kind, items: input.items, error: null };
 }
 
+function isMissingFile(error: unknown): boolean {
+  return isRecord(error) && error['code'] === 'ENOENT';
+}
+
+async function readIfExists(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8');
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+}
+
+async function skillsIn(dir: string): Promise<{ id: string }[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return [];
+    throw error;
+  }
+  const found = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map(async (entry) => {
+        const markdown = await readIfExists(join(dir, entry.name, 'SKILL.md'));
+        return markdown === null ? null : { id: entry.name };
+      }),
+  );
+  return found.flatMap((skill) => (skill === null ? [] : [skill]));
+}
+
+async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
+  const home = ctx.env['HOME'];
+  const dirs = [
+    ...(home === undefined ? [] : [join(home, '.agents', 'skills')]),
+    join(ctx.account.homeDir, 'skills'),
+  ];
+  const perDir = await Promise.all(dirs.map(skillsIn));
+  const seen = new Set<string>();
+  return perDir.flat().flatMap((skill): CapabilityItem[] => {
+    if (seen.has(skill.id)) return [];
+    seen.add(skill.id);
+    return [
+      {
+        kind: 'skill',
+        id: skill.id,
+        name: skill.id,
+        description: null,
+        source: 'user',
+        enabled: true,
+        applyMode: 'account-file',
+        unsupportedReason: null,
+        tokens: null,
+        group: null,
+      },
+    ];
+  });
+}
+
+async function skillCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
+  try {
+    return category({
+      kind: 'skill',
+      items: await listSkills(ctx),
+      error: SKILL_LIST_FAILED_MESSAGE,
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      return category({ kind: 'skill', items: null, error: SKILL_LIST_FAILED_MESSAGE });
+    }
+    throw error;
+  }
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const [mcp, plugins] = await Promise.all([
+  const [mcp, plugins, skills] = await Promise.all([
     runCodex(ctx, ['mcp', 'list', '--json']),
     runCodex(ctx, ['plugin', 'list', '--json']),
+    skillCategory(ctx),
   ]);
   if (!('exitCode' in mcp) || !('exitCode' in plugins)) {
     const kinds = ['mcp', 'plugin'] as const;
     return {
-      categories: kinds.map((kind) => ({ kind, items: [], error: NOT_FOUND_MESSAGE })),
+      categories: [skills, ...kinds.map((kind) => ({ kind, items: [], error: NOT_FOUND_MESSAGE }))],
       cost: null,
     };
   }
   const disabled = ctx.account.disabledCapabilities ?? [];
   return {
     categories: [
+      skills,
       category({
         kind: 'mcp',
         items: mcp.exitCode === 0 ? parseMcpItems(mcp.stdout, disabled) : null,

@@ -102,23 +102,59 @@ describe('codexCapabilities.list', () => {
   });
 });
 
-describe('codexCapabilities.setEnabled', () => {
-  async function withAccountDir<T>(run: (ctx: CapabilityContext) => Promise<T>): Promise<T> {
-    const root = await mkdtemp(join(tmpdir(), 'codex-cap-'));
-    try {
-      const base = contextWith({});
-      const homeDir = join(root, 'acc');
-      await mkdir(homeDir);
-      return await run({
-        ...base,
-        account: { ...base.account, homeDir },
-        backupRoot: join(root, 'backups'),
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+async function withAccountDir<T>(run: (ctx: CapabilityContext) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), 'codex-cap-'));
+  try {
+    const base = contextWith({});
+    const homeDir = join(root, 'acc');
+    await mkdir(homeDir);
+    return await run({
+      ...base,
+      account: { ...base.account, homeDir },
+      env: { HOME: join(root, 'home') },
+      backupRoot: join(root, 'backups'),
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
+}
 
+async function writeSkill(input: { dir: string; name: string; body: string }): Promise<void> {
+  await mkdir(join(input.dir, input.name), { recursive: true });
+  await writeFile(join(input.dir, input.name, 'SKILL.md'), input.body);
+}
+
+describe('codexCapabilities.list skills', () => {
+  it('reads skills from the real home and the account', async () => {
+    await withAccountDir(async (ctx) => {
+      const shared = join(ctx.env['HOME'] ?? '', '.agents', 'skills');
+      await writeSkill({ dir: shared, name: 'off-skill', body: '# body\n' });
+      await writeSkill({ dir: join(ctx.account.homeDir, 'skills'), name: 'on-skill', body: '# x' });
+      const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(skills.map((item) => [item.id, item.enabled])).toEqual([
+        ['off-skill', true],
+        ['on-skill', true],
+      ]);
+      expect(skills[0]).toMatchObject({ applyMode: 'account-file', source: 'user' });
+    });
+  });
+
+  it('lists nothing and no error when config.toml and skill dirs are missing', async () => {
+    await withAccountDir(async (ctx) => {
+      expect(await categoryOf(ctx, 'skill')).toMatchObject({ items: [], error: null });
+    });
+  });
+
+  it('skips the real home directory when HOME is undefined', async () => {
+    await withAccountDir(async (ctx) => {
+      await writeSkill({ dir: join(ctx.account.homeDir, 'skills'), name: 'only', body: '# x' });
+      const items = (await categoryOf({ ...ctx, env: {} }, 'skill'))?.items ?? [];
+      expect(items.map((item) => item.id)).toEqual(['only']);
+    });
+  });
+});
+
+describe('codexCapabilities.setEnabled', () => {
   it('creates config.toml with a disabled plugin table when the file is missing', async () => {
     await withAccountDir(async (ctx) => {
       const ref = { kind: 'plugin', id: 'github@openai-curated-remote' } as const;
