@@ -13,6 +13,11 @@ import type {
 const COMMAND_TIMEOUT_MS = 30_000;
 const CONNECTOR_PREFIX = 'claude.ai ';
 const ALL_CONNECTORS_ID = '*';
+const KINDS = ['skill', 'mcp', 'connector', 'plugin'] as const;
+const NOT_FOUND_MESSAGE = 'claude não encontrado.';
+const CONTEXT_FAILED_MESSAGE = 'Não foi possível ler o /context do Claude.';
+const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Claude.';
+const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Claude.';
 // REGEX: "<name>: <command or url> - <status>" from `claude mcp list`; the name ends at the first ": "
 const MCP_LINE_PATTERN = /^(.+?): .+ - .+$/;
 // REGEX: skill Source column "Plugin (<plugin>)" captures the plugin name
@@ -180,14 +185,16 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
     runClaude(ctx, { args: ['mcp', 'list'] }),
     runClaude(ctx, { args: ['plugin', 'list', '--json'] }),
   ]);
+  if (!('exitCode' in context) || !('exitCode' in mcp) || !('exitCode' in pluginList)) {
+    const categories = KINDS.map((kind) => ({ kind, items: [], error: NOT_FOUND_MESSAGE }));
+    return { categories, cost: null };
+  }
   const disabled = ctx.account.disabledCapabilities ?? [];
-  const plugins = 'exitCode' in pluginList ? (parsePlugins(pluginList.stdout) ?? []) : [];
-  const breakdown =
-    'exitCode' in context && context.exitCode === 0
-      ? parseClaudeContextOutput(context.stdout)
-      : null;
+  const breakdown = context.exitCode === 0 ? parseClaudeContextOutput(context.stdout) : null;
+  const plugins = pluginList.exitCode === 0 ? parsePlugins(pluginList.stdout) : null;
+  const mcpError = mcp.exitCode === 0 ? null : MCP_LIST_FAILED_MESSAGE;
   const servers = serverItems({
-    names: 'exitCode' in mcp ? parseMcpNames(mcp.stdout) : [],
+    names: mcpError === null ? parseMcpNames(mcp.stdout) : [],
     tokens: breakdown === null ? null : serverTokens(breakdown),
     disabled,
   });
@@ -196,17 +203,17 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
       {
         kind: 'skill',
         items: breakdown === null ? [] : skillItems(breakdown, disabled),
-        error: null,
+        error: breakdown === null ? CONTEXT_FAILED_MESSAGE : null,
       },
-      { kind: 'mcp', items: servers.mcp, error: null },
-      { kind: 'connector', items: servers.connectors, error: null },
+      { kind: 'mcp', items: servers.mcp, error: mcpError },
+      { kind: 'connector', items: servers.connectors, error: mcpError },
       {
         kind: 'plugin',
-        items: plugins.map((item) => ({
+        items: (plugins ?? []).map((item) => ({
           ...item,
           enabled: item.enabled && !isDisabled(disabled, { kind: 'plugin', id: item.id }),
         })),
-        error: null,
+        error: plugins === null ? PLUGIN_LIST_FAILED_MESSAGE : null,
       },
     ],
     cost: costSummary(breakdown),

@@ -7,30 +7,41 @@ import type { CapabilityContext } from './types.js';
 function fixture(name: string): string {
   return readFileSync(new URL(`../fixtures/capabilities/${name}`, import.meta.url), 'utf8');
 }
-const runner: CommandRunner = {
-  run: async (cmd) => ({
-    exitCode: 0,
-    stdout: cmd.args.includes('/context')
-      ? JSON.stringify({ result: fixture('claude-context.md') })
-      : cmd.args[0] === 'plugin'
-        ? fixture('claude-plugin-list.json')
-        : fixture('claude-mcp-list.txt'),
-  }),
-};
+type RunResult = Awaited<ReturnType<CommandRunner['run']>>;
+type Overrides = Partial<Record<'context' | 'mcp' | 'plugin', RunResult>>;
 
-const ctx: CapabilityContext = {
-  account: {
-    id: 'acc-1',
-    provider: 'claude',
-    label: 'Claude',
-    homeDir: '/home/acc',
-    createdAt: '2026-01-01T00:00:00.000Z',
-  },
-  runner,
-  env: {},
-  projectPath: null,
-  backupRoot: '/tmp/backups',
-};
+function runnerWith(overrides: Overrides): CommandRunner {
+  return {
+    run: async (cmd) => {
+      if (cmd.args.includes('/context')) {
+        const body = JSON.stringify({ result: fixture('claude-context.md') });
+        return overrides.context ?? { exitCode: 0, stdout: body };
+      }
+      if (cmd.args[0] === 'plugin') {
+        return overrides.plugin ?? { exitCode: 0, stdout: fixture('claude-plugin-list.json') };
+      }
+      return overrides.mcp ?? { exitCode: 0, stdout: fixture('claude-mcp-list.txt') };
+    },
+  };
+}
+
+function contextWith(overrides: Overrides = {}): CapabilityContext {
+  return {
+    account: {
+      id: 'acc-1',
+      provider: 'claude',
+      label: 'Claude',
+      homeDir: '/home/acc',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+    runner: runnerWith(overrides),
+    env: {},
+    projectPath: null,
+    backupRoot: '/tmp/backups',
+  };
+}
+
+const ctx = contextWith();
 
 describe('claudeCapabilities.list', () => {
   it('lists connectors and MCP servers with summed tokens', async () => {
@@ -98,6 +109,44 @@ describe('claudeCapabilities.list', () => {
   it('reads the cost summary from the category table', async () => {
     const { cost } = await claudeCapabilities.list(ctx);
     expect(cost).toEqual({ loadedTokens: 612, instructionTokens: 2100, deferredTokens: 78400 });
+  });
+
+  it('reports claude not found in every category', async () => {
+    const missing = { notFound: true } as const;
+    const listing = await claudeCapabilities.list(contextWith({ mcp: missing }));
+    expect(listing.categories.map((entry) => [entry.kind, entry.error, entry.items])).toEqual([
+      ['skill', 'claude não encontrado.', []],
+      ['mcp', 'claude não encontrado.', []],
+      ['connector', 'claude não encontrado.', []],
+      ['plugin', 'claude não encontrado.', []],
+    ]);
+    expect(listing.cost).toBeNull();
+  });
+
+  it('keeps connectors with null tokens when /context fails', async () => {
+    const failed = { exitCode: 1, stdout: '' };
+    const { categories, cost } = await claudeCapabilities.list(contextWith({ context: failed }));
+    const byKind = (kind: string) => categories.find((entry) => entry.kind === kind);
+    expect(byKind('skill')).toMatchObject({ items: [], error: expect.any(String) });
+    expect(byKind('connector')?.error).toBeNull();
+    expect(byKind('connector')?.items.map((item) => item.tokens)).toEqual([null, null, null]);
+    expect(cost).toBeNull();
+  });
+
+  it('flags only the plugin category when plugin list fails', async () => {
+    const failed = { exitCode: 2, stdout: '' };
+    const { categories } = await claudeCapabilities.list(contextWith({ plugin: failed }));
+    expect(categories.map((entry) => entry.error !== null)).toEqual([false, false, false, true]);
+  });
+
+  it('marks connectors disabled by the wildcard', async () => {
+    const wildcard = contextWith();
+    wildcard.account.disabledCapabilities = [{ kind: 'connector', id: '*' }];
+    const { categories } = await claudeCapabilities.list(wildcard);
+    const enabled = (kind: string) =>
+      categories.find((entry) => entry.kind === kind)?.items.map((item) => item.enabled);
+    expect(enabled('connector')).toEqual([false, false, false]);
+    expect(enabled('mcp')).toEqual([true]);
   });
 });
 
