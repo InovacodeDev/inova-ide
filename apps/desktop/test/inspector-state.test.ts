@@ -42,15 +42,16 @@ describe('subagentSummaryCounts', () => {
 });
 
 describe('inspectorTabs', () => {
-  test('omits optional badges when no subagents and no worktree', () => {
-    expect(inspectorTabs({ subagents: [], worktreeBranch: null })).toEqual([
+  test('omits optional badges when empty', () => {
+    expect(inspectorTabs({ subagents: [], worktreeBranch: null, changedFilesCount: 0 })).toEqual([
       { id: 'context', label: 'Contexto', badge: null },
+      { id: 'changes', label: 'Git', badge: null },
       { id: 'subagents', label: 'Subagentes', badge: null },
       { id: 'session', label: 'Sessão', badge: null },
     ]);
   });
 
-  test('shows total subagents badge when none are running and wt badge for worktree', () => {
+  test('shows changed files badge, total subagents badge when idle, and wt badge for worktree', () => {
     expect(
       inspectorTabs({
         subagents: [
@@ -58,9 +59,11 @@ describe('inspectorTabs', () => {
           makeAgent({ toolId: 't2', status: 'error' }),
         ],
         worktreeBranch: 'inova/feat-ui',
+        changedFilesCount: 4,
       }),
     ).toEqual([
       { id: 'context', label: 'Contexto', badge: null },
+      { id: 'changes', label: 'Git', badge: '4' },
       { id: 'subagents', label: 'Subagentes', badge: '2' },
       { id: 'session', label: 'Sessão', badge: 'wt' },
     ]);
@@ -77,6 +80,7 @@ describe('inspectorTabs', () => {
       }),
     ).toEqual([
       { id: 'context', label: 'Contexto', badge: null },
+      { id: 'changes', label: 'Git', badge: null },
       { id: 'subagents', label: 'Subagentes', badge: '1/2' },
       { id: 'session', label: 'Sessão', badge: null },
     ]);

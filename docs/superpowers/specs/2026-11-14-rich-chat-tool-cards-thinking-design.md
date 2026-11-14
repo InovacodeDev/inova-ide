@@ -11,7 +11,7 @@ Esta entrega executa o Subprojeto 1 de um roadmap sequencial em 4 etapas:
 | --- | --- | --- |
 | 1. Chat Rico, Tool Cards, Status Vivo e Raciocínio | Tool cards especializados, eventos de raciocínio, status vivo e estado vazio rico | Concluído |
 | 2. Shell Unificado e Inspector Encaixável | Unificação do topo e painel direito fixo com abas | Concluído |
-| 3. Alterações Git e Diff Viewer na Sessão | Lista de arquivos alterados, diff por arquivo e reversão granular | Planejado |
+| 3. Alterações Git e Diff Viewer na Sessão | Lista de arquivos alterados, diff por arquivo e reversão granular | Concluído |
 | 4. Command Palette (`⌘K`) | Navegação rápida por sessões, projetos, modelos e ações | Planejado |
 
 ## Arquitetura do Subprojeto 1
@@ -67,4 +67,23 @@ Função pura `presentTool(item)` mapeia entradas de ferramentas para 5 apresent
 ### 3. Rail Lateral e Inspector Acoplável (`sidebar.css`, `session.css`, `SessionDetails.tsx`)
 
 - `sidebar-rail`: convertido de card flutuante absoluto para trilho fixo vertical (`52px`) de altura total, sem sobrepor mensagens nem exigir `rail-offset`.
-- `SessionDetails`: painel direito acoplável (`300px`) lado a lado em `.session-stage` (`flex-direction: row`), com abas `Contexto`, `Subagentes` e `Sessão`.
+- `SessionDetails`: painel direito acoplável (`300px`) lado a lado em `.session-stage` (`flex-direction: row`), com abas `Contexto`, `Git`, `Subagentes` e `Sessão`.
+
+## Arquitetura do Subprojeto 3
+
+### 1. Core e Reversão Granular (`src/core` e `apps/desktop/src/main`)
+
+- `git-worktree.ts`: `getWorktreeStatus` valida `baseCommit` via `git rev-parse --verify --quiet` antes de montar a árvore de snapshot, retornando status vazio quando não há commit base.
+- `git-checkpoints.ts`: `restoreCheckpoint` aceita `files?: readonly string[]` para restaurar ou remover apenas os caminhos selecionados, mantendo o fluxo integral quando omitido.
+- `handlers.ts` e `validation.ts`: `getWorktreeStatus` atende sessões em worktree isolado (`baseCommit`) e sessões no diretório principal (`HEAD`). `parseRestoreCheckpoint` aceita `files` relativos validados sem traversal e `restoreCheckpoint` resolve `ref ?? session.worktree?.baseCommit ?? 'HEAD'`.
+
+### 2. Parser de Diff e Inspetor Git (`git-diff-presentation.ts`, `inspector-state.ts`, `useSessionGitStatus.ts`)
+
+- `parseUnifiedGitDiff`: estrutura blocos `diff --git` em arquivos com status (`added`, `modified`, `deleted`, `renamed`), detecção de binário, contadores `+N / -M` e numeração por hunk/linha.
+- `inspectorTabs`: inclui a aba `Git` (`changes`) com badge indicando a contagem de arquivos modificados.
+- `useSessionGitStatus`: consulta `window.inova.getWorktreeStatus` quando a sessão troca, inicia/termina execução ou sofre mutação.
+
+### 3. Lista na Aba Git e Modal Split (`SessionDetails.tsx`, `SessionDiffModal.tsx`, `App.tsx`)
+
+- Aba `Git` em `SessionDetails`: mostra resumo `+X / -Y`, lista arquivos alterados com abertura direta do diff no arquivo clicado e botões de reversão por arquivo ou em lote.
+- `SessionDiffModal`: substitui o bloco `<pre>` simples por layout dividido com lista lateral à esquerda, diff numerado por hunk à direita, reversão por arquivo, reversão total e aplicação do worktree no projeto principal.

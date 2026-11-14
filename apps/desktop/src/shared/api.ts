@@ -189,8 +189,9 @@ export interface InovaApi {
   applyWorktree(input: { sessionId: string }): Promise<Result<{ appliedFiles: string[] }>>;
   restoreCheckpoint(input: {
     sessionId: string;
-    ref: string;
+    ref?: string;
     preserveFiles?: string[];
+    files?: string[];
   }): Promise<Result<null>>;
   detectProjectChecks(input: { projectId: string }): Promise<Result<VerificationCheck[]>>;
   updateProjectVerification(input: {

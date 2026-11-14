@@ -138,18 +138,42 @@ export function parseSessionDelete(
   return { sessionId: input['sessionId'], force };
 }
 
-export function parseRestoreCheckpoint(
-  input: unknown,
-): { sessionId: string; ref: string; preserveFiles: string[] } | undefined {
+function isRelativeRepoPath(value: unknown): value is string {
+  if (!isBoundedString(value, MAX_PATH) || isAbsolute(value)) return false;
+  if (value.includes('\0') || value.includes('\\')) return false;
+  const segments = value.split('/');
+  return segments.every((segment) => segment !== '' && segment !== '.' && segment !== '..');
+}
+
+export function parseRestoreCheckpoint(input: unknown):
+  | {
+      sessionId: string;
+      ref?: string;
+      preserveFiles: string[];
+      files?: string[];
+    }
+  | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
-  const { ref, preserveFiles = [] } = input;
-  if (!isText(ref) || !ref.startsWith('refs/inova/checkpoints/') || ref.includes('..')) {
-    return undefined;
+  const { ref, preserveFiles = [], files } = input;
+  if (ref === undefined && files === undefined) return undefined;
+  if (ref !== undefined) {
+    if (!isText(ref) || !ref.startsWith('refs/inova/checkpoints/') || ref.includes('..')) {
+      return undefined;
+    }
   }
   if (!Array.isArray(preserveFiles) || !preserveFiles.every((f) => isBoundedString(f, MAX_PATH))) {
     return undefined;
   }
-  return { sessionId: input['sessionId'], ref, preserveFiles };
+  if (files !== undefined) {
+    if (!Array.isArray(files) || files.length === 0 || files.length > 200) return undefined;
+    if (!files.every(isRelativeRepoPath)) return undefined;
+  }
+  return {
+    sessionId: input['sessionId'],
+    ...(ref === undefined ? {} : { ref }),
+    preserveFiles,
+    ...(files === undefined ? {} : { files }),
+  };
 }
 
 function isCheckInput(value: unknown): value is VerificationCheck {

@@ -1351,10 +1351,18 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseSessionRef, async ({ sessionId }) => {
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
-        if (!session.worktree) return fail('Esta sessão não possui worktree isolado.');
+        if (session.worktree) {
+          const status = await getWorktreeStatus({
+            worktreePath: session.worktree.path,
+            baseCommit: session.worktree.baseCommit,
+          });
+          return ok(status);
+        }
+        const project = store.projects.find((item) => item.id === session.projectId);
+        if (!project) return fail('Projeto não encontrado.');
         const status = await getWorktreeStatus({
-          worktreePath: session.worktree.path,
-          baseCommit: session.worktree.baseCommit,
+          worktreePath: project.path,
+          baseCommit: 'HEAD',
         });
         return ok(status);
       }),
@@ -1379,7 +1387,7 @@ export function createHandlers(deps: HandlerDeps) {
         }),
       ),
     restoreCheckpoint: (input: unknown): Promise<Result<null>> =>
-      validated(input, parseRestoreCheckpoint, ({ sessionId, ref, preserveFiles }) =>
+      validated(input, parseRestoreCheckpoint, ({ sessionId, ref, preserveFiles, files }) =>
         serialized(async () => {
           if (deps.chat.isRunning(sessionId)) {
             return fail('Pare o turno em andamento antes de restaurar o checkpoint.');
@@ -1389,7 +1397,13 @@ export function createHandlers(deps: HandlerDeps) {
           const project = store.projects.find((item) => item.id === session.projectId);
           if (!project) return fail('Projeto não encontrado.');
           const cwd = effectiveCwd(session, project);
-          await restoreCheckpoint({ repoPath: cwd, ref, preserveFiles });
+          const targetRef = ref ?? session.worktree?.baseCommit ?? 'HEAD';
+          await restoreCheckpoint({
+            repoPath: cwd,
+            ref: targetRef,
+            preserveFiles,
+            ...(files ? { files } : {}),
+          });
           invalidateProjectFiles(sessionId);
           return ok(null);
         }),

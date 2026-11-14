@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
 import type { ProviderId } from '@inova/core/types';
 import type { ContextInfo } from './chat-reducer';
@@ -11,12 +11,19 @@ import {
   sortedRows,
 } from './context-breakdown';
 import {
+  parseUnifiedGitDiff,
+  splitFilePath,
+  STATUS_BADGE,
+  summarizeGitChanges,
+} from './git-diff-presentation';
+import {
   ChevronDownIcon,
   ChevronRightIcon,
   FolderIcon,
   GitBranchIcon,
   PanelRightCloseIcon,
   RefreshIcon,
+  RotateCcwIcon,
   SwitchIcon,
 } from './icons';
 import { inspectorTabs, subagentSummaryCounts, type InspectorTabId } from './inspector-state';
@@ -24,6 +31,7 @@ import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import { contextLabel, formatTokens } from './token-format';
 import { useContextBreakdown } from './useContextBreakdown';
+import { useSessionGitStatus } from './useSessionGitStatus';
 import './session.css';
 
 function ContextBreakdownPanel({
@@ -138,8 +146,11 @@ interface SessionDetailsProps {
   path?: string | null;
   worktreeBranch?: string | null;
   worktreeBusy?: boolean;
-  onInspectWorktree?: () => void;
+  running?: boolean;
+  gitRevision?: number;
+  onInspectWorktree?: (initialFilePath?: string) => void;
   onApplyWorktree?: () => void;
+  onRevertFiles?: (files: string[]) => Promise<boolean>;
   onHandoff?: () => void;
 }
 
@@ -163,17 +174,38 @@ export function SessionDetails({
   path = null,
   worktreeBranch = null,
   worktreeBusy = false,
+  running = false,
+  gitRevision = 0,
   onInspectWorktree,
   onApplyWorktree,
+  onRevertFiles,
   onHandoff,
 }: SessionDetailsProps) {
   const contextSummary = contextLabel(context);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<InspectorTabId>('context');
+  const gitStatus = useSessionGitStatus({
+    sessionId,
+    running,
+    revision: gitRevision,
+  });
+  const gitFiles = useMemo(
+    () =>
+      parseUnifiedGitDiff({
+        diff: gitStatus.status?.diff ?? '',
+        changedFiles: gitStatus.status?.changedFiles ?? [],
+      }),
+    [gitStatus.status],
+  );
+  const gitSummary = useMemo(() => summarizeGitChanges(gitFiles), [gitFiles]);
 
   if (collapsed) return null;
 
-  const tabs = inspectorTabs({ subagents, worktreeBranch });
+  const tabs = inspectorTabs({
+    subagents,
+    worktreeBranch,
+    changedFilesCount: gitFiles.length,
+  });
   const counts = subagentSummaryCounts(subagents);
   const hasActions = Boolean(
     (worktreeBranch && (onInspectWorktree || onApplyWorktree)) || onHandoff,
@@ -248,6 +280,107 @@ export function SessionDetails({
                 usedTokens={context?.usedTokens ?? null}
               />
             ) : null}
+          </section>
+        ) : null}
+        {activeTab === 'changes' ? (
+          <section className="session-details-section">
+            <div className="session-git-head">
+              <div className="session-git-summary mono">
+                <span>
+                  {gitSummary.fileCount} {gitSummary.fileCount === 1 ? 'arquivo' : 'arquivos'}
+                </span>
+                {gitSummary.addedLines > 0 ? (
+                  <span className="chat-diff-stat-add">+{gitSummary.addedLines}</span>
+                ) : null}
+                {gitSummary.removedLines > 0 ? (
+                  <span className="chat-diff-stat-del">-{gitSummary.removedLines}</span>
+                ) : null}
+              </div>
+              <div className="session-git-head-actions">
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label="Atualizar alterações Git"
+                  data-tooltip="Atualizar alterações Git"
+                  disabled={gitStatus.loading}
+                  onClick={gitStatus.refresh}
+                >
+                  <RefreshIcon size={13} />
+                </button>
+              </div>
+            </div>
+            {gitFiles.length > 0 ? (
+              <div className="session-git-actions-bar">
+                {onInspectWorktree ? (
+                  <button type="button" className="btn btn-sm" onClick={() => onInspectWorktree()}>
+                    Ver diff
+                  </button>
+                ) : null}
+                {onRevertFiles ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={worktreeBusy}
+                    onClick={() => void onRevertFiles(gitFiles.map((file) => file.path))}
+                  >
+                    <RotateCcwIcon size={12} />
+                    Reverter tudo
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {gitStatus.error ? <p className="context-breakdown-error">{gitStatus.error}</p> : null}
+            {gitFiles.length === 0 ? (
+              <p className="session-details-empty">
+                {gitStatus.loading ? 'Lendo alterações Git…' : 'Nenhuma alteração Git na sessão.'}
+              </p>
+            ) : (
+              <ul className="session-git-list">
+                {gitFiles.map((file) => {
+                  const { fileName, dirName } = splitFilePath(file.path);
+                  return (
+                    <li key={file.path} className="session-git-item">
+                      <button
+                        type="button"
+                        className="session-git-item-main"
+                        title={file.path}
+                        onClick={() => onInspectWorktree?.(file.path)}
+                      >
+                        <span className="session-git-badge" data-status={file.status}>
+                          {STATUS_BADGE[file.status]}
+                        </span>
+                        <span className="session-git-item-names">
+                          <span className="session-git-item-name mono">{fileName}</span>
+                          {dirName ? (
+                            <span className="session-git-item-dir mono">{dirName}</span>
+                          ) : null}
+                        </span>
+                        <span className="session-git-item-stats mono">
+                          {file.addedLines > 0 ? (
+                            <span className="chat-diff-stat-add">+{file.addedLines}</span>
+                          ) : null}
+                          {file.removedLines > 0 ? (
+                            <span className="chat-diff-stat-del">-{file.removedLines}</span>
+                          ) : null}
+                        </span>
+                      </button>
+                      {onRevertFiles ? (
+                        <button
+                          type="button"
+                          className="icon-btn session-git-item-revert"
+                          aria-label={`Reverter ${file.path}`}
+                          data-tooltip="Reverter arquivo"
+                          disabled={worktreeBusy}
+                          onClick={() => void onRevertFiles([file.path])}
+                        >
+                          <RotateCcwIcon size={12} />
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         ) : null}
         {activeTab === 'subagents' ? (
@@ -357,7 +490,7 @@ export function SessionDetails({
                     type="button"
                     className="btn btn-sm"
                     data-tooltip="Ver as alterações do worktree desta sessão"
-                    onClick={onInspectWorktree}
+                    onClick={() => onInspectWorktree()}
                   >
                     Ver diff
                   </button>

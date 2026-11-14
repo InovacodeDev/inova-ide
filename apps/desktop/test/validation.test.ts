@@ -277,6 +277,16 @@ test('worktree, checkpoint restore, and project verification validation', () => 
     ref: 'refs/inova/checkpoints/s1/t1',
     preserveFiles: [],
   });
+  expect(parseRestoreCheckpoint({ sessionId: 's1', files: ['src/app.ts', 'README.md'] })).toEqual({
+    sessionId: 's1',
+    preserveFiles: [],
+    files: ['src/app.ts', 'README.md'],
+  });
+  expect(parseRestoreCheckpoint({ sessionId: 's1' })).toBeUndefined();
+  expect(parseRestoreCheckpoint({ sessionId: 's1', files: [] })).toBeUndefined();
+  expect(parseRestoreCheckpoint({ sessionId: 's1', files: ['../secret'] })).toBeUndefined();
+  expect(parseRestoreCheckpoint({ sessionId: 's1', files: ['/abs/path'] })).toBeUndefined();
+  expect(parseRestoreCheckpoint({ sessionId: 's1', files: ['win\\path'] })).toBeUndefined();
   expect(parseRestoreCheckpoint({ sessionId: 's1', ref: 'refs/heads/main' })).toBeUndefined();
   expect(
     parseProjectVerification({

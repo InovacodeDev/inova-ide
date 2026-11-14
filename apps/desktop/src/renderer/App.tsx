@@ -34,13 +34,14 @@ import { ForkModal } from './ForkModal';
 import { HandoffModal } from './HandoffModal';
 import { ImportSessionModal, type ImportRequest } from './ImportSessionModal';
 import { Header } from './Header';
-import { AlertIcon, CloseIcon, GitBranchIcon } from './icons';
+import { AlertIcon } from './icons';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
 import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
+import { SessionDiffModal } from './SessionDiffModal';
 import { SessionHeader } from './SessionHeader';
 import { isAccountBusyElsewhere } from './queue-state';
 import { sessionStatus } from './session-status';
@@ -104,7 +105,10 @@ export function App() {
   const [worktreeModal, setWorktreeModal] = useState<{
     session: Session;
     status: WorktreeStatusView;
+    initialFilePath: string | null;
   } | null>(null);
+  const [gitRevision, setGitRevision] = useState(0);
+  const [revertingFiles, setRevertingFiles] = useState(false);
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
   const [pausedQueueIds, setPausedQueueIds] = useState<string[]>([]);
@@ -789,9 +793,15 @@ export function App() {
     await reloadSessions(session.projectId);
   };
 
-  const inspectWorktree = async (session: Session) => {
+  const inspectWorktree = async (session: Session, initialFilePath?: string) => {
     const result = await call(() => window.inova.getWorktreeStatus({ sessionId: session.id }));
-    if (result) setWorktreeModal({ session, status: result.value });
+    if (result) {
+      setWorktreeModal({
+        session,
+        status: result.value,
+        initialFilePath: initialFilePath ?? null,
+      });
+    }
   };
 
   const applyWorktree = async (session: Session) => {
@@ -800,11 +810,40 @@ export function App() {
       const result = await call(() => window.inova.applyWorktree({ sessionId: session.id }));
       if (!result) return;
       setWorktreeModal(null);
+      setGitRevision((revision) => revision + 1);
       setNotice(
         `Alterações aplicadas no projeto principal (${result.value.appliedFiles.length} arquivo(s)).`,
       );
     } finally {
       setApplyingWorktree(false);
+    }
+  };
+
+  const revertSessionFiles = async (session: Session, files: string[]): Promise<boolean> => {
+    if (files.length === 0) return false;
+    setRevertingFiles(true);
+    try {
+      const result = await call(() =>
+        window.inova.restoreCheckpoint({ sessionId: session.id, files }),
+      );
+      if (!result) return false;
+      setGitRevision((revision) => revision + 1);
+      const refreshed = await window.inova.getWorktreeStatus({ sessionId: session.id });
+      if (refreshed.ok) {
+        setWorktreeModal((current) =>
+          current && current.session.id === session.id
+            ? { ...current, status: refreshed.value }
+            : current,
+        );
+      }
+      setNotice(
+        files.length === 1
+          ? `Arquivo revertido: ${files[0]}`
+          : `${files.length} arquivo(s) revertido(s).`,
+      );
+      return true;
+    } finally {
+      setRevertingFiles(false);
     }
   };
 
@@ -821,6 +860,7 @@ export function App() {
       }),
     );
     if (!result) return;
+    setGitRevision((revision) => revision + 1);
     setNotice('Checkpoint restaurado no repositório.');
   };
 
@@ -1473,13 +1513,16 @@ export function App() {
                   accountDisplay={accountDisplayOf(activeAccount, activeProject)}
                   path={activeProject.path}
                   worktreeBranch={activeSession.worktree?.branch ?? null}
-                  worktreeBusy={applyingWorktree || Boolean(chats[activeSession.id]?.running)}
-                  onInspectWorktree={
-                    activeSession.worktree ? () => void inspectWorktree(activeSession) : undefined
+                  worktreeBusy={
+                    applyingWorktree || revertingFiles || Boolean(chats[activeSession.id]?.running)
                   }
+                  running={Boolean(chats[activeSession.id]?.running)}
+                  gitRevision={gitRevision}
+                  onInspectWorktree={(filePath) => void inspectWorktree(activeSession, filePath)}
                   onApplyWorktree={
                     activeSession.worktree ? () => void applyWorktree(activeSession) : undefined
                   }
+                  onRevertFiles={(files) => revertSessionFiles(activeSession, files)}
                   onHandoff={() => setPendingHandoff(activeSession)}
                 />
               )}
@@ -1644,61 +1687,23 @@ export function App() {
         />
       )}
       {worktreeModal && (
-        <div
-          className="modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="worktree-diff-title"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setWorktreeModal(null);
-          }}
-        >
-          <div className="modal-card sync-modal-card">
-            <div className="modal-header">
-              <GitBranchIcon size={17} />
-              <div className="modal-title-group">
-                <h2 id="worktree-diff-title" className="modal-title">
-                  Alterações do worktree ({worktreeModal.status.branch})
-                </h2>
-              </div>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Fechar diff do worktree"
-                data-tooltip="Fechar diff do worktree"
-                data-shortcut="dismiss"
-                onClick={() => setWorktreeModal(null)}
-              >
-                <CloseIcon size={15} />
-              </button>
-            </div>
-            <div className="modal-body">
-              {worktreeModal.status.changedFiles.length === 0 ? (
-                <p className="modal-description">Nenhuma alteração pendente em relação à base.</p>
-              ) : (
-                <>
-                  <p className="modal-description mono">{worktreeModal.status.diffStat}</p>
-                  <pre className="worktree-diff-pre">{worktreeModal.status.diff}</pre>
-                </>
-              )}
-            </div>
-            <div className="modal-footer">
-              <button type="button" className="btn" onClick={() => setWorktreeModal(null)}>
-                Fechar
-              </button>
-              {worktreeModal.status.changedFiles.length > 0 ? (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={applyingWorktree || Boolean(chats[worktreeModal.session.id]?.running)}
-                  onClick={() => void applyWorktree(worktreeModal.session)}
-                >
-                  {applyingWorktree ? 'Aplicando…' : 'Aplicar no projeto principal'}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <SessionDiffModal
+          key={worktreeModal.session.id}
+          status={worktreeModal.status}
+          hasWorktree={Boolean(worktreeModal.session.worktree)}
+          busy={
+            applyingWorktree || revertingFiles || Boolean(chats[worktreeModal.session.id]?.running)
+          }
+          initialFilePath={worktreeModal.initialFilePath}
+          onClose={() => setWorktreeModal(null)}
+          onRefresh={() => void inspectWorktree(worktreeModal.session)}
+          onApplyWorktree={
+            worktreeModal.session.worktree
+              ? () => void applyWorktree(worktreeModal.session)
+              : undefined
+          }
+          onRevertFiles={(files) => revertSessionFiles(worktreeModal.session, files)}
+        />
       )}
       {pendingFork && (
         <ForkModal

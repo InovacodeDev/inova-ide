@@ -1,6 +1,6 @@
 import type { SubagentSnapshot } from '@inova/core/chat-types';
 
-export type InspectorTabId = 'context' | 'subagents' | 'session';
+export type InspectorTabId = 'context' | 'changes' | 'subagents' | 'session';
 
 export interface InspectorTabMeta {
   id: InspectorTabId;
@@ -41,6 +41,7 @@ export function subagentSummaryCounts(
 export function inspectorTabs(input: {
   subagents?: readonly SubagentSnapshot[];
   worktreeBranch?: string | null;
+  changedFilesCount?: number;
 }): InspectorTabMeta[] {
   const counts = subagentSummaryCounts(input.subagents ?? []);
   const subagentBadge =
@@ -49,8 +50,14 @@ export function inspectorTabs(input: {
       : counts.running > 0
         ? `${counts.running}/${counts.total}`
         : String(counts.total);
+  const changesCount = input.changedFilesCount ?? 0;
   return [
     { id: 'context', label: 'Contexto', badge: null },
+    {
+      id: 'changes',
+      label: 'Git',
+      badge: changesCount > 0 ? String(changesCount) : null,
+    },
     { id: 'subagents', label: 'Subagentes', badge: subagentBadge },
     { id: 'session', label: 'Sessão', badge: input.worktreeBranch ? 'wt' : null },
   ];

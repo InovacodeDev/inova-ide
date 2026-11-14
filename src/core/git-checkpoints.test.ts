@@ -122,4 +122,34 @@ describe('git-checkpoints', () => {
     });
     expect(cached.trim()).toBe('staged-later.txt');
   });
+
+  test('restores only requested files when files filter is supplied', async () => {
+    const repo = await initRepo();
+    await writeFile(join(repo, 'other.txt'), 'keep-me\n');
+    await exec('git', ['add', 'other.txt'], { cwd: repo });
+    await exec('git', ['commit', '-m', 'add other'], { cwd: repo });
+
+    const cp = await createCheckpoint({
+      repoPath: repo,
+      sessionId: 'sess-partial',
+      turnId: 'turn-1',
+    });
+    expect(cp).not.toBeNull();
+
+    await writeFile(join(repo, 'tracked.txt'), 'changed-tracked\n');
+    await writeFile(join(repo, 'other.txt'), 'changed-other\n');
+    await writeFile(join(repo, 'created-one.txt'), 'remove-me\n');
+    await writeFile(join(repo, 'created-two.txt'), 'keep-me\n');
+
+    await restoreCheckpoint({
+      repoPath: repo,
+      ref: cp!.ref,
+      files: ['tracked.txt', 'created-one.txt'],
+    });
+
+    expect(await readFile(join(repo, 'tracked.txt'), 'utf8')).toBe('v1\n');
+    expect(await readFile(join(repo, 'other.txt'), 'utf8')).toBe('changed-other\n');
+    expect(existsSync(join(repo, 'created-one.txt'))).toBe(false);
+    expect(existsSync(join(repo, 'created-two.txt'))).toBe(true);
+  });
 });

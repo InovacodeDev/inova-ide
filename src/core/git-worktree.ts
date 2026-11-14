@@ -80,6 +80,20 @@ export async function getWorktreeStatus(input: {
   worktreePath: string;
   baseCommit: string;
 }): Promise<WorktreeStatus> {
+  const verified = await tryRunGit({
+    cwd: input.worktreePath,
+    args: ['rev-parse', '--verify', '--quiet', `${input.baseCommit}^{commit}`],
+  });
+  if (!verified.ok) {
+    return {
+      branch: '',
+      changedFiles: [],
+      diffStat: '',
+      diff: '',
+      dirty: false,
+    };
+  }
+
   const branchRes = await tryRunGit({
     cwd: input.worktreePath,
     args: ['rev-parse', '--abbrev-ref', 'HEAD'],

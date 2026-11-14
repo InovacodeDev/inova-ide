@@ -105,6 +105,7 @@ export async function restoreCheckpoint(input: {
   repoPath: string;
   ref: string;
   preserveFiles?: readonly string[];
+  files?: readonly string[];
 }): Promise<void> {
   await runGit({ cwd: input.repoPath, args: ['rev-parse', '--verify', input.ref] });
 
@@ -140,20 +141,33 @@ export async function restoreCheckpoint(input: {
   );
   const preserve = new Set(input.preserveFiles ?? []);
 
-  const existingFiles = new Set([
-    ...trackedBuf
-      .toString('utf8')
-      .split('\0')
-      .filter((entry) => entry !== ''),
-    ...untrackedBuf
-      .toString('utf8')
-      .split('\0')
-      .filter((entry) => entry !== ''),
-  ]);
+  let checkoutTargets: string[] | null = null;
+  if (input.files !== undefined) {
+    const requested = [...new Set(input.files.filter((entry) => entry !== ''))];
+    if (requested.length === 0) return;
+    for (const relPath of requested) {
+      if (targetFiles.has(relPath) || preserve.has(relPath)) continue;
+      await rm(join(input.repoPath, relPath), { force: true });
+    }
+    checkoutTargets = requested.filter(
+      (relPath) => targetFiles.has(relPath) && !preserve.has(relPath),
+    );
+  } else {
+    const existingFiles = new Set([
+      ...trackedBuf
+        .toString('utf8')
+        .split('\0')
+        .filter((entry) => entry !== ''),
+      ...untrackedBuf
+        .toString('utf8')
+        .split('\0')
+        .filter((entry) => entry !== ''),
+    ]);
 
-  for (const relPath of existingFiles) {
-    if (targetFiles.has(relPath) || preserve.has(relPath)) continue;
-    await rm(join(input.repoPath, relPath), { force: true });
+    for (const relPath of existingFiles) {
+      if (targetFiles.has(relPath) || preserve.has(relPath)) continue;
+      await rm(join(input.repoPath, relPath), { force: true });
+    }
   }
 
   const gitDir = resolve(input.repoPath, gitDirRaw.trim());
@@ -164,10 +178,30 @@ export async function restoreCheckpoint(input: {
       cwd: input.repoPath,
       env,
     });
-    if (targetFiles.size > 0) {
+    if (checkoutTargets === null) {
+      if (targetFiles.size > 0) {
+        await execFileAsync(
+          'git',
+          ['--git-dir', gitDir, '--work-tree', input.repoPath, 'checkout-index', '-a', '-f'],
+          {
+            cwd: input.repoPath,
+            env,
+          },
+        );
+      }
+    } else if (checkoutTargets.length > 0) {
       await execFileAsync(
         'git',
-        ['--git-dir', gitDir, '--work-tree', input.repoPath, 'checkout-index', '-a', '-f'],
+        [
+          '--git-dir',
+          gitDir,
+          '--work-tree',
+          input.repoPath,
+          'checkout-index',
+          '-f',
+          '--',
+          ...checkoutTargets,
+        ],
         {
           cwd: input.repoPath,
           env,
