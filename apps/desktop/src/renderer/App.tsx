@@ -48,6 +48,7 @@ import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
 import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
+import { refreshableUsageLabels, settleUsage, USAGE_REFRESH_INTERVAL_MS } from './usage-refresh';
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
 import { adjacentSessionId, canOpenTab, tabsReducer, type Tab } from './tabs';
@@ -89,6 +90,7 @@ export function App() {
   const [modelsByAccount, setModelsByAccount] = useState<Record<string, ProviderModels>>({});
   const [defaultModes, setDefaultModes] = useState<Partial<Record<ProviderId, ExecutionMode>>>({});
   const loadingModelsRef = useRef<Set<string>>(new Set());
+  const usageInflightRef = useRef<Set<string>>(new Set());
   const [view, setView] = useState<View>('workspace');
   const [loginModal, setLoginModal] = useState<LoginModalState | null>(null);
   const [pendingRemoveAccount, setPendingRemoveAccount] = useState<AccountView | null>(null);
@@ -189,7 +191,8 @@ export function App() {
   }, [call, reloadSessions]);
 
   const loadUsage = useCallback(
-    async (accountLabel: string) => {
+    async (accountLabel: string, background = false) => {
+      usageInflightRef.current.add(accountLabel);
       setUsage((current) =>
         current[accountLabel]?.status === 'ready'
           ? current
@@ -208,11 +211,25 @@ export function App() {
       } catch (error: unknown) {
         console.error('inova: unexpected renderer error', error);
         next = { status: 'error', message: 'Erro inesperado.' };
+      } finally {
+        usageInflightRef.current.delete(accountLabel);
       }
-      setUsage((current) => ({ ...current, [accountLabel]: next }));
+      setUsage((current) => ({
+        ...current,
+        [accountLabel]: settleUsage({ current: current[accountLabel], next, background }),
+      }));
     },
     [reloadAccounts],
   );
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      refreshableUsageLabels(latest.current.accounts, usageInflightRef.current).forEach((label) => {
+        void loadUsage(label, true);
+      });
+    }, USAGE_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [loadUsage]);
 
   const loadModels = useCallback(async (accountLabel: string) => {
     if (loadingModelsRef.current.has(accountLabel)) return;
