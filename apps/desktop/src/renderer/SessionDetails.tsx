@@ -1,10 +1,125 @@
+import { useState } from 'react';
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
 import type { ContextInfo } from './chat-reducer';
-import { PanelRightCloseIcon, PanelRightOpenIcon } from './icons';
+import {
+  categoryLabel,
+  isReservedCategory,
+  rowParts,
+  sectionLabel,
+  sectionTotal,
+  sortedRows,
+} from './context-breakdown';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  RefreshIcon,
+} from './icons';
 import { contextLabel, formatTokens } from './token-format';
+import { useContextBreakdown } from './useContextBreakdown';
 import './session.css';
 
+function ContextBreakdownPanel({
+  sessionId,
+  usedTokens,
+}: {
+  sessionId: string;
+  usedTokens: number | null;
+}) {
+  const { breakdown, error, loading, refresh } = useContextBreakdown({ sessionId, usedTokens });
+  const maxTokens = Math.max(1, ...(breakdown?.categories.map((item) => item.tokens) ?? []));
+
+  return (
+    <div className="context-breakdown" aria-busy={loading}>
+      <div className="context-breakdown-head">
+        <span className="context-breakdown-status">
+          {loading ? 'Atualizando…' : breakdown ? 'Estimativa do Claude Code' : ''}
+        </span>
+        <button
+          type="button"
+          className="icon-btn context-breakdown-refresh"
+          aria-label="Atualizar detalhamento do contexto"
+          data-tooltip="Atualizar detalhamento do contexto"
+          disabled={loading}
+          onClick={refresh}
+        >
+          <RefreshIcon size={13} />
+        </button>
+      </div>
+      {error !== null ? <p className="context-breakdown-error">{error}</p> : null}
+      {breakdown === null && error === null && loading ? (
+        <p className="context-breakdown-empty">Lendo o contexto…</p>
+      ) : null}
+      {breakdown !== null ? (
+        <>
+          <ul className="context-breakdown-categories">
+            {breakdown.categories.map((category) => (
+              <li
+                key={category.name}
+                className="context-breakdown-category"
+                data-reserved={isReservedCategory(category.name)}
+              >
+                <div className="context-breakdown-row">
+                  <span className="context-breakdown-name">{categoryLabel(category.name)}</span>
+                  <span className="context-breakdown-tokens mono">
+                    {formatTokens(category.tokens)}
+                    {category.percent !== null ? ` · ${category.percent}%` : ''}
+                  </span>
+                </div>
+                {isReservedCategory(category.name) ? null : (
+                  <div className="context-breakdown-bar">
+                    <div
+                      className="context-breakdown-bar-fill"
+                      style={{ width: `${(category.tokens / maxTokens) * 100}%` }}
+                    />
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+          {breakdown.sections.map((section, sectionIndex) => (
+            <details key={`${sectionIndex}-${section.title}`} className="context-breakdown-section">
+              <summary className="context-breakdown-row">
+                <span className="context-breakdown-name">
+                  {sectionLabel(section.title)} ({section.rows.length})
+                </span>
+                <span className="context-breakdown-tokens mono">
+                  {formatTokens(sectionTotal(section))}
+                </span>
+              </summary>
+              <ul className="context-breakdown-items">
+                {sortedRows(section).map((row, rowIndex) => {
+                  const { name, detail } = rowParts(row);
+                  return (
+                    <li key={`${rowIndex}-${name}`} className="context-breakdown-item">
+                      <div className="context-breakdown-row">
+                        <span className="context-breakdown-name" title={name}>
+                          {name}
+                        </span>
+                        <span className="context-breakdown-tokens mono">
+                          {row.tokens === null ? '—' : formatTokens(row.tokens)}
+                        </span>
+                      </div>
+                      {detail ? (
+                        <span className="context-breakdown-detail mono" title={detail}>
+                          {detail}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          ))}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 interface SessionDetailsProps {
+  sessionId: string;
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
   collapsed: boolean;
@@ -18,12 +133,14 @@ const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
 };
 
 export function SessionDetails({
+  sessionId,
   subagents = [],
   context,
   collapsed,
   onToggleCollapsed,
 }: SessionDetailsProps) {
   const contextSummary = contextLabel(context);
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
 
   if (collapsed) {
     return (
@@ -74,6 +191,22 @@ export function SessionDetails({
           ) : null}
           <span className="session-details-context-model mono">{context?.model ?? '—'}</span>
         </div>
+        <button
+          type="button"
+          className="context-breakdown-toggle"
+          aria-expanded={breakdownOpen}
+          onClick={() => setBreakdownOpen((open) => !open)}
+        >
+          {breakdownOpen ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}O que
+          consumiu o contexto
+        </button>
+        {breakdownOpen ? (
+          <ContextBreakdownPanel
+            key={sessionId}
+            sessionId={sessionId}
+            usedTokens={context?.usedTokens ?? null}
+          />
+        ) : null}
       </section>
       {subagents.length > 0 ? (
         <section className="session-details-section">

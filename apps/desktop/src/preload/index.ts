@@ -72,6 +72,7 @@ const api: InovaApi = {
   reportUiFocus: (input) => ipcRenderer.send(CHANNELS.reportUiFocus, input),
   cancelTurn: (sessionId) => ipcRenderer.send(CHANNELS.cancelTurn, sessionId),
   getUsage: (input) => ipcRenderer.invoke(CHANNELS.getUsage, input),
+  getContextBreakdown: (input) => ipcRenderer.invoke(CHANNELS.getContextBreakdown, input),
   listModels: (input) => ipcRenderer.invoke(CHANNELS.listModels, input),
   searchFiles: (input) => ipcRenderer.invoke(CHANNELS.searchFiles, input),
   listCommands: (input) => ipcRenderer.invoke(CHANNELS.listCommands, input),

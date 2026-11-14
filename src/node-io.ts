@@ -23,7 +23,12 @@ function diedBySignal(error: unknown): boolean {
 export const nodeRunner: CommandRunner = {
   run: (cmd) =>
     new Promise((resolve, reject) => {
-      const options = { env: cmd.env, encoding: 'utf8', timeout: RUNNER_TIMEOUT_MS } as const;
+      const options = {
+        env: cmd.env,
+        encoding: 'utf8',
+        timeout: cmd.timeoutMs ?? RUNNER_TIMEOUT_MS,
+        ...(cmd.cwd === undefined ? {} : { cwd: cmd.cwd }),
+      } as const;
       execFile(cmd.command, cmd.args, options, (error, stdout) => {
         if (error === null) return resolve({ exitCode: 0, stdout });
         const code = errorCode(error);

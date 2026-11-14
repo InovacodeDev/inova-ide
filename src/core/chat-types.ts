@@ -25,6 +25,31 @@ export interface VerificationCheckResult {
   output: string;
 }
 
+export interface ContextCategory {
+  name: string;
+  tokens: number;
+  percent: number | null;
+}
+
+export interface ContextSectionRow {
+  cells: string[];
+  tokens: number | null;
+}
+
+export interface ContextSection {
+  title: string;
+  columns: string[];
+  rows: ContextSectionRow[];
+}
+
+export interface ContextBreakdown {
+  model: string | null;
+  usedTokens: number | null;
+  windowTokens: number | null;
+  categories: ContextCategory[];
+  sections: ContextSection[];
+}
+
 export type SubagentStatus = 'running' | 'done' | 'error';
 
 export interface SubagentSnapshot {

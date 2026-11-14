@@ -1442,6 +1442,7 @@ export function App() {
               })}
               {activeSession && activeProject && (
                 <SessionDetails
+                  sessionId={activeSession.id}
                   subagents={chats[activeSession.id]?.subagents}
                   context={chats[activeSession.id]?.context}
                   collapsed={detailsCollapsed}

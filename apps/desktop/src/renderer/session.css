@@ -383,3 +383,139 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.context-breakdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.context-breakdown-toggle:hover,
+.context-breakdown-toggle[aria-expanded='true'] {
+  color: var(--text);
+}
+
+.context-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.context-breakdown-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.context-breakdown-status,
+.context-breakdown-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.context-breakdown-refresh {
+  width: 24px;
+  height: 24px;
+}
+
+.context-breakdown-error {
+  margin: 0;
+  color: var(--error);
+}
+
+.context-breakdown-categories,
+.context-breakdown-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.context-breakdown-items {
+  gap: 6px;
+  padding: 6px 0 2px 12px;
+}
+
+.context-breakdown-category,
+.context-breakdown-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.context-breakdown-category[data-reserved='true'] {
+  color: var(--muted);
+}
+
+.context-breakdown-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.context-breakdown-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-breakdown-tokens {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.context-breakdown-detail {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-breakdown-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.context-breakdown-bar-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.context-breakdown-section > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.context-breakdown-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.context-breakdown-section > summary .context-breakdown-name::before {
+  content: '▸ ';
+  color: var(--muted);
+}
+
+.context-breakdown-section[open] > summary .context-breakdown-name::before {
+  content: '▾ ';
+}

@@ -64,6 +64,7 @@ function setup() {
       'markInboxRead',
       'clearReadInbox',
       'getUsage',
+      'getContextBreakdown',
       'listModels',
       'startLogin',
       'submitLoginCode',
@@ -193,6 +194,7 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   expect(electron.invokes.has('inova:renameSession')).toBe(false);
   await invoke('inova:loadTranscript', trusted, input);
   await invoke('inova:getUsage', trusted, input);
+  await invoke('inova:getContextBreakdown', trusted, input);
   await invoke('inova:listModels', trusted, input);
   await invoke('inova:getDefaultModes', trusted);
   await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
@@ -236,6 +238,7 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:applyProfileSync', trusted, { projectId: 'p', approvedIds: ['x'] });
   expect(handlers['loadTranscript']).toHaveBeenCalledWith(input);
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
+  expect(handlers['getContextBreakdown']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
   expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
   expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });

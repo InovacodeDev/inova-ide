@@ -1,5 +1,5 @@
 import type { AuthStatus } from '@inova/core/providers';
-import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ComparisonDiffView } from '@inova/core/git-compare';
 import type { ProviderModels } from '@inova/core/models';
@@ -260,6 +260,7 @@ export interface InovaApi {
   reportUiFocus(input: { activeSessionId: string | null; windowFocused: boolean }): void;
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
+  getContextBreakdown(input: { sessionId: string }): Promise<Result<ContextBreakdown>>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
   searchFiles(input: {
     projectId: string;
@@ -364,6 +365,7 @@ export const CHANNELS = {
   reportUiFocus: 'inova:reportUiFocus',
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
+  getContextBreakdown: 'inova:getContextBreakdown',
   listModels: 'inova:listModels',
   searchFiles: 'inova:searchFiles',
   listCommands: 'inova:listCommands',
