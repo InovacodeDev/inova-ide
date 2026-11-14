@@ -14,6 +14,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Comandos `/` nativos de cada provedor, como `/clear` e `/compact` no Claude.
 - Skills chamadas com `/nome` aparecem como tag na mensagem enviada.
 - Menu lateral recolhível, com barra flutuante de ícones.
+- Fila de mensagens por sessão: mensagens enviadas enquanto o agente trabalha são enviadas uma por vez ao fim de cada resposta, com contagem visível.
+- Conta no limite de uso volta a funcionar sozinha: ao enviar depois do horário de reset, o app confere e sincroniza o uso.
 
 ### Alterado
 
