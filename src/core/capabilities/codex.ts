@@ -2,6 +2,7 @@ import type { CommandRunner } from '../providers.js';
 import { tomlTableHeader } from './file-edit.js';
 import type {
   CapabilityAdapter,
+  CapabilityCategoryResult,
   CapabilityContext,
   CapabilityItem,
   CapabilityListing,
@@ -11,6 +12,7 @@ import type {
 const COMMAND_TIMEOUT_MS = 30_000;
 const NOT_FOUND_MESSAGE = 'codex não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Codex.';
+const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Codex.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,22 +57,68 @@ function parseMcpItems(
   });
 }
 
+function parsePluginItems(stdout: string): CapabilityItem[] | null {
+  const parsed = parseJson(stdout);
+  if (!isRecord(parsed) || !Array.isArray(parsed['installed'])) return null;
+  return parsed['installed'].flatMap((entry: unknown): CapabilityItem[] => {
+    if (!isRecord(entry) || typeof entry['pluginId'] !== 'string') return [];
+    const id = entry['pluginId'];
+    return [
+      {
+        kind: 'plugin',
+        id,
+        name: typeof entry['name'] === 'string' ? entry['name'] : id,
+        description: null,
+        source: 'plugin',
+        enabled: entry['enabled'] !== false,
+        applyMode: 'account-file',
+        unsupportedReason: null,
+        tokens: null,
+        group: null,
+      },
+    ];
+  });
+}
+
 function runCodex(ctx: CapabilityContext, args: string[]): ReturnType<CommandRunner['run']> {
   return ctx.runner.run({ command: 'codex', args, env: ctx.env, timeoutMs: COMMAND_TIMEOUT_MS });
 }
 
+function category(input: {
+  kind: CapabilityCategoryResult['kind'];
+  items: CapabilityItem[] | null;
+  error: string;
+}): CapabilityCategoryResult {
+  return input.items === null
+    ? { kind: input.kind, items: [], error: input.error }
+    : { kind: input.kind, items: input.items, error: null };
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const mcp = await runCodex(ctx, ['mcp', 'list', '--json']);
-  if (!('exitCode' in mcp)) {
-    return { categories: [{ kind: 'mcp', items: [], error: NOT_FOUND_MESSAGE }], cost: null };
+  const [mcp, plugins] = await Promise.all([
+    runCodex(ctx, ['mcp', 'list', '--json']),
+    runCodex(ctx, ['plugin', 'list', '--json']),
+  ]);
+  if (!('exitCode' in mcp) || !('exitCode' in plugins)) {
+    const kinds = ['mcp', 'plugin'] as const;
+    return {
+      categories: kinds.map((kind) => ({ kind, items: [], error: NOT_FOUND_MESSAGE })),
+      cost: null,
+    };
   }
-  const items =
-    mcp.exitCode === 0 ? parseMcpItems(mcp.stdout, ctx.account.disabledCapabilities ?? []) : null;
+  const disabled = ctx.account.disabledCapabilities ?? [];
   return {
     categories: [
-      items === null
-        ? { kind: 'mcp', items: [], error: MCP_LIST_FAILED_MESSAGE }
-        : { kind: 'mcp', items, error: null },
+      category({
+        kind: 'mcp',
+        items: mcp.exitCode === 0 ? parseMcpItems(mcp.stdout, disabled) : null,
+        error: MCP_LIST_FAILED_MESSAGE,
+      }),
+      category({
+        kind: 'plugin',
+        items: plugins.exitCode === 0 ? parsePluginItems(plugins.stdout) : null,
+        error: PLUGIN_LIST_FAILED_MESSAGE,
+      }),
     ],
     cost: null,
   };

@@ -60,6 +60,30 @@ describe('codexCapabilities.list', () => {
     ]);
   });
 
+  it('lists only installed plugins with native enabled state', async () => {
+    const category = await categoryOf(
+      contextWith({
+        disabledCapabilities: [{ kind: 'plugin', id: 'github@openai-curated-remote' }],
+      }),
+      'plugin',
+    );
+    expect(category?.items).toEqual([
+      expect.objectContaining({
+        id: 'github@openai-curated-remote',
+        name: 'github',
+        enabled: true,
+        applyMode: 'account-file',
+        source: 'plugin',
+      }),
+      expect.objectContaining({ id: 'visualize@openai-curated-remote', enabled: false }),
+    ]);
+  });
+
+  it('keeps a failing MCP command from hiding plugins', async () => {
+    const ctx = contextWith({ overrides: { mcp: { exitCode: 1, stdout: '' } } });
+    expect((await categoryOf(ctx, 'plugin'))?.error).toBeNull();
+  });
+
   it('reports a failing or unparsable command in the category', async () => {
     const failed = contextWith({ overrides: { mcp: { exitCode: 1, stdout: '' } } });
     const garbage = contextWith({ overrides: { mcp: { exitCode: 0, stdout: 'not json' } } });
@@ -69,8 +93,9 @@ describe('codexCapabilities.list', () => {
   });
 
   it('reports not found when the binary is missing', async () => {
-    const ctx = contextWith({ overrides: { mcp: { notFound: true } } });
+    const ctx = contextWith({ overrides: { mcp: { notFound: true }, plugin: { notFound: true } } });
     expect((await categoryOf(ctx, 'mcp'))?.error).toBe('codex não encontrado.');
+    expect((await categoryOf(ctx, 'plugin'))?.error).toBe('codex não encontrado.');
   });
 });
 
