@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { isCapabilityRef } from './capabilities/types.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
@@ -38,8 +39,10 @@ function isSafeSegment(id: string): boolean {
 function isAccount(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'provider', 'label', 'homeDir', 'createdAt'])) return false;
-  const { id, provider } = value;
+  const { id, provider, disabledCapabilities } = value;
   return (
+    (disabledCapabilities === undefined ||
+      (Array.isArray(disabledCapabilities) && disabledCapabilities.every(isCapabilityRef))) &&
     typeof id === 'string' &&
     typeof provider === 'string' &&
     isProviderId(provider) &&
