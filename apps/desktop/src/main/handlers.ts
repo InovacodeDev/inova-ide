@@ -744,7 +744,9 @@ export function createHandlers(deps: HandlerDeps) {
 
   function handleChatEvent(sessionId: string, event: ChatEvent): void {
     deps.emit(sessionId, event);
-    if (event.kind !== 'text-delta') enqueueAppend(sessionId, event);
+    if (event.kind !== 'text-delta' && event.kind !== 'thinking-delta') {
+      enqueueAppend(sessionId, event);
+    }
     if (event.kind === 'session') {
       adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
     }

@@ -1,6 +1,7 @@
 import type { ChatItem } from './chat-reducer';
+import { plural, presentTool, toolSummary } from './tool-presentation';
 
-type ToolItem = Extract<ChatItem, { type: 'tool' }>;
+export { toolSummary };
 
 export interface ChatEntry {
   item: ChatItem;
@@ -15,18 +16,7 @@ export type ToolKind = 'shell' | 'edit' | 'other';
 
 const SHELL_TOOL = /bash|shell|exec/i;
 const EDIT_TOOL = /edit|write/i;
-const SUMMARY_KEYS = [
-  'description',
-  'command',
-  'file_path',
-  'filePath',
-  'path',
-  'pattern',
-  'query',
-  'url',
-  'prompt',
-] as const;
-const MAX_SUMMARY_CHARS = 100;
+const MAX_ACTIVITY_TARGET_CHARS = 48;
 
 export function toolKind(name: string): ToolKind {
   if (SHELL_TOOL.test(name)) return 'shell';
@@ -34,58 +24,84 @@ export function toolKind(name: string): ToolKind {
   return 'other';
 }
 
-function firstLine(input: string): string {
-  const line = input.split('\n').find((candidate) => candidate.trim() !== '') ?? '';
-  const trimmed = line.trim();
-  return trimmed.length > MAX_SUMMARY_CHARS ? `${trimmed.slice(0, MAX_SUMMARY_CHARS)}…` : trimmed;
+function baseName(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
 }
 
-function parseInputRecord(input: string): Record<string, unknown> | null {
-  if (!input.trimStart().startsWith('{')) return null;
-  try {
-    const value: unknown = JSON.parse(input);
-    return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function plural(input: { count: number; one: string; many: string }): string {
-  return `${input.count} ${input.count === 1 ? input.one : input.many}`;
-}
-
-export function toolSummary(item: Pick<ToolItem, 'input' | 'output' | 'isError'>): {
-  title: string;
-  result: string | null;
-} {
-  const record = parseInputRecord(item.input);
-  const described = SUMMARY_KEYS.flatMap((key) => {
-    const value = record?.[key];
-    return typeof value === 'string' && value.trim() !== '' ? [value] : [];
-  })[0];
-  const title = firstLine(described ?? item.input);
-  if (item.output === null || item.isError) return { title, result: null };
-  const output = item.output.trim();
-  const result =
-    output === ''
-      ? 'sem saída'
-      : plural({ count: output.split('\n').length, one: 'linha', many: 'linhas' });
-  return { title, result };
+function clipActivityTarget(target: string): string {
+  const trimmed = target.trim();
+  if (trimmed === '') return 'arquivos';
+  return trimmed.length > MAX_ACTIVITY_TARGET_CHARS
+    ? `${trimmed.slice(0, MAX_ACTIVITY_TARGET_CHARS - 1)}…`
+    : trimmed;
 }
 
 export function summarizeWork(entries: readonly ChatEntry[]): string {
+  const hasThinking = entries.some((entry) => entry.item.type === 'thinking');
   const tools = entries.flatMap((entry) => (entry.item.type === 'tool' ? [entry.item] : []));
   const count = (kind: ToolKind) => tools.filter((tool) => toolKind(tool.name) === kind).length;
   const failed = tools.filter((tool) => tool.isError).length;
-  const parts = [
-    { count: count('shell'), one: 'comando', many: 'comandos' },
-    { count: count('edit'), one: 'edição', many: 'edições' },
-    { count: count('other'), one: 'outra ação', many: 'outras ações' },
-  ]
-    .filter((part) => part.count > 0)
-    .map(plural);
+
+  let addedTotal = 0;
+  let removedTotal = 0;
+  for (const tool of tools) {
+    const presented = presentTool(tool);
+    if (presented.kind === 'edit') {
+      addedTotal += presented.addedLines;
+      removedTotal += presented.removedLines;
+    }
+  }
+
+  const editCount = count('edit');
+  const editSummary =
+    editCount === 0
+      ? null
+      : addedTotal > 0 || removedTotal > 0
+        ? `${plural({ count: editCount, one: 'edição', many: 'edições' })} (+${addedTotal} -${removedTotal})`
+        : plural({ count: editCount, one: 'edição', many: 'edições' });
+
+  const parts: string[] = [];
+  if (hasThinking) parts.push('raciocínio');
+  const shellCount = count('shell');
+  if (shellCount > 0) parts.push(plural({ count: shellCount, one: 'comando', many: 'comandos' }));
+  if (editSummary !== null) parts.push(editSummary);
+  const otherCount = count('other');
+  if (otherCount > 0) {
+    parts.push(plural({ count: otherCount, one: 'outra ação', many: 'outras ações' }));
+  }
   if (failed > 0) parts.push(`${failed} com erro`);
   return parts.join(' · ');
+}
+
+export function activeTurnActivity(items: readonly ChatItem[]): string {
+  let start = 0;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i]?.type === 'user') {
+      start = i + 1;
+      break;
+    }
+  }
+  const turnItems = items.slice(start);
+  for (let i = turnItems.length - 1; i >= 0; i -= 1) {
+    const item = turnItems[i];
+    if (item?.type !== 'tool' || item.output !== null) continue;
+    const presented = presentTool(item);
+    switch (presented.kind) {
+      case 'edit':
+        return `Editando ${baseName(presented.filePath)}…`;
+      case 'shell':
+        return 'Executando comando…';
+      case 'lookup':
+        return `Consultando ${clipActivityTarget(presented.target)}…`;
+      case 'todo':
+        return 'Atualizando tarefas…';
+      case 'generic':
+        return `Executando ${item.name}…`;
+    }
+  }
+  const last = turnItems[turnItems.length - 1];
+  if (last?.type === 'thinking' && last.streaming) return 'Raciocinando…';
+  return 'Pensando…';
 }
 
 function groupTurn(entries: ChatEntry[], expanded: boolean): ChatBlock[] {
@@ -95,10 +111,18 @@ function groupTurn(entries: ChatEntry[], expanded: boolean): ChatBlock[] {
   if (!answer) return asItems();
   const work = entries.filter(
     (entry) =>
-      entry.index < answer.index && (entry.item.type === 'tool' || entry.item.type === 'assistant'),
+      entry.index < answer.index &&
+      (entry.item.type === 'tool' ||
+        entry.item.type === 'assistant' ||
+        entry.item.type === 'thinking'),
   );
   const first = work[0];
-  if (!first || !work.some((entry) => entry.item.type === 'tool')) return asItems();
+  if (
+    !first ||
+    !work.some((entry) => entry.item.type === 'tool' || entry.item.type === 'thinking')
+  ) {
+    return asItems();
+  }
   const hidden = new Set(work.map((entry) => entry.index));
   return entries.flatMap((entry): ChatBlock[] => {
     if (entry.index === first.index) {

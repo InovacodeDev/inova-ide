@@ -48,18 +48,19 @@
 
 .sidebar-rail {
   box-sizing: border-box;
-  position: absolute;
-  top: 16px;
-  left: 16px;
-  z-index: 5;
+  width: 52px;
+  flex: none;
+  padding: 12px 8px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-rail .sidebar-rail-item:last-child {
+  margin-top: auto;
 }
 
 .sidebar-rail .sidebar-rail-item.active {

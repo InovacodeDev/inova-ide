@@ -1,12 +1,33 @@
 import { LogoIcon, RefreshIcon, SettingsIcon } from './icons';
+import type { SessionStatus } from './session-status';
+import type { Tab } from './tabs';
+import { TabBar } from './TabBar';
 
 interface HeaderProps {
   runningCount: number;
   update: { latest: string; installing: boolean; onInstall: () => void } | null;
   onOpenSettings: () => void;
+  tabs?: Tab[];
+  activeTabId?: string | null;
+  inWorkspace?: boolean;
+  statusOf?: (sessionId: string) => SessionStatus | undefined;
+  queuedCountOf?: (sessionId: string) => number;
+  onActivateTab?: (sessionId: string) => void;
+  onCloseTab?: (tab: Tab) => void;
 }
 
-export function Header({ runningCount, update, onOpenSettings }: HeaderProps) {
+export function Header({
+  runningCount,
+  update,
+  onOpenSettings,
+  tabs,
+  activeTabId = null,
+  inWorkspace = false,
+  statusOf,
+  queuedCountOf,
+  onActivateTab,
+  onCloseTab,
+}: HeaderProps) {
   return (
     <header className="app-header">
       <div className="app-brand">
@@ -15,6 +36,18 @@ export function Header({ runningCount, update, onOpenSettings }: HeaderProps) {
         <span className="app-name">
           Inova<span className="app-name-accent">IDE</span>
         </span>
+      </div>
+      <div className="app-header-tabs">
+        {tabs && tabs.length > 0 && statusOf && onActivateTab && onCloseTab ? (
+          <TabBar
+            tabs={tabs}
+            active={inWorkspace ? (activeTabId ?? null) : null}
+            statusOf={statusOf}
+            queuedCountOf={queuedCountOf}
+            onActivate={onActivateTab}
+            onClose={onCloseTab}
+          />
+        ) : null}
       </div>
       <div className="app-header-actions">
         {runningCount > 0 ? (

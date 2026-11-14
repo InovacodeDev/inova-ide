@@ -68,6 +68,8 @@ export type ChatEvent =
   | { kind: 'user'; text: string; at: string }
   | { kind: 'text-delta'; blockId: string; text: string }
   | { kind: 'text'; blockId: string; text: string }
+  | { kind: 'thinking-delta'; blockId: string; text: string }
+  | { kind: 'thinking'; blockId: string; text: string }
   | { kind: 'tool-use'; toolId: string; name: string; input: string }
   | { kind: 'tool-result'; toolId: string; output: string; isError: boolean }
   | { kind: 'usage-limits'; windows: UsageWindow[] }

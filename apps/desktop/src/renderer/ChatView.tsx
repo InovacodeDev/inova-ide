@@ -48,10 +48,14 @@ import { ConfirmModal } from './ConfirmModal';
 import { DictationControl } from './DictationControl';
 import { appendDictation, formatMegabytes } from './dictation';
 import {
+  CheckIcon,
   ClockIcon,
   CloseIcon,
   CopyIcon,
   FileIcon,
+  FileTextIcon,
+  FolderIcon,
+  GitBranchIcon,
   GitForkIcon,
   ListTodoIcon,
   PencilIcon,
@@ -63,6 +67,7 @@ import {
   TerminalIcon,
   ThumbDownIcon,
   ThumbUpIcon,
+  ZapIcon,
 } from './icons';
 import { copyToClipboard } from './clipboard';
 import { Markdown } from './Markdown';
@@ -73,11 +78,19 @@ import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
 import { queueCountLabel, queuedCardLabel } from './queue-state';
 import {
+  presentTool,
+  type DiffLine,
+  type PresentedEditTool,
+  type PresentedGenericTool,
+  type PresentedLookupTool,
+  type PresentedShellTool,
+  type PresentedTodoTool,
+} from './tool-presentation';
+import {
+  activeTurnActivity,
   agentTurnFooters,
   groupChatItems,
   summarizeWork,
-  toolKind,
-  toolSummary,
   type AgentTurnFooter,
   type ChatEntry,
 } from './turn-groups';
@@ -140,45 +153,501 @@ const NEAR_BOTTOM_PX = 80;
 const NO_ACTIVE_FORMATS: ReadonlySet<ComposerFormat> = new Set();
 const FILE_SEARCH_DEBOUNCE_MS = 80;
 
-function ToolIcon({ name }: { name: string }) {
-  const kind = toolKind(name);
-  if (kind === 'shell') return <TerminalIcon size={16} />;
-  if (kind === 'edit') return <PencilIcon size={16} />;
-  return <FileIcon size={16} />;
+const DIFF_PREVIEW_LIMIT = 120;
+
+function diffRowClass(type: DiffLine['type']): string {
+  if (type === 'add') return 'chat-diff-line chat-diff-line-add';
+  if (type === 'del') return 'chat-diff-line chat-diff-line-del';
+  return 'chat-diff-line chat-diff-line-ctx';
 }
 
-function ToolCard({ item }: { item: Extract<ChatItem, { type: 'tool' }> }) {
-  const summary = toolSummary(item);
+function diffSign(type: DiffLine['type']): string {
+  if (type === 'add') return '+';
+  if (type === 'del') return '-';
+  return ' ';
+}
+
+function ToolStatusBadges({
+  isError,
+  running,
+  result,
+}: {
+  isError: boolean;
+  running: boolean;
+  result?: string | null;
+}) {
+  return (
+    <>
+      {result !== null && result !== undefined ? (
+        <span className="chat-tool-status chat-tool-result">{result}</span>
+      ) : null}
+      {isError ? <span className="chat-tool-status chat-tool-failed">erro</span> : null}
+      {running ? (
+        <span className="chat-tool-status chat-tool-pending">
+          <span className="dot pulse" aria-hidden="true" />
+          executando
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+function EditToolCard({
+  item,
+  presented,
+  defaultOpen,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  presented: PresentedEditTool;
+  defaultOpen: boolean;
+}) {
+  const [expandedAll, setExpandedAll] = useState(false);
+  const totalLines = presented.diffLines.length;
+  const visibleLines = expandedAll
+    ? presented.diffLines
+    : presented.diffLines.slice(0, DIFF_PREVIEW_LIMIT);
+  const hiddenCount = totalLines - visibleLines.length;
+  const label = presented.operation === 'write' ? 'Novo arquivo' : 'Edição';
+
+  return (
+    <details
+      className={
+        item.isError ? 'chat-tool chat-tool-edit chat-tool-error' : 'chat-tool chat-tool-edit'
+      }
+      open={defaultOpen}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <PencilIcon size={16} />
+        </span>
+        <span className="chat-tool-name">{label}</span>
+        <span className="chat-tool-preview">{presented.filePath}</span>
+        {presented.addedLines > 0 ? (
+          <span className="chat-tool-status chat-diff-stat-add">+{presented.addedLines}</span>
+        ) : null}
+        {presented.removedLines > 0 ? (
+          <span className="chat-tool-status chat-diff-stat-del">-{presented.removedLines}</span>
+        ) : null}
+        <ToolStatusBadges isError={item.isError} running={item.output === null} />
+      </summary>
+      <div className="chat-tool-body">
+        {totalLines > 0 ? (
+          <div
+            className="chat-diff-view"
+            role="region"
+            aria-label={`Diff de ${presented.filePath}`}
+          >
+            {visibleLines.map((line, idx) => (
+              <div key={idx} className={diffRowClass(line.type)}>
+                <span className="chat-diff-num">{line.newLine ?? line.oldLine ?? ''}</span>
+                <span className="chat-diff-sign">{diffSign(line.type)}</span>
+                <span className="chat-diff-code">{line.text === '' ? ' ' : line.text}</span>
+              </div>
+            ))}
+            {hiddenCount > 0 ? (
+              <button type="button" className="chat-diff-more" onClick={() => setExpandedAll(true)}>
+                Mostrar todas as {totalLines} linhas (+{hiddenCount})
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <pre className="chat-tool-pre">{item.input}</pre>
+        )}
+        {item.isError && item.output !== null ? (
+          <pre className="chat-tool-pre">{item.output}</pre>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function ShellToolCard({
+  item,
+  presented,
+  onCopyText,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  presented: PresentedShellTool;
+  onCopyText: (text: string) => void;
+}) {
+  const result =
+    item.output === null
+      ? null
+      : presented.lineCount > 0
+        ? `${presented.lineCount} ${presented.lineCount === 1 ? 'linha' : 'linhas'}`
+        : 'ok';
+  const title = presented.command || item.name;
+  return (
+    <details
+      className={
+        item.isError ? 'chat-tool chat-tool-shell chat-tool-error' : 'chat-tool chat-tool-shell'
+      }
+      open={item.isError}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <TerminalIcon size={16} />
+        </span>
+        <span className="chat-tool-name">Terminal</span>
+        <span className="chat-tool-preview">$ {title}</span>
+        <ToolStatusBadges isError={item.isError} running={item.output === null} result={result} />
+      </summary>
+      <div className="chat-tool-body chat-shell-body">
+        <div className="chat-shell-head">
+          <code className="chat-shell-cmd">$ {title}</code>
+          <button
+            type="button"
+            className="chat-meta-btn"
+            aria-label="Copiar comando"
+            data-tooltip="Copiar comando"
+            onClick={() => onCopyText(title)}
+          >
+            <CopyIcon size={12} />
+          </button>
+        </div>
+        {presented.description ? (
+          <div className="chat-shell-desc">{presented.description}</div>
+        ) : null}
+        {presented.output === null ? null : (
+          <div className="chat-shell-output-wrap">
+            <div className="chat-tool-label">Saída</div>
+            <pre className="chat-shell-pre">
+              {presented.output === '' ? '(sem saída)' : presented.output}
+            </pre>
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function LookupIcon({ category }: { category: PresentedLookupTool['category'] }) {
+  if (category === 'files') return <FolderIcon size={15} />;
+  if (category === 'read') return <FileTextIcon size={15} />;
+  return <FileIcon size={15} />;
+}
+
+function LookupToolCard({
+  item,
+  presented,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  presented: PresentedLookupTool;
+}) {
+  return (
+    <details
+      className={
+        item.isError ? 'chat-tool chat-tool-lookup chat-tool-error' : 'chat-tool chat-tool-lookup'
+      }
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <LookupIcon category={presented.category} />
+        </span>
+        <span className="chat-tool-name">{presented.label}</span>
+        <span className="chat-tool-preview">{presented.target || item.name}</span>
+        <ToolStatusBadges
+          isError={item.isError}
+          running={item.output === null}
+          result={presented.detail}
+        />
+      </summary>
+      <div className="chat-tool-body">
+        {presented.output === null ? (
+          <pre className="chat-tool-pre">{item.input}</pre>
+        ) : (
+          <pre className="chat-tool-pre">{presented.output}</pre>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function TodoToolCard({
+  item,
+  presented,
+  defaultOpen,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  presented: PresentedTodoTool;
+  defaultOpen: boolean;
+}) {
+  const summaryCount = `${presented.completedCount}/${presented.items.length}`;
+  return (
+    <details
+      className={
+        item.isError ? 'chat-tool chat-tool-todo chat-tool-error' : 'chat-tool chat-tool-todo'
+      }
+      open={defaultOpen}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <ListTodoIcon size={16} />
+        </span>
+        <span className="chat-tool-name">Plano de tarefas</span>
+        <span className="chat-tool-preview">
+          {presented.items.length === 1 ? '1 item' : `${presented.items.length} itens`}
+        </span>
+        <ToolStatusBadges
+          isError={item.isError}
+          running={item.output === null}
+          result={summaryCount}
+        />
+      </summary>
+      <div className="chat-tool-body">
+        {presented.items.length > 0 ? (
+          <ul className="chat-todo-list">
+            {presented.items.map((todo, idx) => {
+              const cls =
+                todo.status === 'completed'
+                  ? 'chat-todo-item chat-todo-done'
+                  : todo.status === 'in_progress'
+                    ? 'chat-todo-item chat-todo-active'
+                    : 'chat-todo-item';
+              return (
+                <li key={idx} className={cls}>
+                  <span className="chat-todo-dot" aria-hidden="true">
+                    {todo.status === 'completed' ? (
+                      <CheckIcon size={12} />
+                    ) : todo.status === 'in_progress' ? (
+                      <span className="dot pulse" />
+                    ) : (
+                      <span className="chat-todo-ring" />
+                    )}
+                  </span>
+                  <span>{todo.content}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <pre className="chat-tool-pre">{item.input}</pre>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function GenericToolCard({
+  item,
+  presented,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  presented: PresentedGenericTool;
+}) {
   return (
     <details className={item.isError ? 'chat-tool chat-tool-error' : 'chat-tool'}>
       <summary className="chat-tool-summary">
         <span className="chat-tool-icon">
-          <ToolIcon name={item.name} />
+          <FileIcon size={16} />
         </span>
         <span className="chat-tool-name">{item.name}</span>
-        <span className="chat-tool-preview">{summary.title}</span>
-        {summary.result !== null ? (
-          <span className="chat-tool-status chat-tool-result">{summary.result}</span>
-        ) : null}
-        {item.isError ? <span className="chat-tool-status chat-tool-failed">erro</span> : null}
-        {item.output === null ? (
-          <span className="chat-tool-status chat-tool-pending">
-            <span className="dot pulse" aria-hidden="true" />
-            executando
-          </span>
-        ) : null}
+        <span className="chat-tool-preview">{presented.title}</span>
+        <ToolStatusBadges
+          isError={item.isError}
+          running={item.output === null}
+          result={presented.result}
+        />
       </summary>
       <div className="chat-tool-body">
         <div className="chat-tool-label">Entrada</div>
-        <pre className="chat-tool-pre">{item.input}</pre>
-        {item.output === null ? null : (
+        {presented.entries.length > 0 ? (
+          <div className="chat-tool-kv">
+            {presented.entries.map((entry) => (
+              <div key={entry.key} className="chat-tool-kv-row">
+                <span className="chat-tool-kv-key">{entry.key}</span>
+                <span className="chat-tool-kv-val">{entry.value}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <pre className="chat-tool-pre">{presented.rawInput}</pre>
+        )}
+        {presented.output === null ? null : (
           <>
             <div className="chat-tool-label">Saída</div>
-            <pre className="chat-tool-pre">{item.output}</pre>
+            <pre className="chat-tool-pre">{presented.output}</pre>
           </>
         )}
       </div>
     </details>
+  );
+}
+
+function ToolCard({
+  item,
+  defaultOpen = false,
+  onCopyText,
+}: {
+  item: Extract<ChatItem, { type: 'tool' }>;
+  defaultOpen?: boolean;
+  onCopyText: (text: string) => void;
+}) {
+  const presented = presentTool(item);
+  switch (presented.kind) {
+    case 'edit':
+      return <EditToolCard item={item} presented={presented} defaultOpen={defaultOpen} />;
+    case 'shell':
+      return <ShellToolCard item={item} presented={presented} onCopyText={onCopyText} />;
+    case 'lookup':
+      return <LookupToolCard item={item} presented={presented} />;
+    case 'todo':
+      return <TodoToolCard item={item} presented={presented} defaultOpen={defaultOpen} />;
+    case 'generic':
+      return <GenericToolCard item={item} presented={presented} />;
+  }
+}
+
+function ThinkingCard({ item }: { item: Extract<ChatItem, { type: 'thinking' }> }) {
+  const first =
+    item.text
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line !== '') ?? '';
+  return (
+    <details
+      className={
+        item.streaming
+          ? 'chat-tool chat-thinking-card chat-thinking-streaming'
+          : 'chat-tool chat-thinking-card'
+      }
+      open={item.streaming}
+    >
+      <summary className="chat-tool-summary">
+        <span className="chat-tool-icon">
+          <ZapIcon size={15} />
+        </span>
+        <span className="chat-tool-name">Raciocínio</span>
+        {first ? <span className="chat-tool-preview chat-thinking-preview">{first}</span> : null}
+        {item.streaming ? (
+          <span className="chat-tool-status chat-tool-pending">
+            <span className="dot pulse" aria-hidden="true" />
+            ativo
+          </span>
+        ) : null}
+      </summary>
+      <div className="chat-tool-body chat-thinking-body">
+        <Markdown text={item.text} streaming={item.streaming} />
+      </div>
+    </details>
+  );
+}
+
+function formatElapsedSeconds(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return `${mins}:${String(secs).padStart(2, '0')}`;
+}
+
+function LiveTurnStatus({ activity, elapsedSec }: { activity: string; elapsedSec: number }) {
+  return (
+    <div className="chat-row chat-thinking" aria-live="polite">
+      <span className="dot pulse" aria-hidden="true" />
+      <span className="chat-thinking-label">{activity}</span>
+      <span className="chat-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span className="chat-thinking-timer">{formatElapsedSeconds(elapsedSec)}</span>
+    </div>
+  );
+}
+
+function directoryName(workingDir: string | null): string | null {
+  if (!workingDir) return null;
+  const parts = workingDir.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? workingDir;
+}
+
+function ChatEmptyState({
+  provider,
+  modelLabel,
+  workingDir,
+  inWorktree,
+  readOnly,
+  hasReviewCommand,
+  onPickSuggestion,
+}: {
+  provider: ProviderId | null;
+  modelLabel: string;
+  workingDir: string | null;
+  inWorktree: boolean;
+  readOnly: boolean;
+  hasReviewCommand: boolean;
+  onPickSuggestion: (prompt: string) => void;
+}) {
+  const folder = directoryName(workingDir);
+  const providerLabel = provider ? PROVIDER_NAME[provider] : 'Agente';
+  const suggestions = [
+    {
+      label: 'Explorar arquitetura',
+      prompt:
+        'Explique a arquitetura principal deste projeto e os pontos de entrada mais importantes.',
+    },
+    {
+      label: 'Revisar alterações',
+      prompt: hasReviewCommand
+        ? '/review'
+        : 'Revise as alterações atuais no Git procurando bugs, riscos e pontos de melhoria.',
+    },
+    {
+      label: 'Executar testes',
+      prompt: 'Execute a suíte de testes relevante e resuma o que está passando ou falhando.',
+    },
+    {
+      label: 'Planejar tarefa',
+      prompt: 'Ajude a planejar passo a passo a próxima alteração antes de editar arquivos.',
+    },
+  ];
+
+  return (
+    <div className="chat-empty-card">
+      <div className="chat-empty-head">
+        {provider ? <ProviderBadge provider={provider} size={28} /> : null}
+        <div>
+          <div className="chat-empty-title">
+            {readOnly
+              ? 'Sessão arquivada sem mensagens'
+              : `Pronto para trabalhar com ${providerLabel}`}
+          </div>
+          <div className="chat-empty-sub">
+            {readOnly
+              ? 'Esta conversa não recebeu mensagens antes de ser encerrada.'
+              : 'Envie uma instrução, arraste arquivos ou escolha um atalho abaixo.'}
+          </div>
+        </div>
+      </div>
+      <div className="chat-empty-meta">
+        <span className="chat-empty-pill">{modelLabel}</span>
+        {folder ? (
+          <span className="chat-empty-pill" title={workingDir ?? undefined}>
+            <FolderIcon size={12} />
+            {folder}
+          </span>
+        ) : null}
+        {inWorktree ? (
+          <span className="chat-empty-pill">
+            <GitBranchIcon size={12} />
+            Worktree isolada
+          </span>
+        ) : null}
+      </div>
+      {readOnly ? null : (
+        <div className="chat-empty-chips">
+          {suggestions.map((suggestion) => (
+            <button
+              key={suggestion.label}
+              type="button"
+              className="chat-empty-chip"
+              onClick={() => onPickSuggestion(suggestion.prompt)}
+            >
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -276,6 +745,7 @@ function VerificationCard({
 interface MessageProps {
   item: ChatItem;
   turnIndex: number;
+  isLatestTurn?: boolean;
   showAgentLabel: boolean;
   provider: ProviderId | null;
   busy: boolean;
@@ -377,6 +847,7 @@ function AgentLabel({ provider }: { provider: ProviderId | null }) {
 function Message({
   item,
   turnIndex,
+  isLatestTurn = false,
   showAgentLabel,
   provider,
   busy,
@@ -477,7 +948,14 @@ function Message({
       return (
         <div className="chat-row">
           {label}
-          <ToolCard item={item} />
+          <ToolCard item={item} defaultOpen={isLatestTurn} onCopyText={onCopyText} />
+        </div>
+      );
+    case 'thinking':
+      return (
+        <div className="chat-row">
+          {label}
+          <ThinkingCard item={item} />
         </div>
       );
     case 'checkpoint':
@@ -728,6 +1206,37 @@ export function ChatView({
       return counter;
     });
   }, [items]);
+  const lastUserTurnIndex = useMemo(
+    () => userTurnIndices.reduce((max, current) => (current > max ? current : max), -1),
+    [userTurnIndices],
+  );
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setElapsedSec(0);
+    });
+    if (!running) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const timer = window.setInterval(() => {
+      setElapsedSec((current) => current + 1);
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [running, sessionId]);
+  const matchedModel = model ? catalog.models.find((entry) => entry.id === model) : undefined;
+  const resolvedModelLabel =
+    model === null ? catalog.defaultModelLabel : (matchedModel?.label ?? model);
+  const pickSuggestion = (prompt: string) => {
+    editorRef.current?.setMarkdown(prompt);
+    setDraft(prompt);
+    editorRef.current?.focus();
+  };
   const blocks = useMemo(
     () => groupChatItems(items, running, collapseFinishedTurns),
     [items, running, collapseFinishedTurns],
@@ -1023,10 +1532,12 @@ export function ChatView({
 
   const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => {
     const footer = footers.get(index);
+    const isLatestTurn = (userTurnIndices[index] ?? -1) === lastUserTurnIndex;
     return (
       <Message
         key={item.id}
         item={item}
+        isLatestTurn={isLatestTurn}
         onCopyText={copyText}
         agentMeta={
           footer ? (
@@ -1168,7 +1679,15 @@ export function ChatView({
       <div className="chat-list" ref={listRef} onScroll={onScroll}>
         <div className="chat-list-inner">
           {items.length === 0 && !running ? (
-            <div className="chat-empty">Envie uma mensagem para começar</div>
+            <ChatEmptyState
+              provider={provider}
+              modelLabel={resolvedModelLabel}
+              workingDir={workingDir}
+              inWorktree={inWorktree}
+              readOnly={readOnly}
+              hasReviewCommand={knownCommands.has('review')}
+              onPickSuggestion={pickSuggestion}
+            />
           ) : null}
           {blocks.map((block) => {
             const opensTurn = block.index === 0 || items[block.index - 1]?.type === 'user';
@@ -1182,7 +1701,10 @@ export function ChatView({
                 />
               );
             }
-            const isAgent = block.item.type === 'assistant' || block.item.type === 'tool';
+            const isAgent =
+              block.item.type === 'assistant' ||
+              block.item.type === 'tool' ||
+              block.item.type === 'thinking';
             return renderEntry(block, isAgent && opensTurn);
           })}
           {queuedTurns.map((queued) => (
@@ -1209,14 +1731,7 @@ export function ChatView({
             </div>
           ))}
           {thinking ? (
-            <div className="chat-row chat-thinking" aria-live="polite">
-              pensando
-              <span className="chat-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
+            <LiveTurnStatus activity={activeTurnActivity(items)} elapsedSec={elapsedSec} />
           ) : null}
         </div>
       </div>

@@ -129,6 +129,46 @@ describe('claude parser', () => {
       },
     ]);
   });
+
+  it('emits thinking-delta and non-empty thinking blocks', () => {
+    const parser = createChatParser('claude', { turnId: 't1' });
+    expect(
+      parser.parse(
+        JSON.stringify({
+          type: 'stream_event',
+          event: { type: 'message_start', message: { id: 'm9' } },
+          parent_tool_use_id: null,
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      parser.parse(
+        JSON.stringify({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            delta: { type: 'thinking_delta', thinking: 'Passo 1' },
+          },
+          parent_tool_use_id: null,
+        }),
+      ),
+    ).toEqual([{ kind: 'thinking-delta', blockId: 'm9:thinking', text: 'Passo 1' }]);
+    expect(
+      parser.parse(
+        JSON.stringify({
+          type: 'assistant',
+          message: {
+            id: 'm9',
+            content: [
+              { type: 'thinking', thinking: '' },
+              { type: 'thinking', thinking: 'Passo 1 completo' },
+            ],
+          },
+          parent_tool_use_id: null,
+        }),
+      ),
+    ).toEqual([{ kind: 'thinking', blockId: 'm9:thinking', text: 'Passo 1 completo' }]);
+  });
 });
 
 describe('gemini parser', () => {
@@ -260,6 +300,25 @@ describe('gemini parser', () => {
     });
     expect(first.parse(line)).not.toEqual(second.parse(line));
   });
+
+  it('emits thinking on DONE agent_response when present', () => {
+    const parser = createChatParser('gemini', { turnId: 't1' });
+    expect(
+      parser.parse(
+        JSON.stringify({
+          event: 'step_update',
+          step_update: {
+            step_index: 4,
+            state: 'DONE',
+            step_type: 'agent_response',
+            thinking: 'Analisando dependências',
+          },
+        }),
+      ),
+    ).toEqual([
+      { kind: 'thinking', blockId: 't1:gemini-thinking-4', text: 'Analisando dependências' },
+    ]);
+  });
 });
 
 describe('codex parser', () => {
@@ -267,6 +326,7 @@ describe('codex parser', () => {
     const events = parseFixture('codex', 'codex-exec.jsonl');
     expect(events).toEqual([
       { kind: 'session', providerSessionId: '0199a213-81c0-7800-8aa1-bbab2a035a53' },
+      { kind: 'thinking', blockId: 't1:item_0', text: '**Planning the answer**' },
       { kind: 'tool-use', toolId: 't1:item_1', name: 'command_execution', input: 'bash -lc ls' },
       { kind: 'tool-result', toolId: 't1:item_1', output: 'README.md\nsrc\n', isError: false },
       expect.objectContaining({ kind: 'text', blockId: 't1:item_2' }),
@@ -348,6 +408,27 @@ describe('extra providers parsers', () => {
         }),
       ),
     ).toEqual([{ kind: 'text', blockId: 't3:m1', text: 'Pronto' }]);
+  });
+
+  it('emits thinking from reasoning_content and thinking blocks in stream agents', () => {
+    const ds = createChatParser('deepseek', { turnId: 't4' });
+    expect(
+      ds.parse(
+        JSON.stringify({
+          role: 'assistant',
+          id: 'msg-1',
+          reasoning_content: 'Raciocínio DeepSeek',
+          content: [
+            { type: 'thinking', thinking: 'Bloco extra' },
+            { type: 'text', text: 'Resposta' },
+          ],
+        }),
+      ),
+    ).toEqual([
+      { kind: 'thinking', blockId: 'msg-1:thinking', text: 'Raciocínio DeepSeek' },
+      { kind: 'thinking', blockId: 'msg-1:thinking', text: 'Bloco extra' },
+      { kind: 'text', blockId: 'msg-1', text: 'Resposta' },
+    ]);
   });
 });
 

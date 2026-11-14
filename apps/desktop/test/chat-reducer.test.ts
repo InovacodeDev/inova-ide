@@ -32,6 +32,32 @@ describe('chatReducer', () => {
     expect(state.items).toEqual([{ type: 'assistant', id: 'b2', text: 'x', streaming: false }]);
   });
 
+  test('thinking-delta accumulates, thinking replaces, and done closes streaming', () => {
+    const started = chatReducer(initialChatState, { type: 'started' });
+    const streaming = run(
+      [
+        { kind: 'thinking-delta', blockId: 'm1:thinking', text: 'Passo ' },
+        { kind: 'thinking-delta', blockId: 'm1:thinking', text: '1' },
+      ],
+      started,
+    );
+    expect(streaming.items).toEqual([
+      { type: 'thinking', id: 'thinking-m1:thinking', text: 'Passo 1', streaming: true },
+    ]);
+    const settled = run(
+      [{ kind: 'thinking', blockId: 'm1:thinking', text: 'Passo 1 revisado' }],
+      streaming,
+    );
+    expect(settled.items).toEqual([
+      { type: 'thinking', id: 'thinking-m1:thinking', text: 'Passo 1 revisado', streaming: false },
+    ]);
+    const unclosed = run([{ kind: 'thinking-delta', blockId: 'm2:thinking', text: 'oi' }], started);
+    const done = run([{ kind: 'done', isError: false, costUsd: null, durationMs: null }], unclosed);
+    expect(done.items).toEqual([
+      { type: 'thinking', id: 'thinking-m2:thinking', text: 'oi', streaming: false },
+    ]);
+  });
+
   test('tool-result fills the matching tool and ignores unknown ids', () => {
     const state = run([
       { kind: 'tool-use', toolId: 't1', name: 'Bash', input: 'ls' },

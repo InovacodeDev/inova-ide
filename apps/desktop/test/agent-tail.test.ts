@@ -21,6 +21,13 @@ describe('agentTail', () => {
     expect(agentTail({ items, lines: 2 })).toBe('b\nc');
   });
 
+  test('uses thinking text', () => {
+    const items: ChatItem[] = [
+      { type: 'thinking', id: 'th', text: 'passo 1\npasso 2', streaming: true },
+    ];
+    expect(agentTail({ items, lines: 1 })).toBe('passo 2');
+  });
+
   test('uses user text', () => {
     const items: ChatItem[] = [{ type: 'user', id: 'u', text: 'oi', at: null }];
     expect(agentTail({ items, lines: 3 })).toBe('oi');

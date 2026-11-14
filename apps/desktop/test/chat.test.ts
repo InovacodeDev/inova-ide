@@ -180,6 +180,7 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
     { kind: 'session', providerSessionId: 'p' },
     { kind: 'user', text: 't', at: 'a' },
     { kind: 'text', blockId: 'b', text: 't' },
+    { kind: 'thinking', blockId: 'b1', text: 'raciocínio' },
     { kind: 'tool-use', toolId: 'i', name: 'n', input: '{}' },
     { kind: 'tool-result', toolId: 'i', output: 'o', isError: true },
     { kind: 'usage-limits', windows: [{ kind: 'weekly', usedPercent: 1, resetsAt: null }] },

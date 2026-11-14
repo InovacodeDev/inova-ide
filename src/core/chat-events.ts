@@ -262,8 +262,15 @@ function createClaudeParser(): ChatParser {
       return [];
     }
     if (event['type'] !== 'content_block_delta' || !isRecord(event['delta'])) return [];
-    const text = str(event['delta']['text']);
-    if (event['delta']['type'] !== 'text_delta' || text === null) return [];
+    const delta = event['delta'];
+    if (delta['type'] === 'thinking_delta') {
+      const thinking = str(delta['thinking']);
+      return thinking !== null && thinking !== ''
+        ? [{ kind: 'thinking-delta', blockId: `${messageId}:thinking`, text: thinking }]
+        : [];
+    }
+    const text = str(delta['text']);
+    if (delta['type'] !== 'text_delta' || text === null) return [];
     return [{ kind: 'text-delta', blockId: messageId, text }];
   }
 
@@ -274,7 +281,12 @@ function createClaudeParser(): ChatParser {
     for (const block of message['content']) {
       if (!isRecord(block)) continue;
       const text = str(block['text']);
-      if (block['type'] === 'text' && text !== null) {
+      if (block['type'] === 'thinking') {
+        const thinking = str(block['thinking']);
+        if (thinking !== null && thinking.trim() !== '') {
+          events.push({ kind: 'thinking', blockId: `${messageId}:thinking`, text: thinking });
+        }
+      } else if (block['type'] === 'text' && text !== null) {
         events.push({ kind: 'text', blockId: messageId, text });
       } else if (block['type'] === 'tool_use') {
         const toolId = str(block['id']);
@@ -398,10 +410,21 @@ function createGeminiParser(prefix: string): ChatParser {
   function parseStepUpdate(step: Json): ChatEvent[] {
     switch (step['step_type']) {
       case 'agent_response': {
+        const thinking = str(step['thinking']);
+        const thinkingEvents: ChatEvent[] =
+          step['state'] === 'DONE' && thinking !== null && thinking.trim() !== ''
+            ? [
+                {
+                  kind: 'thinking',
+                  blockId: `${prefix}gemini-thinking-${num(step['step_index']) ?? block + 1}`,
+                  text: thinking,
+                },
+              ]
+            : [];
         const delta = str(step['text_delta']);
         const events = delta === null ? [] : appendDelta(delta);
-        if (step['state'] === 'DONE') return [...events, ...flush()];
-        return events;
+        if (step['state'] === 'DONE') return [...thinkingEvents, ...events, ...flush()];
+        return [...thinkingEvents, ...events];
       }
       case 'tool':
         return parseToolStep(step);
@@ -500,6 +523,9 @@ function createCodexParser(prefix: string): ChatParser {
       ];
     }
     const text = str(item['text']);
+    if (!started && item['type'] === 'reasoning' && text !== null && text.trim() !== '') {
+      return [{ kind: 'thinking', blockId: id, text }];
+    }
     if (!started && item['type'] === 'agent_message' && text !== null) {
       return [{ kind: 'text', blockId: id, text }];
     }
@@ -603,6 +629,14 @@ function createStreamAgentParser(
   function fromMessage(message: Json): ChatEvent[] {
     const events: ChatEvent[] = [];
     messageId = str(message['id']) ?? messageId;
+    const reasoning = str(message['reasoning_content']);
+    if (reasoning !== null && reasoning.trim() !== '') {
+      events.push({
+        kind: 'thinking',
+        blockId: `${nextBlockId(messageId)}:thinking`,
+        text: reasoning,
+      });
+    }
     const content = message['content'];
     if (typeof content === 'string' && content !== '') {
       events.push({ kind: 'text', blockId: nextBlockId(messageId), text: content });
@@ -610,7 +644,16 @@ function createStreamAgentParser(
       for (const block of content) {
         if (!isRecord(block)) continue;
         const text = str(block['text']);
-        if (block['type'] === 'text' && text !== null && text !== '') {
+        if (block['type'] === 'thinking') {
+          const thinking = str(block['thinking']) ?? text;
+          if (thinking !== null && thinking.trim() !== '') {
+            events.push({
+              kind: 'thinking',
+              blockId: `${nextBlockId(messageId)}:thinking`,
+              text: thinking,
+            });
+          }
+        } else if (block['type'] === 'text' && text !== null && text !== '') {
           events.push({ kind: 'text', blockId: nextBlockId(messageId), text });
         } else if (block['type'] === 'tool_use') {
           const toolId = str(block['id']) ?? nextBlockId(null);

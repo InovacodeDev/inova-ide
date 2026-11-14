@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import type { ChatItem } from '../src/renderer/chat-reducer.js';
 import {
+  activeTurnActivity,
   agentTurnFooters,
   groupChatItems,
   summarizeWork,
@@ -10,6 +11,12 @@ import {
 
 const user = (id: string): ChatItem => ({ type: 'user', id, text: 'oi', at: null });
 const text = (id: string): ChatItem => ({ type: 'assistant', id, text: 'ok', streaming: false });
+const think = (id: string, streaming = false): ChatItem => ({
+  type: 'thinking',
+  id,
+  text: 'analisando',
+  streaming,
+});
 const tool = (id: string, patch: Partial<Extract<ChatItem, { type: 'tool' }>> = {}): ChatItem => ({
   type: 'tool',
   id,
@@ -48,6 +55,12 @@ describe('groupChatItems', () => {
   test('does not collapse a turn without a final answer or without tools', () => {
     expect(shape([user('u1'), tool('t1')], false)).toEqual(['u1', 't1']);
     expect(shape([user('u1'), text('a1'), text('a2')], false)).toEqual(['u1', 'a1', 'a2']);
+  });
+
+  test('collapses thinking items with work in finished turns', () => {
+    const items = [user('u1'), think('th1'), tool('t1'), text('a1')];
+    expect(shape(items, false)).toEqual(['u1', 'work(th1,t1)', 'a1']);
+    expect(shape([user('u1'), think('th1'), text('a1')], false)).toEqual(['u1', 'work(th1)', 'a1']);
   });
 
   test('keeps checkpoints, tools after the answer and their original indexes', () => {
@@ -109,6 +122,51 @@ describe('summarizeWork', () => {
       'edit',
       'other',
     ]);
+  });
+
+  test('includes diff stats and thinking in summarizeWork', () => {
+    const entries = [
+      think('th1'),
+      tool('t1', {
+        name: 'Edit',
+        input: JSON.stringify({ file_path: 'src/a.ts', old_string: 'a\nb', new_string: 'a\nc\nd' }),
+      }),
+    ].map((item, index) => ({ item, index }));
+    expect(summarizeWork(entries)).toBe('raciocínio · 1 edição (+2 -1)');
+  });
+});
+
+describe('activeTurnActivity', () => {
+  test('reports current pending tool or streaming thinking after the last user message', () => {
+    expect(activeTurnActivity([user('u1')])).toBe('Pensando…');
+    expect(activeTurnActivity([user('u1'), think('th1', true)])).toBe('Raciocinando…');
+    expect(
+      activeTurnActivity([
+        user('u1'),
+        tool('t1', {
+          name: 'Edit',
+          input: JSON.stringify({
+            file_path: 'apps/desktop/src/App.tsx',
+            old_string: 'a',
+            new_string: 'b',
+          }),
+          output: null,
+        }),
+      ]),
+    ).toBe('Editando App.tsx…');
+    expect(
+      activeTurnActivity([user('u1'), tool('t2', { name: 'Bash', input: 'ls', output: null })]),
+    ).toBe('Executando comando…');
+    expect(
+      activeTurnActivity([
+        user('u1'),
+        tool('t3', {
+          name: 'Read',
+          input: JSON.stringify({ file_path: 'src/core/types.ts' }),
+          output: null,
+        }),
+      ]),
+    ).toBe('Consultando src/core/types.ts…');
   });
 });
 

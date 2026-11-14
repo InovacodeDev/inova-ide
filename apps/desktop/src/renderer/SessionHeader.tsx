@@ -1,6 +1,13 @@
 import { useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
-import { CloseIcon, FolderIcon, GitBranchIcon, PencilIcon, SwitchIcon } from './icons';
+import {
+  CloseIcon,
+  GitBranchIcon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
+  PencilIcon,
+  SwitchIcon,
+} from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
 import { STATUS_LABEL, type SessionStatus } from './session-status';
@@ -18,6 +25,8 @@ interface SessionHeaderProps {
   worktreeBusy?: boolean;
   status: SessionStatus | null;
   exited?: boolean;
+  detailsCollapsed?: boolean;
+  onToggleDetails?: () => void;
   onRename?: (title: string) => void;
   onInspectWorktree?: () => void;
   onApplyWorktree?: () => void;
@@ -38,6 +47,8 @@ export function SessionHeader(props: SessionHeaderProps) {
     worktreeBusy = false,
     status,
     exited,
+    detailsCollapsed = false,
+    onToggleDetails,
     onRename,
     onInspectWorktree,
     onApplyWorktree,
@@ -65,21 +76,20 @@ export function SessionHeader(props: SessionHeaderProps) {
   return (
     <div className="session-header">
       <div className="session-header-main">
-        <div className="session-header-hierarchy">
-          <span
-            className={
-              kind === 'subsession'
-                ? 'session-kind-pill session-kind-pill-sub'
-                : 'session-kind-pill'
-            }
-          >
-            {kind === 'subsession' ? 'Subsessão' : 'Sessão'}
+        {provider ? <ProviderBadge provider={provider} size={18} /> : null}
+        {kind === 'subsession' ? (
+          <span className="session-kind-pill session-kind-pill-sub">Subsessão</span>
+        ) : null}
+        {sectionName ? (
+          <span className="session-header-crumb" title={path ?? undefined}>
+            {sectionName}
           </span>
-          {sectionName ? <span className="session-header-crumb">Seção: {sectionName}</span> : null}
-          {kind === 'subsession' && parentTitle ? (
-            <span className="session-header-crumb">Sessão pai: {parentTitle}</span>
-          ) : null}
-        </div>
+        ) : null}
+        {sectionName ? (
+          <span className="session-header-sep" aria-hidden="true">
+            /
+          </span>
+        ) : null}
         {editing ? (
           <input
             className="session-header-rename"
@@ -110,88 +120,106 @@ export function SessionHeader(props: SessionHeaderProps) {
                 data-tooltip={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
                 onClick={startEdit}
               >
-                <PencilIcon size={14} />
+                <PencilIcon size={13} />
               </button>
             ) : null}
           </div>
         )}
-        <div className="session-header-meta">
-          {provider ? (
-            <span className="session-header-item">
-              <ProviderBadge provider={provider} size={18} />
-              {PROVIDER_NAME[provider]}
-              {accountDisplay !== null ? ` · ${accountDisplay}` : ''}
-            </span>
-          ) : null}
-          {path ? (
-            <span className="session-header-item" title={path}>
-              <FolderIcon size={14} />
-              <span className="mono session-header-path">{path}</span>
-            </span>
-          ) : null}
-          {worktreeBranch ? (
-            <span className="session-header-worktree">
-              <span className="pill session-worktree-pill" title={worktreeBranch}>
-                <GitBranchIcon size={13} />
-                <span className="mono">{worktreeBranch}</span>
-              </span>
-              {onInspectWorktree ? (
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  data-tooltip="Ver as alterações do worktree desta sessão"
-                  onClick={onInspectWorktree}
-                >
-                  Ver diff
-                </button>
-              ) : null}
-              {onApplyWorktree ? (
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  data-tooltip="Aplicar as alterações do worktree ao projeto"
-                  disabled={worktreeBusy}
-                  onClick={onApplyWorktree}
-                >
-                  Aplicar
-                </button>
-              ) : null}
-            </span>
-          ) : null}
-          {exited ? (
-            <span className="pill pill-idle">
-              <span className="dot" />
-              Encerrado
-            </span>
-          ) : status !== null && status !== 'idle' ? (
-            <span className={`pill pill-${status}`}>
-              <span className={status === 'running' ? 'dot pulse' : 'dot'} />
-              {STATUS_LABEL[status]}
-            </span>
-          ) : null}
-          {onHandoff ? (
-            <button
-              type="button"
-              className="btn btn-sm"
-              data-tooltip="Transferir sessão para outra conta ou provedor"
-              onClick={onHandoff}
-            >
-              <SwitchIcon size={13} />
-              Transferir
-            </button>
-          ) : null}
-        </div>
+        {kind === 'subsession' && parentTitle ? (
+          <span className="session-header-parent" title={`Sessão pai: ${parentTitle}`}>
+            ↳ {parentTitle}
+          </span>
+        ) : null}
+        {exited ? (
+          <span className="pill pill-idle">
+            <span className="dot" />
+            Encerrado
+          </span>
+        ) : status !== null && status !== 'idle' ? (
+          <span className={`pill pill-${status}`}>
+            <span className={status === 'running' ? 'dot pulse' : 'dot'} />
+            {STATUS_LABEL[status]}
+          </span>
+        ) : null}
       </div>
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
-        data-tooltip={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
-        data-shortcut="close-tab"
-        onClick={onClose}
-      >
-        <CloseIcon />
-      </button>
+      <div className="session-header-actions">
+        {provider ? (
+          <span className="session-header-account">
+            {PROVIDER_NAME[provider]}
+            {accountDisplay !== null ? ` · ${accountDisplay}` : ''}
+          </span>
+        ) : null}
+        {worktreeBranch ? (
+          <span className="session-header-worktree">
+            <span className="pill session-worktree-pill" title={worktreeBranch}>
+              <GitBranchIcon size={13} />
+              <span className="mono">{worktreeBranch}</span>
+            </span>
+            {onInspectWorktree ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                data-tooltip="Ver as alterações do worktree desta sessão"
+                onClick={onInspectWorktree}
+              >
+                Ver diff
+              </button>
+            ) : null}
+            {onApplyWorktree ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                data-tooltip="Aplicar as alterações do worktree ao projeto"
+                disabled={worktreeBusy}
+                onClick={onApplyWorktree}
+              >
+                Aplicar
+              </button>
+            ) : null}
+          </span>
+        ) : null}
+        {onHandoff ? (
+          <button
+            type="button"
+            className="btn btn-sm"
+            data-tooltip="Transferir sessão para outra conta ou provedor"
+            onClick={onHandoff}
+          >
+            <SwitchIcon size={13} />
+            Transferir
+          </button>
+        ) : null}
+        {onToggleDetails ? (
+          <button
+            type="button"
+            className={detailsCollapsed ? 'icon-btn' : 'icon-btn icon-btn-active'}
+            aria-label={
+              detailsCollapsed ? 'Mostrar detalhes da sessão' : 'Minimizar detalhes da sessão'
+            }
+            aria-pressed={!detailsCollapsed}
+            data-tooltip={
+              detailsCollapsed ? 'Mostrar detalhes da sessão' : 'Minimizar detalhes da sessão'
+            }
+            onClick={onToggleDetails}
+          >
+            {detailsCollapsed ? (
+              <PanelRightOpenIcon size={15} />
+            ) : (
+              <PanelRightCloseIcon size={15} />
+            )}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+          data-tooltip={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+          data-shortcut="close-tab"
+          onClick={onClose}
+        >
+          <CloseIcon size={15} />
+        </button>
+      </div>
     </div>
   );
 }

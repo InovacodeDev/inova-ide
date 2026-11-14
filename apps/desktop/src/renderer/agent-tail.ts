@@ -3,6 +3,7 @@ import type { ChatItem } from './chat-reducer';
 function itemText(item: ChatItem): string {
   switch (item.type) {
     case 'assistant':
+    case 'thinking':
     case 'user':
       return item.text;
     case 'error':

@@ -162,6 +162,10 @@ function eventOf(record: Json): ChatEvent | undefined {
       return strings(record, ['blockId', 'text'])
         ? { kind: 'text', blockId: String(record['blockId']), text: String(record['text']) }
         : undefined;
+    case 'thinking':
+      return strings(record, ['blockId', 'text'])
+        ? { kind: 'thinking', blockId: String(record['blockId']), text: String(record['text']) }
+        : undefined;
     case 'tool-use':
       return strings(record, ['toolId', 'name', 'input'])
         ? {

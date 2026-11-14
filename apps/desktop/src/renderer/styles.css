@@ -67,9 +67,9 @@ a:hover {
 .app-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  min-height: 48px;
-  padding: 8px 16px;
+  gap: 14px;
+  min-height: 44px;
+  padding: 0 14px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -78,6 +78,16 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: none;
+}
+
+.app-header-tabs {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-end;
+  overflow-x: auto;
 }
 
 .logo-mark {
@@ -168,10 +178,6 @@ a:hover {
   display: flex;
   flex-direction: column;
   background: var(--bg);
-}
-
-.main.rail-offset {
-  padding-left: 76px;
 }
 
 .main-content {

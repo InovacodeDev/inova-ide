@@ -3,6 +3,7 @@ import type { ChatEvent, SubagentSnapshot, VerificationCheckResult } from '@inov
 export type ChatItem =
   | { type: 'user'; id: string; text: string; at: string | null }
   | { type: 'assistant'; id: string; text: string; streaming: boolean }
+  | { type: 'thinking'; id: string; text: string; streaming: boolean }
   | {
       type: 'tool';
       id: string;
@@ -52,25 +53,34 @@ export type ChatAction =
   | { type: 'replace'; events: ChatEvent[] }
   | { type: 'started' };
 
-function upsertAssistant(
+function upsertTextBlock(
   items: ChatItem[],
-  update: { blockId: string; text: string; append: boolean },
+  update: { type: 'assistant' | 'thinking'; id: string; text: string; append: boolean },
 ): ChatItem[] {
-  const index = items.findIndex((item) => item.type === 'assistant' && item.id === update.blockId);
+  const index = items.findIndex((item) => item.type === update.type && item.id === update.id);
   const existing = items[index];
-  if (existing?.type !== 'assistant') {
+  if (!existing || (existing.type !== 'assistant' && existing.type !== 'thinking')) {
     return [
       ...items,
-      { type: 'assistant', id: update.blockId, text: update.text, streaming: update.append },
+      { type: update.type, id: update.id, text: update.text, streaming: update.append },
     ];
   }
   const next = items.slice();
   next[index] = {
     ...existing,
+    type: update.type,
     text: update.append ? existing.text + update.text : update.text,
     streaming: update.append,
   };
   return next;
+}
+
+function closeStreaming(items: ChatItem[]): ChatItem[] {
+  return items.map((item) =>
+    (item.type === 'assistant' || item.type === 'thinking') && item.streaming
+      ? { ...item, streaming: false }
+      : item,
+  );
 }
 
 function upsertVerification(
@@ -132,12 +142,42 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
     case 'text-delta':
       return {
         ...state,
-        items: upsertAssistant(items, { blockId: event.blockId, text: event.text, append: true }),
+        items: upsertTextBlock(items, {
+          type: 'assistant',
+          id: event.blockId,
+          text: event.text,
+          append: true,
+        }),
       };
     case 'text':
       return {
         ...state,
-        items: upsertAssistant(items, { blockId: event.blockId, text: event.text, append: false }),
+        items: upsertTextBlock(items, {
+          type: 'assistant',
+          id: event.blockId,
+          text: event.text,
+          append: false,
+        }),
+      };
+    case 'thinking-delta':
+      return {
+        ...state,
+        items: upsertTextBlock(items, {
+          type: 'thinking',
+          id: `thinking-${event.blockId}`,
+          text: event.text,
+          append: true,
+        }),
+      };
+    case 'thinking':
+      return {
+        ...state,
+        items: upsertTextBlock(items, {
+          type: 'thinking',
+          id: `thinking-${event.blockId}`,
+          text: event.text,
+          append: false,
+        }),
       };
     case 'tool-use':
       return {
@@ -191,9 +231,7 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
     case 'done': {
       const closed = {
         ...state,
-        items: items.map((item) =>
-          item.type === 'assistant' && item.streaming ? { ...item, streaming: false } : item,
-        ),
+        items: closeStreaming(items),
         running: false,
       };
       if (state.subagents === undefined) return closed;
@@ -241,9 +279,7 @@ function loadTranscript(events: ChatEvent[]): ChatState {
   return {
     ...replayed,
     items: [
-      ...replayed.items.map((item) =>
-        item.type === 'assistant' && item.streaming ? { ...item, streaming: false } : item,
-      ),
+      ...closeStreaming(replayed.items),
       { type: 'error', id: 'interrupted', message: INTERRUPTED_MESSAGE },
     ],
   };

@@ -53,7 +53,6 @@ import { refreshableUsageLabels, settleUsage, USAGE_REFRESH_INTERVAL_MS } from '
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
 import { adjacentSessionId, canOpenTab, tabsReducer, type Tab } from './tabs';
-import { TabBar } from './TabBar';
 import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
@@ -1056,7 +1055,6 @@ export function App() {
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
   const runningCount = Object.values(chats).filter((chat) => chat.running).length;
-  const mainClassName = sidebarCollapsed ? 'main rail-offset' : 'main';
   const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
@@ -1150,6 +1148,15 @@ export function App() {
             : null
         }
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
+        tabs={chatTabs}
+        activeTabId={tabs.active}
+        inWorkspace={inWorkspace}
+        statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+        queuedCountOf={(sessionId) =>
+          turnQueue.filter((item) => item.sessionId === sessionId).length
+        }
+        onActivateTab={activateTab}
+        onCloseTab={requestCloseTab}
       />
       <div className="app-body">
         <Sidebar
@@ -1192,7 +1199,7 @@ export function App() {
           onRequestArchiveSession={setPendingArchive}
           onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
-        <main className={mainClassName}>
+        <main className="main">
           {view === 'agents' && (
             <AgentsView
               agents={chatTabs.map((tab) => {
@@ -1266,18 +1273,6 @@ export function App() {
             />
           )}
           <div className="main-content" style={inWorkspace ? undefined : { display: 'none' }}>
-            {chatTabs.length > 0 && (
-              <TabBar
-                tabs={chatTabs}
-                active={tabs.active}
-                statusOf={(sessionId) => sessionStatus(chats[sessionId])}
-                queuedCountOf={(sessionId) =>
-                  turnQueue.filter((item) => item.sessionId === sessionId).length
-                }
-                onActivate={activateTab}
-                onClose={requestCloseTab}
-              />
-            )}
             {activeTab ? (
               <SessionHeader
                 key={activeTab.sessionId}
@@ -1297,6 +1292,10 @@ export function App() {
                   activeTab.kind === 'chat' ? sessionStatus(chats[activeTab.sessionId]) : null
                 }
                 exited={activeTab.exited}
+                detailsCollapsed={detailsCollapsed}
+                onToggleDetails={() =>
+                  void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } })
+                }
                 onRename={
                   activeSession
                     ? (title) => void renameSession({ session: activeSession, title })
@@ -1467,6 +1466,21 @@ export function App() {
                   onToggleCollapsed={() =>
                     void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } })
                   }
+                  kind={activeSession.parentId ? 'subsession' : 'session'}
+                  sectionName={folderName(activeProject.path)}
+                  parentTitle={activeParentTitle}
+                  provider={activeAccount?.provider ?? activeTab?.provider ?? null}
+                  accountDisplay={accountDisplayOf(activeAccount, activeProject)}
+                  path={activeProject.path}
+                  worktreeBranch={activeSession.worktree?.branch ?? null}
+                  worktreeBusy={applyingWorktree || Boolean(chats[activeSession.id]?.running)}
+                  onInspectWorktree={
+                    activeSession.worktree ? () => void inspectWorktree(activeSession) : undefined
+                  }
+                  onApplyWorktree={
+                    activeSession.worktree ? () => void applyWorktree(activeSession) : undefined
+                  }
+                  onHandoff={() => setPendingHandoff(activeSession)}
                 />
               )}
             </div>
