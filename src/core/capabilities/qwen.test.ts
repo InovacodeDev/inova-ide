@@ -6,6 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { qwenCapabilities } from './qwen.js';
 import type { CapabilityContext } from './types.js';
 
+const EXTENSION_REASON =
+  'O Inova ainda não consegue ler o estado das extensões do Qwen. Use qwen extensions enable/disable.';
+
 function fixture(name: string): string {
   return readFileSync(new URL(`../fixtures/capabilities/${name}`, import.meta.url), 'utf8');
 }
@@ -75,20 +78,22 @@ describe('qwenCapabilities.list', () => {
       await mkdir(join(root, 'no-manifest'), { recursive: true });
       const category = await categoryOf(ctx, 'plugin');
       expect(category?.error).toBeNull();
-      expect(category?.items.map((item) => [item.id, item.applyMode])).toEqual([
-        ['ext-a', 'account-file'],
-      ]);
+      expect(
+        category?.items.map((item) => [item.id, item.applyMode, item.unsupportedReason]),
+      ).toEqual([['ext-a', 'unsupported', EXTENSION_REASON]]);
     }, '{ nope');
   });
 
-  it('reports an invalid extension manifest as a plugin error', async () => {
+  it('skips an extension with an invalid manifest and lists the others', async () => {
     await withAccountDir(async (ctx) => {
-      const dir = join(ctx.account.homeDir, '.qwen', 'extensions', 'bad');
-      await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, 'qwen-extension.json'), '{ nope');
-      expect((await categoryOf(ctx, 'plugin'))?.error).toBe(
-        'Uma extensão do Qwen tem qwen-extension.json inválido.',
-      );
+      const root = join(ctx.account.homeDir, '.qwen', 'extensions');
+      await mkdir(join(root, 'bad'), { recursive: true });
+      await writeFile(join(root, 'bad', 'qwen-extension.json'), '{ nope');
+      await mkdir(join(root, 'good'), { recursive: true });
+      await writeFile(join(root, 'good', 'qwen-extension.json'), '{"name":"ext-good"}');
+      const category = await categoryOf(ctx, 'plugin');
+      expect(category?.error).toBeNull();
+      expect(category?.items.map((item) => item.id)).toEqual(['ext-good']);
     });
   });
 
@@ -151,43 +156,39 @@ describe('qwenCapabilities.setEnabled', () => {
     }, '{ nope');
   });
 
-  it('runs qwen extensions disable with the account env', async () => {
+  it('rejects extensions with the unsupported reason and does not run qwen', async () => {
     await withAccountDir(async (ctx) => {
-      const calls: Parameters<CapabilityContext['runner']['run']>[0][] = [];
-      const recording: CapabilityContext = {
+      let ran = false;
+      const watching: CapabilityContext = {
         ...ctx,
         runner: {
-          run: async (cmd) => {
-            calls.push(cmd);
+          run: async () => {
+            ran = true;
             return { exitCode: 0, stdout: '' };
           },
         },
       };
-      await qwenCapabilities.setEnabled({
-        ctx: recording,
-        ref: { kind: 'plugin', id: 'ext-a' },
-        enabled: false,
-      });
-      expect(calls).toHaveLength(1);
-      expect(calls[0]?.command).toBe('qwen');
-      expect(calls[0]?.args).toEqual(['extensions', 'disable', 'ext-a']);
-      expect(calls[0]?.env?.['HOME']).toBe(ctx.account.homeDir);
+      await expect(
+        qwenCapabilities.setEnabled({
+          ctx: watching,
+          ref: { kind: 'plugin', id: 'ext-a' },
+          enabled: false,
+        }),
+      ).rejects.toThrow(EXTENSION_REASON);
+      expect(ran).toBe(false);
     });
   });
 
-  it('throws when the extension command fails', async () => {
+  it('rejects kinds other than mcp and skill', async () => {
     await withAccountDir(async (ctx) => {
-      const failing: CapabilityContext = {
-        ...ctx,
-        runner: { run: async () => ({ exitCode: 1, stdout: '' }) },
-      };
-      const ref = { kind: 'plugin', id: 'ext-a' } as const;
       await expect(
-        qwenCapabilities.setEnabled({ ctx: failing, ref, enabled: false }),
-      ).rejects.toThrow('Falha ao desligar ext-a.');
-      await expect(
-        qwenCapabilities.setEnabled({ ctx: failing, ref, enabled: true }),
-      ).rejects.toThrow('Falha ao ligar ext-a.');
+        qwenCapabilities.setEnabled({
+          ctx,
+          ref: { kind: 'connector', id: 'x' },
+          enabled: false,
+        }),
+      ).rejects.toThrow('Qwen não suporta desligar este item.');
+      expect(await readdir(ctx.backupRoot).catch(() => [])).toEqual([]);
     });
   });
 });

@@ -12,12 +12,12 @@ import type {
   SetEnabledInput,
 } from './types.js';
 
-const COMMAND_TIMEOUT_MS = 30_000;
-const NOT_FOUND_MESSAGE = 'qwen não encontrado.';
+const UNSUPPORTED_KIND_MESSAGE = 'Qwen não suporta desligar este item.';
+const EXTENSION_UNSUPPORTED_REASON =
+  'O Inova ainda não consegue ler o estado das extensões do Qwen. Use qwen extensions enable/disable.';
 const INVALID_SETTINGS_MESSAGE = 'O settings.json do Qwen é inválido.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Qwen';
 const EXTENSION_LIST_FAILED_MESSAGE = 'Não foi possível listar as extensões do Qwen';
-const INVALID_EXTENSION_MESSAGE = 'Uma extensão do Qwen tem qwen-extension.json inválido.';
 
 type Settings = Record<string, unknown>;
 
@@ -73,6 +73,16 @@ async function skillCategory(
   }
 }
 
+function manifestName(raw: string): string | null {
+  try {
+    const manifest: unknown = JSON.parse(raw);
+    return isRecord(manifest) && typeof manifest['name'] === 'string' ? manifest['name'] : null;
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
 async function extensionNames(dir: string): Promise<string[]> {
   let entries: Dirent[];
   try {
@@ -86,8 +96,7 @@ async function extensionNames(dir: string): Promise<string[]> {
       .filter((entry) => entry.isDirectory())
       .map(async (entry) => {
         const raw = await readIfExists(join(dir, entry.name, 'qwen-extension.json'));
-        const manifest: unknown = raw === null ? null : JSON.parse(raw);
-        return isRecord(manifest) && typeof manifest['name'] === 'string' ? manifest['name'] : null;
+        return raw === null ? null : manifestName(raw);
       }),
   );
   return names.flatMap((name) => (name === null ? [] : [name]));
@@ -96,12 +105,13 @@ async function extensionNames(dir: string): Promise<string[]> {
 async function extensionCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
   try {
     const names = await extensionNames(join(ctx.account.homeDir, '.qwen', 'extensions'));
-    const items = names.map((id) => baseItem({ kind: 'plugin', id, enabled: true }));
+    const items = names.map((id): CapabilityItem => ({
+      ...baseItem({ kind: 'plugin', id, enabled: true }),
+      applyMode: 'unsupported',
+      unsupportedReason: EXTENSION_UNSUPPORTED_REASON,
+    }));
     return { kind: 'plugin', items, error: null };
   } catch (error: unknown) {
-    if (error instanceof SyntaxError) {
-      return { kind: 'plugin', items: [], error: INVALID_EXTENSION_MESSAGE };
-    }
     const code = isRecord(error) ? error['code'] : undefined;
     if (typeof code !== 'string') throw error;
     return { kind: 'plugin', items: [], error: `${EXTENSION_LIST_FAILED_MESSAGE} (${code}).` };
@@ -143,33 +153,20 @@ function withListMembership(input: {
   return { ...input.root, [group]: { ...parent, [key]: list } };
 }
 
-async function toggleExtension(input: SetEnabledInput): Promise<void> {
-  const { ctx, ref, enabled } = input;
-  const result = await ctx.runner.run({
-    command: 'qwen',
-    args: ['extensions', enabled ? 'enable' : 'disable', ref.id],
-    env: ctx.env,
-    timeoutMs: COMMAND_TIMEOUT_MS,
-  });
-  if (!('exitCode' in result)) throw new Error(NOT_FOUND_MESSAGE);
-  if (result.exitCode !== 0) {
-    throw new Error(`Falha ao ${enabled ? 'ligar' : 'desligar'} ${ref.id}.`);
-  }
-}
-
 function setEnabled(input: SetEnabledInput): Promise<void> {
   const { ctx, ref, enabled } = input;
-  const file = settingsFile(ctx);
+  if (ref.kind === 'plugin') return Promise.reject(new Error(EXTENSION_UNSUPPORTED_REASON));
+  if (ref.kind !== 'mcp' && ref.kind !== 'skill') {
+    return Promise.reject(new Error(UNSUPPORTED_KIND_MESSAGE));
+  }
   const path =
     ref.kind === 'skill' ? (['skills', 'disabled'] as const) : (['mcp', 'excluded'] as const);
   return serialize(`qwen:${ctx.account.id}`, () =>
-    ref.kind === 'plugin'
-      ? toggleExtension(input)
-      : updateJsonFile({
-          file,
-          backupRoot: ctx.backupRoot,
-          update: (root) => withListMembership({ root, path, name: ref.id, enabled }),
-        }),
+    updateJsonFile({
+      file: settingsFile(ctx),
+      backupRoot: ctx.backupRoot,
+      update: (root) => withListMembership({ root, path, name: ref.id, enabled }),
+    }),
   );
 }
 
