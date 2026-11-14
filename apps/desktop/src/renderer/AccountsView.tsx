@@ -322,7 +322,7 @@ export function AccountsView(props: AccountsViewProps) {
                             >
                               {loggingInLabel === account.label
                                 ? 'Conectando…'
-                                : account.status === 'logged-in'
+                                : account.status === 'logged-in' || account.status === 'expired'
                                   ? 'Renovar login'
                                   : 'Entrar'}
                             </button>

@@ -11,6 +11,14 @@ export function isRateLimitMessage(text: string): boolean {
   return RATE_LIMIT_RE.test(text);
 }
 
+// REGEX: matches provider CLI errors for a revoked, expired, or missing login (Claude 401 authentication_error, "/login" hints, Codex 401 Unauthorized, agy not logged in)
+const AUTH_REVOKED_RE =
+  /authentication_error|oauth token (?:has been )?(?:revoked|expired)|please run \/login|invalid api key|failed to authenticate|\b401 unauthorized\b|not logged into antigravity/i;
+
+export function isAuthRevokedMessage(text: string): boolean {
+  return AUTH_REVOKED_RE.test(text);
+}
+
 function clip(text: string, maxChars: number): string {
   const normalized = text.trim();
   if (normalized.length <= maxChars) return normalized;

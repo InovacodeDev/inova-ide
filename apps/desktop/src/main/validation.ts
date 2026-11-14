@@ -24,7 +24,7 @@ import type {
   VerificationCheck,
 } from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
-import { ATTACHMENT_KINDS } from '../shared/api.js';
+import { ATTACHMENT_KINDS, SESSION_EXPIRED_USAGE_MESSAGE } from '../shared/api.js';
 import type { AttachmentKind, Result } from '../shared/api.js';
 
 const MAX_TEXT = 255;
@@ -619,6 +619,8 @@ function usageMessage(error: UsageError): string {
       return `Não foi possível ler o consumo (HTTP ${error.message.match(/(\d{3})$/)?.[1] ?? '?'}).`;
     case 'bad-response':
       return 'Não foi possível ler o consumo: resposta inválida.';
+    case 'unauthorized':
+      return SESSION_EXPIRED_USAGE_MESSAGE;
   }
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { ChatEvent } from './chat-types.js';
 import {
   buildHandoffContext,
+  isAuthRevokedMessage,
   isRateLimitMessage,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
@@ -13,6 +14,20 @@ describe('handoff', () => {
     expect(isRateLimitMessage('You reached your weekly usage limit')).toBe(true);
     expect(isRateLimitMessage('Insufficient quota on this account')).toBe(true);
     expect(isRateLimitMessage('SyntaxError: unexpected token')).toBe(false);
+  });
+
+  test('isAuthRevokedMessage detects revoked or invalid provider logins', () => {
+    expect(
+      isAuthRevokedMessage(
+        'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has been revoked. Please obtain a new token or refresh an existing token."}}',
+      ),
+    ).toBe(true);
+    expect(isAuthRevokedMessage('Invalid API key · Please run /login')).toBe(true);
+    expect(isAuthRevokedMessage('OAuth token revoked · Please run /login')).toBe(true);
+    expect(isAuthRevokedMessage('unexpected status 401 Unauthorized')).toBe(true);
+    expect(isAuthRevokedMessage('You are not logged into Antigravity.')).toBe(true);
+    expect(isAuthRevokedMessage('HTTP 429: rate limit exceeded')).toBe(false);
+    expect(isAuthRevokedMessage('Tests failed: expected 401 to be 200')).toBe(false);
   });
 
   test('buildHandoffContext extracts objective, assistant progress, tools, git summary, and errors within maxChars', () => {

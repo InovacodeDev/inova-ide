@@ -81,12 +81,16 @@ export interface UpdateInfo {
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
 
+export type AccountStatus = AuthStatus | 'expired';
+
+export const SESSION_EXPIRED_USAGE_MESSAGE = 'Sessão da conta expirou. Renove o login em Contas.';
+
 export interface AccountView {
   id: string;
   label: string;
   email: string | null;
   provider: ProviderId;
-  status: AuthStatus;
+  status: AccountStatus;
 }
 
 export interface ProjectView {

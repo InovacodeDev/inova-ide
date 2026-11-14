@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Conta com login revogado (por exemplo, depois de `/logout` no Claude Code) aparece como "sessão expirada" em Contas e no rodapé, com o botão "Renovar login". O aviso do turno com erro diz qual conta precisa de login novo.
+
 ## [0.5.3] - 2026-11-14
 
 ### Adicionado

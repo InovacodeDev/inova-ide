@@ -20,6 +20,7 @@ import type {
   RulesStrategy,
   WorktreeStatusView,
 } from '../shared/api';
+import { SESSION_EXPIRED_USAGE_MESSAGE } from '../shared/api';
 import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
@@ -185,24 +186,31 @@ export function App() {
     return { projects: result.value, sessions: Object.fromEntries(loaded) };
   }, [call, reloadSessions]);
 
-  const loadUsage = useCallback(async (accountLabel: string) => {
-    setUsage((current) =>
-      current[accountLabel]?.status === 'ready'
-        ? current
-        : { ...current, [accountLabel]: { status: 'loading' } },
-    );
-    let next: UsageState;
-    try {
-      const result = await window.inova.getUsage({ accountLabel });
-      next = result.ok
-        ? { status: 'ready', snapshot: result.value }
-        : { status: 'error', message: result.message };
-    } catch (error: unknown) {
-      console.error('inova: unexpected renderer error', error);
-      next = { status: 'error', message: 'Erro inesperado.' };
-    }
-    setUsage((current) => ({ ...current, [accountLabel]: next }));
-  }, []);
+  const loadUsage = useCallback(
+    async (accountLabel: string) => {
+      setUsage((current) =>
+        current[accountLabel]?.status === 'ready'
+          ? current
+          : { ...current, [accountLabel]: { status: 'loading' } },
+      );
+      let next: UsageState;
+      try {
+        const result = await window.inova.getUsage({ accountLabel });
+        next = result.ok
+          ? { status: 'ready', snapshot: result.value }
+          : { status: 'error', message: result.message };
+        const known = latest.current.accounts.find((account) => account.label === accountLabel);
+        const expiredNow = !result.ok && result.message === SESSION_EXPIRED_USAGE_MESSAGE;
+        const recovered = result.ok && known?.status === 'expired';
+        if ((expiredNow && known?.status !== 'expired') || recovered) void reloadAccounts();
+      } catch (error: unknown) {
+        console.error('inova: unexpected renderer error', error);
+        next = { status: 'error', message: 'Erro inesperado.' };
+      }
+      setUsage((current) => ({ ...current, [accountLabel]: next }));
+    },
+    [reloadAccounts],
+  );
 
   const loadModels = useCallback(async (accountLabel: string) => {
     if (loadingModelsRef.current.has(accountLabel)) return;
@@ -285,6 +293,7 @@ export function App() {
       if (event.kind === 'user') dispatchChat({ sessionId, action: { type: 'started' } });
       dispatchChat({ sessionId, action: { type: 'event', event } });
       if (event.kind !== 'done') return;
+      if (event.isError) void reloadAccounts();
       setCompareMetrics((current) => ({
         ...current,
         [sessionId]: { costUsd: event.costUsd, durationMs: event.durationMs },
@@ -307,7 +316,7 @@ export function App() {
       const usageLabel = overridden?.label ?? project?.accountLabel;
       if (usageLabel) void loadUsage(usageLabel);
     });
-  }, [reloadSessions, loadUsage]);
+  }, [reloadSessions, loadUsage, reloadAccounts]);
 
   useEffect(() => {
     return window.inova.onLoginEvent((event) => {

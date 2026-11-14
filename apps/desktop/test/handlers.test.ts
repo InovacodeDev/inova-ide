@@ -796,6 +796,87 @@ test('getUsage clears the exhaustion when no window is at the limit', async () =
   await handlers.loadTranscript({ sessionId: session.id });
 });
 
+async function accountStatus(
+  handlers: Awaited<ReturnType<typeof setup>>['handlers'],
+  label: string,
+): Promise<string | undefined> {
+  return unwrap(await handlers.listAccounts()).find((item) => item.label === label)?.status;
+}
+
+function endTurn(
+  handlers: Awaited<ReturnType<typeof setup>>['handlers'],
+  input: { sessionId: string; isError: boolean },
+): void {
+  handlers.handleChatEvent(input.sessionId, {
+    kind: 'done',
+    isError: input.isError,
+    costUsd: null,
+    durationMs: 1,
+  });
+}
+
+test('a revoked login in a chat turn marks the account expired until a new login succeeds', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'error',
+    message:
+      'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has been revoked."}}',
+  });
+  endTurn(handlers, { sessionId: session.id, isError: true });
+
+  expect(await accountStatus(handlers, 'pessoal')).toBe('expired');
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.find((item) => item.sessionId === session.id)).toMatchObject({
+    kind: 'failed',
+    summary: 'Sessão da conta pessoal expirou. Renove o login em Contas.',
+  });
+
+  unwrap(await handlers.startLogin({ accountLabel: 'pessoal' }));
+  await handlers.handlePtyExit('sess-1', 0);
+  expect(await accountStatus(handlers, 'pessoal')).toBe('logged-in');
+  await handlers.loadTranscript({ sessionId: session.id });
+});
+
+test('a successful chat turn clears the expired mark', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'error',
+    message: 'Invalid API key · Please run /login',
+  });
+  endTurn(handlers, { sessionId: session.id, isError: true });
+  expect(await accountStatus(handlers, 'pessoal')).toBe('expired');
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  endTurn(handlers, { sessionId: session.id, isError: false });
+  expect(await accountStatus(handlers, 'pessoal')).toBe('logged-in');
+  await handlers.loadTranscript({ sessionId: session.id });
+});
+
+test('getUsage marks the account expired when the API rejects a valid token and clears it after success', async () => {
+  const { root, fetch, handlers } = await setup();
+  const { account } = await seedSession(root);
+  await writeFile(
+    join(account.homeDir, '.credentials.json'),
+    JSON.stringify({
+      claudeAiOauth: { accessToken: 'secret-token', expiresAt: Date.now() + 3_600_000 },
+    }),
+  );
+  fetch.mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
+  expect(await handlers.getUsage({ accountLabel: 'pessoal' })).toEqual({
+    ok: false,
+    message: 'Sessão da conta expirou. Renove o login em Contas.',
+  });
+  expect(await accountStatus(handlers, 'pessoal')).toBe('expired');
+
+  fetch.mockResolvedValue(apiUsage(10, null));
+  unwrap(await handlers.getUsage({ accountLabel: 'pessoal' }));
+  expect(await accountStatus(handlers, 'pessoal')).toBe('logged-in');
+});
+
 test('getUsage falls back to the cached stream snapshot for claude', async () => {
   const { root, fetch, handlers } = await setup();
   const { session } = await seedSession(root);
