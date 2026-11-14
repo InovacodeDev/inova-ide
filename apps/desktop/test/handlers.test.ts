@@ -1272,14 +1272,9 @@ test('rewindSession restores files, truncates the transcript, and resets agent m
   expect(rewound).toEqual({ text: 'Turno 1' });
   expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
   const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
-  expect(after).toEqual(
-    before.slice(
-      0,
-      before.findLastIndex((e) => e.kind === 'checkpoint'),
-    ),
-  );
+  expect(after).toEqual(before.slice(0, before.map((e) => e.kind).lastIndexOf('checkpoint')));
   expect(after.some((e) => e.kind === 'user' && e.text === 'Turno 1')).toBe(false);
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBeNull();
   expect(stored?.handoffContext).toContain('Turno 0');
   expect(stored?.handoffContext).not.toContain('Turno 1');
@@ -1295,7 +1290,7 @@ test('rewindSession of the first turn clears the handoff context', async () => {
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([
     { kind: 'session', providerSessionId: 'cli-sess-1' },
   ]);
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBeNull();
   expect(stored?.handoffContext).toBeNull();
 });
@@ -1321,7 +1316,7 @@ test('rewindSession skips file restore when the turn has no checkpoint', async (
   expect(await readFile(join(project.path, 'keep.txt'), 'utf8')).toBe('untouched');
   const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
   expect(after.filter((e) => e.kind === 'user')).toHaveLength(1);
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBeNull();
 });
 
@@ -1340,7 +1335,7 @@ test('rewinding a child session to turn 0 detaches it so the next turn does not 
   await new Promise((r) => setTimeout(r, 40));
 
   unwrap(await handlers.rewindSession({ sessionId: child.id, turnIndex: 0 }));
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === child.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
   expect(stored?.detachedFromParent).toBe(true);
   expect(stored?.providerSessionId).toBeNull();
 
@@ -1362,7 +1357,7 @@ test('rewindSession fails without touching files or transcript while a turn is r
   expect(result.ok).toBe(false);
   expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
@@ -1395,7 +1390,7 @@ test('rewindSession keeps transcript and session intact when the checkpoint rest
   await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 0 })).rejects.toThrow();
 
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
-  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
