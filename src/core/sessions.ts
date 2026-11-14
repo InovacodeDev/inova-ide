@@ -312,6 +312,7 @@ export async function updateSession(ctx: {
       | 'providerSessionId'
       | 'accountIdOverride'
       | 'handoffContext'
+      | 'detachedFromParent'
       | 'model'
       | 'effort'
       | 'mode'
@@ -330,6 +331,7 @@ export async function updateSession(ctx: {
       providerSessionId,
       accountIdOverride,
       handoffContext,
+      detachedFromParent,
       model,
       effort,
       mode,
@@ -352,6 +354,7 @@ export async function updateSession(ctx: {
       }
     }
     if (handoffContext !== undefined) session.handoffContext = handoffContext;
+    if (detachedFromParent !== undefined) session.detachedFromParent = detachedFromParent;
     if (model !== undefined) session.model = normalizeModel(model);
     if (worktree !== undefined) session.worktree = worktree;
     if (effort !== undefined) {

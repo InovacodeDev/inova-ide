@@ -1325,6 +1325,32 @@ test('rewindSession skips file restore when the turn has no checkpoint', async (
   expect(stored?.providerSessionId).toBeNull();
 });
 
+test('rewinding a child session to turn 0 detaches it so the next turn does not fork the parent', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  await updateSession({ root, sessionId: parent.id, patch: { providerSessionId: 'parent-prov' } });
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  handlers.handleChatEvent(child.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(child.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  await new Promise((r) => setTimeout(r, 40));
+
+  unwrap(await handlers.rewindSession({ sessionId: child.id, turnIndex: 0 }));
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === child.id);
+  expect(stored?.detachedFromParent).toBe(true);
+  expect(stored?.providerSessionId).toBeNull();
+
+  unwrap(await handlers.sendMessage({ sessionId: child.id, prompt: 'de novo' }));
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args).not.toContain('--fork-session');
+  expect(args).not.toContain('parent-prov');
+  expect(args).toContain('--session-id');
+});
+
 test('rewindSession fails without touching files or transcript while a turn is running', async () => {
   const { root, handlers, running } = await setup();
   const { repoDir, session } = await seedRewindSession(root, handlers);

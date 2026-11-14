@@ -109,6 +109,15 @@ describe('sessions', () => {
     expect(await getSession({ root, sessionId: a.id })).toEqual(updated);
   });
 
+  it('detachedFromParent is absent by default and round-trips through updateSession', async () => {
+    const created = await createSession({ root, projectId: 'p1' });
+    expect(created.detachedFromParent).toBeUndefined();
+    await updateSession({ root, sessionId: created.id, patch: { detachedFromParent: true } });
+    expect((await getSession({ root, sessionId: created.id })).detachedFromParent).toBe(true);
+    await updateSession({ root, sessionId: created.id, patch: { title: 'outro' } });
+    expect((await getSession({ root, sessionId: created.id })).detachedFromParent).toBe(true);
+  });
+
   it('updateSession stores and clears model and effort and rejects invalid values', async () => {
     const a = await createSession({ root, projectId: 'p1' });
     expect(a.model).toBeNull();

@@ -240,7 +240,12 @@ function decideTurn(input: { session: Session; parent: Session | undefined; clau
     };
   }
   const sessionId = randomUUID();
-  if (claude && parent?.providerSessionId && !session.handoffContext) {
+  if (
+    claude &&
+    parent?.providerSessionId &&
+    !session.handoffContext &&
+    session.detachedFromParent !== true
+  ) {
     return {
       turn: { mode: 'fork', parentProviderSessionId: parent.providerSessionId, sessionId },
       newId: sessionId,
@@ -1567,26 +1572,33 @@ export function createHandlers(deps: HandlerDeps) {
           if (!truncated) return fail('Turno não encontrado.');
           const { kept, removedUserText, checkpointRef } = truncated;
           const cwd = effectiveCwd(session, project);
-          if (checkpointRef !== null) {
-            await restoreCheckpoint({ repoPath: cwd, ref: checkpointRef, preserveFiles: [] });
+          try {
+            if (checkpointRef !== null) {
+              await restoreCheckpoint({ repoPath: cwd, ref: checkpointRef, preserveFiles: [] });
+            }
+            const hasUserTurns = kept.some((event) => event.kind === 'user');
+            const handoffContext = hasUserTurns
+              ? buildHandoffContext({
+                  events: kept,
+                  gitSummary: await gitSummaryFor(cwd),
+                  fromProvider: account.provider,
+                  toProvider: account.provider,
+                })
+              : null;
+            provisionalSessions.delete(sessionId);
+            await updateSession({
+              root: deps.root,
+              sessionId,
+              patch: {
+                providerSessionId: null,
+                handoffContext,
+                ...(session.parentId === null ? {} : { detachedFromParent: true }),
+              },
+            });
+            await writeTranscriptEvents(sessionId, kept);
+          } finally {
+            if (checkpointRef !== null) invalidateProjectFiles(sessionId);
           }
-          const hasUserTurns = kept.some((event) => event.kind === 'user');
-          const handoffContext = hasUserTurns
-            ? buildHandoffContext({
-                events: kept,
-                gitSummary: await gitSummaryFor(cwd),
-                fromProvider: account.provider,
-                toProvider: account.provider,
-              })
-            : null;
-          await writeTranscriptEvents(sessionId, kept);
-          provisionalSessions.delete(sessionId);
-          await updateSession({
-            root: deps.root,
-            sessionId,
-            patch: { providerSessionId: null, handoffContext },
-          });
-          invalidateProjectFiles(sessionId);
           return ok({ text: removedUserText });
         }),
       ),
