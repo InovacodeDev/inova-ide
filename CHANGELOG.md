@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Painel de contexto: o expansor "O que consumiu o contexto" mostra os tokens por categoria (prompt de sistema, ferramentas, MCP, memória, skills, mensagens). Ele também lista cada item, do maior para o menor. Funciona só em sessões Claude e não altera a sessão.
+- O consumo de cada conta logada é atualizado a cada 1 minuto. Se uma atualização automática falhar, a barra mantém o último valor lido.
+
 ## [0.6.0] - 2026-11-14
 
 ### Adicionado
