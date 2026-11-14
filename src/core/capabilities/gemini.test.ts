@@ -59,12 +59,22 @@ describe('geminiCapabilities.list', () => {
     expect(category).toEqual({ kind: 'mcp', items: [], error: null });
   });
 
-  it('lists plugins as account-file items', async () => {
-    const plugins = await categoryOf(contextWith({}), 'plugin');
+  it('lists plugins and groups their skills as unsupported', async () => {
+    const ctx = contextWith({});
+    const plugins = await categoryOf(ctx, 'plugin');
     expect(plugins?.items.map((item) => [item.id, item.enabled, item.applyMode])).toEqual([
       ['dummyplug', true, 'account-file'],
       ['offplug', false, 'account-file'],
     ]);
+    const skills = await categoryOf(ctx, 'skill');
+    expect(
+      skills?.items.map((item) => [item.id, item.enabled, item.applyMode, item.group]),
+    ).toEqual([
+      ['dummyplug:hello', true, 'unsupported', 'dummyplug'],
+      ['dummyplug:wave', true, 'unsupported', 'dummyplug'],
+      ['offplug:bye', false, 'unsupported', 'offplug'],
+    ]);
+    expect(skills?.items[0]?.unsupportedReason).toBe('Desligue o plugin dummyplug');
   });
 
   it('reports a per-category error on non-zero exit', async () => {
@@ -76,6 +86,9 @@ describe('geminiCapabilities.list', () => {
     );
     expect((await categoryOf(ctx, 'plugin'))?.error).toBe(
       'Não foi possível listar os plugins do agy.',
+    );
+    expect((await categoryOf(ctx, 'skill'))?.error).toBe(
+      'Não foi possível listar as skills do agy.',
     );
   });
 
@@ -93,6 +106,7 @@ describe('geminiCapabilities.list', () => {
     };
     const { categories } = await geminiCapabilities.list(missing);
     expect(categories.map((entry) => entry.error)).toEqual([
+      'agy não encontrado.',
       'agy não encontrado.',
       'agy não encontrado.',
     ]);
