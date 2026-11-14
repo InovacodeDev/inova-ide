@@ -12,7 +12,9 @@ const runner: CommandRunner = {
     exitCode: 0,
     stdout: cmd.args.includes('/context')
       ? JSON.stringify({ result: fixture('claude-context.md') })
-      : fixture('claude-mcp-list.txt'),
+      : cmd.args[0] === 'plugin'
+        ? fixture('claude-plugin-list.json')
+        : fixture('claude-mcp-list.txt'),
   }),
 };
 
@@ -63,6 +65,34 @@ describe('claudeCapabilities.list', () => {
       group: 'superpowers',
       description: null,
     });
+  });
+
+  it('lists plugins and honors the disabled list', async () => {
+    const disabledCtx = {
+      ...ctx,
+      account: {
+        ...ctx.account,
+        disabledCapabilities: [{ kind: 'plugin', id: 'superpowers@synced' }],
+      },
+    } satisfies CapabilityContext;
+    const pluginsOf = async (context: CapabilityContext) =>
+      (await claudeCapabilities.list(context)).categories.find((entry) => entry.kind === 'plugin')
+        ?.items;
+    expect(await pluginsOf(ctx)).toEqual([
+      {
+        kind: 'plugin',
+        id: 'superpowers@synced',
+        name: 'superpowers@synced',
+        description: null,
+        source: 'plugin',
+        enabled: true,
+        applyMode: 'launch',
+        unsupportedReason: null,
+        tokens: null,
+        group: null,
+      },
+    ]);
+    expect((await pluginsOf(disabledCtx))?.[0]?.enabled).toBe(false);
   });
 
   it('reads the cost summary from the category table', async () => {

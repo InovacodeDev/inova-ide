@@ -125,6 +125,39 @@ function costSummary(breakdown: ContextBreakdown | null): CapabilityCostSummary 
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parsePlugins(stdout: string): CapabilityItem[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+  if (!Array.isArray(parsed)) return null;
+  return parsed.flatMap((entry: unknown): CapabilityItem[] =>
+    isRecord(entry) && typeof entry['id'] === 'string'
+      ? [
+          {
+            kind: 'plugin',
+            id: entry['id'],
+            name: entry['id'],
+            description: null,
+            source: 'plugin',
+            enabled: entry['enabled'] !== false,
+            applyMode: 'launch',
+            unsupportedReason: null,
+            tokens: null,
+            group: null,
+          },
+        ]
+      : [],
+  );
+}
+
 function runClaude(
   ctx: CapabilityContext,
   command: { args: string[]; cwd?: string },
@@ -139,18 +172,20 @@ function runClaude(
 }
 
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const [context, mcp] = await Promise.all([
+  const [context, mcp, pluginList] = await Promise.all([
     runClaude(ctx, {
       args: ['-p', '--output-format', 'json', '--no-session-persistence', '--', '/context'],
       cwd: ctx.projectPath ?? ctx.account.homeDir,
     }),
     runClaude(ctx, { args: ['mcp', 'list'] }),
+    runClaude(ctx, { args: ['plugin', 'list', '--json'] }),
   ]);
+  const disabled = ctx.account.disabledCapabilities ?? [];
+  const plugins = 'exitCode' in pluginList ? (parsePlugins(pluginList.stdout) ?? []) : [];
   const breakdown =
     'exitCode' in context && context.exitCode === 0
       ? parseClaudeContextOutput(context.stdout)
       : null;
-  const disabled = ctx.account.disabledCapabilities ?? [];
   const servers = serverItems({
     names: 'exitCode' in mcp ? parseMcpNames(mcp.stdout) : [],
     tokens: breakdown === null ? null : serverTokens(breakdown),
@@ -165,6 +200,14 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
       },
       { kind: 'mcp', items: servers.mcp, error: null },
       { kind: 'connector', items: servers.connectors, error: null },
+      {
+        kind: 'plugin',
+        items: plugins.map((item) => ({
+          ...item,
+          enabled: item.enabled && !isDisabled(disabled, { kind: 'plugin', id: item.id }),
+        })),
+        error: null,
+      },
     ],
     cost: costSummary(breakdown),
   };
