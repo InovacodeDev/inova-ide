@@ -1,3 +1,65 @@
+.tab-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-bar-tab {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 220px;
+  padding-right: 4px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+  color: var(--muted);
+}
+
+.tab-bar-tab:hover {
+  color: var(--text);
+}
+
+.tab-bar-tab-active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.tab-bar-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab-bar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-bar-running {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tab-bar-close {
+  flex: none;
+}
+
 .session-header {
   display: flex;
   flex-wrap: wrap;

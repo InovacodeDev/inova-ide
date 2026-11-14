@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { adjacentSessionId, tabsReducer, type TabsState } from '../src/renderer/tabs';
+import { adjacentSessionId, canOpenTab, tabsReducer, type TabsState } from '../src/renderer/tabs';
 
 const empty: TabsState = { tabs: [], active: null };
 const open = (state: TabsState, id: string): TabsState =>
@@ -86,5 +86,31 @@ describe('adjacentSessionId', () => {
     const unfocused: TabsState = { ...three, active: null };
     expect(adjacentSessionId({ state: unfocused, delta: 1 })).toBe('a');
     expect(adjacentSessionId({ state: unfocused, delta: -1 })).toBe('c');
+  });
+});
+
+describe('tab limit', () => {
+  const three = open(open(open(empty, 'a'), 'b'), 'c');
+
+  test('canOpenTab is false for a new id when full', () => {
+    expect(canOpenTab(three, 'd')).toBe(false);
+  });
+
+  test('canOpenTab is true for an existing id when full', () => {
+    expect(canOpenTab(three, 'a')).toBe(true);
+  });
+
+  test('canOpenTab is true with room left', () => {
+    expect(canOpenTab(open(open(empty, 'a'), 'b'), 'c')).toBe(true);
+  });
+
+  test('opening a fourth tab returns the same state', () => {
+    expect(open(three, 'd')).toBe(three);
+  });
+
+  test('opening an existing tab when full activates it', () => {
+    const state = open(three, 'a');
+    expect(state.tabs).toHaveLength(3);
+    expect(state.active).toBe('a');
   });
 });

@@ -48,7 +48,8 @@ import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
-import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
+import { adjacentSessionId, canOpenTab, tabsReducer, type Tab } from './tabs';
+import { TabBar } from './TabBar';
 import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
@@ -123,7 +124,7 @@ export function App() {
   const [windowFocused, setWindowFocused] = useState(() =>
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
-  const { warning, dismiss, guard, call } = useWarning();
+  const { warning, dismiss, guard, call, warn } = useWarning();
   const updates = useUpdates();
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -135,10 +136,16 @@ export function App() {
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
-  const latest = useRef({ accounts, projects, sessions, chats });
+  const latest = useRef({ accounts, projects, sessions, chats, tabs });
   useEffect(() => {
-    latest.current = { accounts, projects, sessions, chats };
+    latest.current = { accounts, projects, sessions, chats, tabs };
   });
+
+  const ensureTabRoom = (sessionId: string): boolean => {
+    if (canOpenTab(latest.current.tabs, sessionId)) return true;
+    warn('Limite de 3 abas. Feche uma aba.');
+    return false;
+  };
 
   const reloadAccounts = useCallback(async () => {
     const result = await call(() => window.inova.listAccounts());
@@ -352,6 +359,7 @@ export function App() {
   };
 
   const openChatTab = async (session: Session, knownProject?: ProjectView) => {
+    if (!ensureTabRoom(session.id)) return;
     const project =
       knownProject ??
       latest.current.projects.find((candidate) => candidate.id === session.projectId);
@@ -382,6 +390,7 @@ export function App() {
     parent: Session | null;
     isolatedWorktree?: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.createSession({
         projectId: input.project.id,
@@ -403,6 +412,7 @@ export function App() {
   );
 
   const importSessions = async (input: { project: ProjectView; requests: ImportRequest[] }) => {
+    if (!ensureTabRoom('')) return;
     const imported: Session[] = [];
     for (const request of input.requests) {
       const result = await call(() =>
@@ -504,6 +514,7 @@ export function App() {
     targetAccountId?: string;
     copyWorktreeFiles: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.forkSession({
         sessionId: input.session.id,
@@ -540,6 +551,7 @@ export function App() {
     targetAccountId: string;
     createWorktree: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const pendingPrompt = busyConflicts[input.session.id]?.prompt;
     const result = await call(() =>
       window.inova.handoffSession({
@@ -1111,6 +1123,15 @@ export function App() {
             />
           )}
           <div className="main-content" style={inWorkspace ? undefined : { display: 'none' }}>
+            {chatTabs.length > 0 && (
+              <TabBar
+                tabs={chatTabs}
+                active={tabs.active}
+                statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+                onActivate={activateTab}
+                onClose={requestCloseTab}
+              />
+            )}
             {activeTab ? (
               <SessionHeader
                 key={activeTab.sessionId}
