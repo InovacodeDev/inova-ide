@@ -1450,7 +1450,11 @@ export function createHandlers(deps: HandlerDeps) {
       }),
     cancelQueuedTurn: (input: unknown): Promise<Result<null>> =>
       validated(input, parseTurnRef, async ({ turnId }) => {
+        const owner = turnQueue.list().find((item) => item.turnId === turnId);
         turnQueue.cancelByTurnId(turnId);
+        if (owner && turnQueue.forSession(owner.sessionId).length === 0) {
+          setQueuePaused({ sessionId: owner.sessionId, paused: false });
+        }
         emitQueueSnapshot();
         return ok(null);
       }),
@@ -1458,8 +1462,21 @@ export function createHandlers(deps: HandlerDeps) {
     listPausedQueues: (): Promise<Result<string[]>> => guarded(async () => ok([...pausedQueues])),
     resumeSessionQueue: (input: unknown): Promise<Result<null>> =>
       validated(input, parseSessionRef, async ({ sessionId }) => {
-        setQueuePaused({ sessionId, paused: false });
         const head = turnQueue.forSession(sessionId)[0];
+        if (head) {
+          const entry = exhaustionEntry(head.accountId);
+          if (entry !== null) {
+            if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
+            const account = (await loadStore(deps.root)).accounts.find(
+              (item) => item.id === head.accountId,
+            );
+            if (account) {
+              const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+              if (blocked !== null) return fail(blocked);
+            }
+          }
+        }
+        setQueuePaused({ sessionId, paused: false });
         if (head) {
           preferredQueueSession.set(head.accountId, sessionId);
           void drainAccountQueue(head.accountId).catch((error: unknown) => {

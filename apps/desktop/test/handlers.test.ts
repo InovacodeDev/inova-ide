@@ -1333,6 +1333,60 @@ test('account idle does not drain a paused session but drains others', async () 
   ]);
 });
 
+test('resumeSessionQueue fails and keeps the pause while the account is still exhausted', async () => {
+  const { handlers, send, chatInUse, session, accountId, pausedSnapshots } =
+    await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: '2026-01-01T05:00:00.000Z' }],
+  });
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+
+  const result = await handlers.resumeSessionQueue({ sessionId: session.id });
+  expect(result.ok ? '' : result.message).toContain('CONTA_ESGOTADA:');
+  expect(result.ok ? '' : result.message).toContain('Libera às');
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+test('cancelling the last queued turn clears the session pause', async () => {
+  const { handlers, chatInUse, session, accountId, pausedSnapshots } = await startQueuedSession();
+  const first = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'A' }));
+  const second = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'B' }));
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await settle();
+  unwrap(await handlers.cancelQueuedTurn({ turnId: first.turnId }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  unwrap(await handlers.cancelQueuedTurn({ turnId: second.turnId }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+  expect(pausedSnapshots.at(-1)).toEqual([]);
+});
+
+test('production order: done while account in use, then idle, runs the finished session first', async () => {
+  const { handlers, send, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Antiga de outra sessão' }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Da mesma sessão' }));
+
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(1);
+
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  await settle();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(session.id);
+  expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([other.id]);
+});
+
 test('deleting a session clears its queue pause', async () => {
   const { handlers, chatInUse, session, accountId } = await startQueuedSession();
   unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));

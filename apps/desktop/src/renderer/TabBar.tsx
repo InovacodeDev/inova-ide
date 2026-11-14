@@ -19,6 +19,7 @@ export function TabBar(props: TabBarProps) {
     <div className="tab-bar" role="tablist" aria-label="Sessões abertas">
       {tabs.map((tab) => {
         const selected = tab.sessionId === active;
+        const queuedCount = queuedCountOf?.(tab.sessionId) ?? 0;
         return (
           <div
             key={tab.sessionId}
@@ -37,13 +38,13 @@ export function TabBar(props: TabBarProps) {
               {statusOf(tab.sessionId) === 'running' && (
                 <span className="tab-bar-running" role="img" aria-label="Executando" />
               )}
-              {(queuedCountOf?.(tab.sessionId) ?? 0) > 0 && (
+              {queuedCount > 0 && (
                 <span
                   className="tab-bar-queue"
                   role="img"
-                  aria-label={queueCountLabel(queuedCountOf?.(tab.sessionId) ?? 0)}
+                  aria-label={queueCountLabel(queuedCount)}
                 >
-                  {queuedCountOf?.(tab.sessionId)}
+                  {queuedCount}
                 </span>
               )}
             </button>
