@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   backupFile,
   CapabilityFileError,
+  serialize,
   setTomlArrayMembership,
   setTomlSkillConfig,
   setTomlTableKey,
@@ -182,5 +183,26 @@ describe('updateTomlFile', () => {
     expect(await readFile(file, 'utf8')).toBe('a = 1\nb = 2\n');
     const [name] = await readdir(backupRoot);
     expect(await readFile(join(backupRoot, name ?? ''), 'utf8')).toBe('a = 1\n');
+  });
+});
+
+describe('serialize', () => {
+  it('[RF-5] runs same-key tasks one after another', async () => {
+    const file = join(dir, 'counter');
+    await writeFile(file, '0');
+    const bump = async (): Promise<void> => {
+      const value = Number(await readFile(file, 'utf8'));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await writeFile(file, String(value + 1));
+    };
+    await Promise.all([serialize('k', bump), serialize('k', bump)]);
+    expect(await readFile(file, 'utf8')).toBe('2');
+  });
+
+  it('keeps running after a failed task', async () => {
+    const failed = serialize('f', () => Promise.reject(new Error('x')));
+    const ok = serialize('f', () => Promise.resolve(7));
+    await expect(failed).rejects.toThrow('x');
+    await expect(ok).resolves.toBe(7);
   });
 });

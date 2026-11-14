@@ -244,3 +244,19 @@ export async function updateTomlFile(input: {
   await backupFile({ file: input.file, backupRoot: input.backupRoot });
   await writeAtomic(input.file, input.update(raw));
 }
+
+const queueTails = new Map<string, Promise<unknown>>();
+
+export function serialize<T>(key: string, task: () => Promise<T>): Promise<T> {
+  const previous = queueTails.get(key) ?? Promise.resolve();
+  const run = previous.then(task, task);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  queueTails.set(key, tail);
+  void tail.then(() => {
+    if (queueTails.get(key) === tail) queueTails.delete(key);
+  });
+  return run;
+}
