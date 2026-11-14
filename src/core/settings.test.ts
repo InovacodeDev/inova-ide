@@ -50,6 +50,35 @@ describe('settings', () => {
     expect((await getSettings(root)).appearance.theme).toBe('light');
   });
 
+  it('defaults sidebarCollapsed to false when the stored appearance lacks it', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        settings: { appearance: { theme: 'light' } },
+      }),
+    );
+    expect((await getSettings(root)).appearance).toEqual({
+      theme: 'light',
+      sidebarCollapsed: false,
+    });
+  });
+
+  it('updateSettings preserves a saved sidebarCollapsed of true', async () => {
+    await updateSettings({ root, patch: { appearance: { sidebarCollapsed: true } } });
+    expect((await getSettings(root)).appearance.sidebarCollapsed).toBe(true);
+    await updateSettings({ root, patch: { appearance: { theme: 'light' } } });
+    expect((await getSettings(root)).appearance.sidebarCollapsed).toBe(true);
+  });
+
+  it('updateSettings rejects a non-boolean sidebarCollapsed', async () => {
+    await expect(
+      updateSettings({ root, patch: { appearance: { sidebarCollapsed: 'yes' } as never } }),
+    ).rejects.toThrow(SettingsError);
+  });
+
   it('updateSettings merges a partial patch per section and persists it', async () => {
     await updateSettings({ root, patch: { sessions: { autoArchiveDays: 7 } } });
     const result = await updateSettings({

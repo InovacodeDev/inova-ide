@@ -179,6 +179,10 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   expect(electron.invoke).toHaveBeenCalledWith('inova:cancelQueuedTurn', { turnId: 't1' });
   void api.listTurnQueue();
   expect(electron.invoke).toHaveBeenCalledWith('inova:listTurnQueue');
+  void api.listPausedQueues();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listPausedQueues');
+  void api.resumeSessionQueue({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:resumeSessionQueue', { sessionId: 's' });
   void api.switchSessionAccount({ sessionId: 's', accountId: 'a2' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:switchSessionAccount', {
     sessionId: 's',
@@ -194,6 +198,13 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     sessionId: 's',
     turnIndex: 0,
   });
+  void api.rewindSession({ sessionId: 's', turnIndex: 1 });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:rewindSession', {
+    sessionId: 's',
+    turnIndex: 1,
+  });
+  void api.clearSession({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:clearSession', { sessionId: 's' });
   void api.listExternalSessions({ projectId: 'p' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:listExternalSessions', { projectId: 'p' });
   const importInput = {

@@ -44,6 +44,7 @@ export interface Session {
   providerSessionId: string | null;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
+  detachedFromParent?: boolean;
   comparisonGroupId?: string | null;
   comparisonRole?: 'left' | 'right' | null;
   model?: string | null;
@@ -75,6 +76,7 @@ export interface QueuedTurn {
   accountId: string;
   prompt: string;
   enqueuedAt: string;
+  extraDirs?: string[];
 }
 
 export interface Workspace {
@@ -89,6 +91,7 @@ export type ThemePreference = 'system' | 'dark' | 'light';
 export interface Settings {
   appearance: {
     theme: ThemePreference;
+    sidebarCollapsed: boolean;
   };
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';

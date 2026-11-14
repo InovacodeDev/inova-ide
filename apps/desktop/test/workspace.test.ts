@@ -80,6 +80,23 @@ describe('restoreTabs', () => {
     expect(result.activeSessionId).toBe('b');
   });
 
+  test('caps restored tabs at three and keeps the saved active tab when kept', () => {
+    const many = { p: ['a', 'b', 'c', 'd', 'e'].map(session) };
+    const kept = restoreTabs({
+      workspace: { openSessionIds: ['a', 'b', 'c', 'd', 'e'], activeSessionId: 'b' },
+      sessions: many,
+      projects: [project],
+    });
+    expect(kept.tabs.map((t) => t.sessionId)).toEqual(['a', 'b', 'c']);
+    expect(kept.activeSessionId).toBe('b');
+    const dropped = restoreTabs({
+      workspace: { openSessionIds: ['a', 'b', 'c', 'd', 'e'], activeSessionId: 'e' },
+      sessions: many,
+      projects: [project],
+    });
+    expect(dropped.activeSessionId).toBe('a');
+  });
+
   test('returns nothing for an empty workspace', () => {
     const result = restoreTabs({
       workspace: { openSessionIds: [], activeSessionId: null },

@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import type { ChatEvent } from './chat-types.js';
-import { buildHandoffContext, isRateLimitMessage, sliceTranscriptToTurn } from './handoff.js';
+import {
+  buildHandoffContext,
+  isRateLimitMessage,
+  sliceTranscriptToTurn,
+  truncateTranscriptAtTurn,
+} from './handoff.js';
 
 describe('handoff', () => {
   test('isRateLimitMessage detects common quota and 429 errors', () => {
@@ -96,5 +101,86 @@ describe('handoff', () => {
     expect(slice1.preTurnCheckpointRef).toBe('refs/inova/checkpoints/s/1');
     expect(slice1.postTurnCheckpointRef).toBeNull();
     expect(slice1.slicedEvents).toHaveLength(8);
+  });
+
+  describe('truncateTranscriptAtTurn', () => {
+    const checkpoint = (n: number): ChatEvent => ({
+      kind: 'checkpoint',
+      turnId: `u${n}`,
+      ref: `refs/inova/checkpoints/s/${n}`,
+      createdAt: `t${n}`,
+      skippedLargeFiles: [],
+    });
+    const withCheckpoints: ChatEvent[] = [
+      checkpoint(0),
+      { kind: 'user', text: 'Turno 0', at: 't0' },
+      { kind: 'text', blockId: 'b0', text: 'Resposta 0' },
+      { kind: 'done', isError: false, costUsd: null, durationMs: 10 },
+      checkpoint(1),
+      { kind: 'user', text: 'Turno 1', at: 't1' },
+      { kind: 'text', blockId: 'b1', text: 'Resposta 1' },
+    ];
+
+    test('cuts before the checkpoint that precedes the target turn', () => {
+      const result = truncateTranscriptAtTurn(withCheckpoints, 1);
+      expect(result?.kept).toEqual(withCheckpoints.slice(0, 4));
+      expect(result?.removedUserText).toBe('Turno 1');
+      expect(result?.checkpointRef).toBe('refs/inova/checkpoints/s/1');
+    });
+
+    test('returns the large files the checkpoint skipped', () => {
+      const events: ChatEvent[] = [
+        {
+          kind: 'checkpoint',
+          turnId: 'u0',
+          ref: 'refs/inova/checkpoints/s/0',
+          createdAt: 't0',
+          skippedLargeFiles: ['big.bin'],
+        },
+        { kind: 'user', text: 'Turno 0', at: 't0' },
+      ];
+      expect(truncateTranscriptAtTurn(events, 0)?.skippedLargeFiles).toEqual(['big.bin']);
+      expect(truncateTranscriptAtTurn(withCheckpoints, 0)?.skippedLargeFiles).toEqual([]);
+    });
+
+    test('turn 0 keeps nothing', () => {
+      const result = truncateTranscriptAtTurn(withCheckpoints, 0);
+      expect(result?.kept).toEqual([]);
+      expect(result?.removedUserText).toBe('Turno 0');
+      expect(result?.checkpointRef).toBe('refs/inova/checkpoints/s/0');
+    });
+
+    test('cuts before the user event when no checkpoint precedes it', () => {
+      const events: ChatEvent[] = [
+        { kind: 'user', text: 'Turno 0', at: 't0' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+        { kind: 'user', text: 'Turno 1', at: 't1' },
+      ];
+      const result = truncateTranscriptAtTurn(events, 1);
+      expect(result?.kept).toEqual(events.slice(0, 2));
+      expect(result?.checkpointRef).toBeNull();
+    });
+
+    test('keeps feedback of earlier turns recorded after the cut point', () => {
+      const feedback = (turnIndex: number): ChatEvent => ({
+        kind: 'feedback',
+        turnIndex,
+        value: 'up',
+      });
+      const events: ChatEvent[] = [
+        { kind: 'user', text: 'Turno 0', at: 't0' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+        { kind: 'user', text: 'Turno 1', at: 't1' },
+        feedback(0),
+        feedback(1),
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+      ];
+      const result = truncateTranscriptAtTurn(events, 1);
+      expect(result?.kept).toEqual([...events.slice(0, 2), feedback(0)]);
+    });
+
+    test('returns null when the turn does not exist', () => {
+      expect(truncateTranscriptAtTurn(withCheckpoints, 5)).toBeNull();
+    });
   });
 });

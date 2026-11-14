@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, test } from 'vitest';
 import {
+  checkpointExists,
   createCheckpoint,
   removeSessionCheckpoints,
   restoreCheckpoint,
@@ -40,6 +41,15 @@ describe('git-checkpoints', () => {
   test('returns null outside git repositories', async () => {
     const plain = await makeTempDir('inova-cp-plain-');
     expect(await createCheckpoint({ repoPath: plain, sessionId: 's1', turnId: 't1' })).toBeNull();
+  });
+
+  test('checkpointExists reports whether a checkpoint ref resolves', async () => {
+    const repo = await initRepo();
+    const cp = await createCheckpoint({ repoPath: repo, sessionId: 's1', turnId: 't1' });
+    expect(await checkpointExists({ repoPath: repo, ref: cp?.ref ?? '' })).toBe(true);
+    expect(await checkpointExists({ repoPath: repo, ref: 'refs/inova/checkpoints/s1/gone' })).toBe(
+      false,
+    );
   });
 
   test('captures snapshot without altering git status and restores while preserving .gitignore and skipped large files', async () => {

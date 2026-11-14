@@ -41,6 +41,7 @@ import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { accountDisplayName } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionHeader } from './SessionHeader';
+import { isAccountBusyElsewhere } from './queue-state';
 import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
@@ -48,7 +49,8 @@ import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
-import { adjacentSessionId, tabsReducer, type Tab } from './tabs';
+import { adjacentSessionId, canOpenTab, tabsReducer, type Tab } from './tabs';
+import { TabBar } from './TabBar';
 import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
@@ -102,14 +104,21 @@ export function App() {
   } | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
+  const [pausedQueueIds, setPausedQueueIds] = useState<string[]>([]);
   const [busyConflicts, setBusyConflicts] = useState<
-    Record<string, { prompt: string; exhausted: boolean }>
+    Record<string, { prompt: string; exhausted: boolean; message?: string; extraDirs?: string[] }>
   >({});
   const [pendingFork, setPendingFork] = useState<{
     session: Session;
     turnIndex: number;
     isLatestTurn: boolean;
   } | null>(null);
+  const [pendingRewind, setPendingRewind] = useState<{
+    sessionId: string;
+    turnIndex: number;
+    resend?: { extraDirs: string[] };
+  } | null>(null);
+  const [pendingComposerText, setPendingComposerText] = useState<Record<string, string>>({});
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
@@ -123,7 +132,7 @@ export function App() {
   const [windowFocused, setWindowFocused] = useState(() =>
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
-  const { warning, dismiss, guard, call } = useWarning();
+  const { warning, dismiss, guard, call, warn } = useWarning();
   const updates = useUpdates();
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -131,13 +140,20 @@ export function App() {
   const inboxRef = useRef<HTMLElement>(null);
   const activeChatRef = useRef<ChatViewHandle>(null);
   useTheme(settings?.appearance.theme);
+  const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
-  const latest = useRef({ accounts, projects, sessions, chats });
+  const latest = useRef({ accounts, projects, sessions, chats, tabs });
   useEffect(() => {
-    latest.current = { accounts, projects, sessions, chats };
+    latest.current = { accounts, projects, sessions, chats, tabs };
   });
+
+  const ensureTabRoom = (sessionId: string): boolean => {
+    if (canOpenTab(latest.current.tabs, sessionId)) return true;
+    warn('Limite de 3 abas. Feche uma aba.');
+    return false;
+  };
 
   const reloadAccounts = useCallback(async () => {
     const result = await call(() => window.inova.listAccounts());
@@ -204,10 +220,10 @@ export function App() {
   }, []);
 
   const loadChat = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, mode: 'load' | 'replace' = 'load') => {
       const result = await call(() => window.inova.loadTranscript({ sessionId }));
       if (result) {
-        dispatchChat({ sessionId, action: { type: 'load', events: result.value } });
+        dispatchChat({ sessionId, action: { type: mode, events: result.value } });
       }
     },
     [call],
@@ -230,6 +246,9 @@ export function App() {
     });
     void call(() => window.inova.listTurnQueue()).then((loadedQueue) => {
       if (loadedQueue) setTurnQueue(loadedQueue.value);
+    });
+    void call(() => window.inova.listPausedQueues()).then((loadedPaused) => {
+      if (loadedPaused) setPausedQueueIds(loadedPaused.value);
     });
     void (async () => {
       const loaded = await reloadProjects();
@@ -320,6 +339,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    return window.inova.onQueuePausedEvent((sessionIds) => setPausedQueueIds(sessionIds));
+  }, []);
+
+  useEffect(() => {
     const onFocus = () => setWindowFocused(true);
     const onBlur = () => setWindowFocused(false);
     window.addEventListener('focus', onFocus);
@@ -351,6 +374,7 @@ export function App() {
   };
 
   const openChatTab = async (session: Session, knownProject?: ProjectView) => {
+    if (!ensureTabRoom(session.id)) return;
     const project =
       knownProject ??
       latest.current.projects.find((candidate) => candidate.id === session.projectId);
@@ -381,6 +405,7 @@ export function App() {
     parent: Session | null;
     isolatedWorktree?: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.createSession({
         projectId: input.project.id,
@@ -402,6 +427,7 @@ export function App() {
   );
 
   const importSessions = async (input: { project: ProjectView; requests: ImportRequest[] }) => {
+    if (!ensureTabRoom('')) return;
     const imported: Session[] = [];
     for (const request of input.requests) {
       const result = await call(() =>
@@ -417,7 +443,11 @@ export function App() {
     await openChatTab(first, input.project);
   };
 
-  const sendMessage = async (sessionId: string, prompt: string, extraDirs: string[] = []) => {
+  const sendMessage = async (
+    sessionId: string,
+    prompt: string,
+    extraDirs: string[] = [],
+  ): Promise<boolean> => {
     dispatchChat({ sessionId, action: { type: 'started' } });
     const result = await guard(() => window.inova.sendMessage({ sessionId, prompt, extraDirs }));
     if (!result || !result.ok) {
@@ -432,15 +462,35 @@ export function App() {
         if (result.message.startsWith('CONTA_OCUPADA:')) {
           setBusyConflicts((current) => ({
             ...current,
-            [sessionId]: { prompt, exhausted: false },
+            [sessionId]: {
+              prompt,
+              exhausted: false,
+              ...(extraDirs.length > 0 ? { extraDirs } : {}),
+            },
           }));
         } else if (result.message.startsWith('CONTA_ESGOTADA:')) {
-          setBusyConflicts((current) => ({ ...current, [sessionId]: { prompt, exhausted: true } }));
+          const message = result.message.slice('CONTA_ESGOTADA:'.length).trim();
+          setBusyConflicts((current) => ({
+            ...current,
+            [sessionId]: { prompt, exhausted: true, message },
+          }));
         } else {
           await call(() => Promise.resolve(result));
         }
       }
-      return;
+      return false;
+    }
+    if (busyConflicts[sessionId]?.exhausted) {
+      const { sessions: knownSessions, projects: knownProjects } = latest.current;
+      const projectId = Object.keys(knownSessions).find((id) =>
+        knownSessions[id]?.some((item) => item.id === sessionId),
+      );
+      const session = projectId
+        ? knownSessions[projectId]?.find((item) => item.id === sessionId)
+        : undefined;
+      const project = knownProjects.find((candidate) => candidate.id === projectId);
+      const account = effectiveAccountOf(session, project);
+      if (account) void loadUsage(account.label);
     }
     setBusyConflicts((current) => {
       if (!(sessionId in current)) return current;
@@ -448,6 +498,7 @@ export function App() {
       delete next[sessionId];
       return next;
     });
+    return true;
   };
 
   const clearBusyConflict = (sessionId: string) => {
@@ -459,9 +510,31 @@ export function App() {
     });
   };
 
-  const enqueuePrompt = async (sessionId: string, prompt: string) => {
-    const result = await call(() => window.inova.enqueueTurn({ sessionId, prompt }));
+  const enqueuePrompt = async (input: {
+    sessionId: string;
+    prompt: string;
+    extraDirs?: string[];
+  }) => {
+    const { sessionId, prompt, extraDirs } = input;
+    const result = await call(() =>
+      window.inova.enqueueTurn({ sessionId, prompt, ...(extraDirs ? { extraDirs } : {}) }),
+    );
     if (result) clearBusyConflict(sessionId);
+  };
+
+  const resumeQueue = async (sessionId: string) => {
+    const result = await guard(() => window.inova.resumeSessionQueue({ sessionId }));
+    if (!result || result.ok) return;
+    if (result.message.startsWith('CONTA_ESGOTADA:')) {
+      const message = result.message.slice('CONTA_ESGOTADA:'.length).trim();
+      const prompt = turnQueue.find((item) => item.sessionId === sessionId)?.prompt ?? '';
+      setBusyConflicts((current) => ({
+        ...current,
+        [sessionId]: { prompt, exhausted: true, message },
+      }));
+      return;
+    }
+    await call(() => Promise.resolve(result));
   };
 
   const cancelQueuedTurn = async (turnId: string) => {
@@ -503,6 +576,7 @@ export function App() {
     targetAccountId?: string;
     copyWorktreeFiles: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.forkSession({
         sessionId: input.session.id,
@@ -515,6 +589,51 @@ export function App() {
     const created = result.value.session;
     await reloadSessions(created.projectId);
     await openChatTab(created);
+  };
+
+  const seedComposer = (sessionId: string, text: string) =>
+    setPendingComposerText((current) => ({ ...current, [sessionId]: text }));
+
+  const confirmRewindTurn = async (input: { sessionId: string; turnIndex: number }) => {
+    const result = await call(() => window.inova.rewindSession(input));
+    if (!result) return;
+    await loadChat(input.sessionId, 'replace');
+    seedComposer(input.sessionId, result.value.text);
+  };
+
+  const clearConversation = async (sessionId: string) => {
+    const result = await call(() => window.inova.clearSession({ sessionId }));
+    if (!result) return;
+    await loadChat(sessionId, 'replace');
+  };
+
+  const regenerateLastTurn = async (input: { sessionId: string; extraDirs: string[] }) => {
+    const { sessionId, extraDirs } = input;
+    const userTurns = (chats[sessionId]?.items ?? []).filter((item) => item.type === 'user');
+    if (userTurns.length === 0) return;
+    const result = await call(() =>
+      window.inova.rewindSession({ sessionId, turnIndex: userTurns.length - 1 }),
+    );
+    if (!result) return;
+    await loadChat(sessionId, 'replace');
+    const sent = await sendMessage(sessionId, result.value.text, extraDirs);
+    if (!sent) seedComposer(sessionId, result.value.text);
+  };
+
+  const recordFeedback = async (input: {
+    sessionId: string;
+    turnIndex: number;
+    value: 'up' | 'down' | null;
+  }) => {
+    const result = await call(() => window.inova.recordFeedback(input));
+    if (!result) return;
+    dispatchChat({
+      sessionId: input.sessionId,
+      action: {
+        type: 'event',
+        event: { kind: 'feedback', turnIndex: input.turnIndex, value: input.value },
+      },
+    });
   };
 
   useEffect(() => {
@@ -539,6 +658,7 @@ export function App() {
     targetAccountId: string;
     createWorktree: boolean;
   }) => {
+    if (!ensureTabRoom('')) return;
     const pendingPrompt = busyConflicts[input.session.id]?.prompt;
     const result = await call(() =>
       window.inova.handoffSession({
@@ -906,6 +1026,13 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const mainClassName = [
+    'main',
+    inWorkspace && activeSession && activeProject ? 'has-details' : '',
+    sidebarCollapsed ? 'rail-offset' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
   const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
@@ -993,6 +1120,10 @@ export function App() {
           view={view}
           inboxRef={inboxRef}
           onNavigate={setView}
+          collapsed={sidebarCollapsed}
+          onToggleCollapsed={() =>
+            void updateSettings({ appearance: { sidebarCollapsed: !sidebarCollapsed } })
+          }
           accounts={accounts}
           projects={projects}
           sessions={sessions}
@@ -1025,7 +1156,7 @@ export function App() {
           onRequestArchiveSession={setPendingArchive}
           onUnarchiveSession={(session) => void setArchived({ session, archived: false })}
         />
-        <main className="main">
+        <main className={mainClassName}>
           {view === 'agents' && (
             <AgentsView
               agents={chatTabs.map((tab) => {
@@ -1099,6 +1230,18 @@ export function App() {
             />
           )}
           <div className="main-content" style={inWorkspace ? undefined : { display: 'none' }}>
+            {chatTabs.length > 0 && (
+              <TabBar
+                tabs={chatTabs}
+                active={tabs.active}
+                statusOf={(sessionId) => sessionStatus(chats[sessionId])}
+                queuedCountOf={(sessionId) =>
+                  turnQueue.filter((item) => item.sessionId === sessionId).length
+                }
+                onActivate={activateTab}
+                onClose={requestCloseTab}
+              />
+            )}
             {activeTab ? (
               <SessionHeader
                 key={activeTab.sessionId}
@@ -1154,6 +1297,20 @@ export function App() {
                 : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
               const tabState = chats[tab.sessionId] ?? initialChatState;
               const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
+              const tabWaitingForAccount =
+                tabQueuedTurns.length > 0 &&
+                isAccountBusyElsewhere({
+                  sessionId: tab.sessionId,
+                  accountId: tabAccount?.id,
+                  runningAccounts: new Map(
+                    Object.entries(chats)
+                      .filter(([, chat]) => chat.running)
+                      .map(([sessionId]) => [
+                        sessionId,
+                        effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))?.id,
+                      ]),
+                  ),
+                });
               const alternativeAccounts = accounts.filter(
                 (candidate) => candidate.id !== tabAccount?.id,
               );
@@ -1182,6 +1339,8 @@ export function App() {
                   catalog={tabCatalog}
                   readOnly={archivedIds.has(tab.sessionId)}
                   queuedTurns={tabQueuedTurns}
+                  queuePaused={pausedQueueIds.includes(tab.sessionId)}
+                  queueWaitingForAccount={tabWaitingForAccount}
                   busyConflict={busyConflicts[tab.sessionId] ?? null}
                   alternativeAccounts={alternativeAccounts}
                   onChangeModelConfig={(patch) =>
@@ -1214,8 +1373,38 @@ export function App() {
                         }
                       : undefined
                   }
+                  onRewindTurn={(turnIndex) =>
+                    setPendingRewind({ sessionId: tab.sessionId, turnIndex })
+                  }
+                  onRegenerate={(extraDirs) =>
+                    setPendingRewind({
+                      sessionId: tab.sessionId,
+                      turnIndex: tabState.items.filter((item) => item.type === 'user').length - 1,
+                      resend: { extraDirs },
+                    })
+                  }
+                  composerSeed={pendingComposerText[tab.sessionId] ?? null}
+                  onComposerSeedApplied={() =>
+                    setPendingComposerText((current) =>
+                      Object.fromEntries(
+                        Object.entries(current).filter(([id]) => id !== tab.sessionId),
+                      ),
+                    )
+                  }
+                  onClearSession={() => void clearConversation(tab.sessionId)}
+                  onFeedback={({ turnIndex, value }) =>
+                    void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
+                  }
+                  onWarn={warn}
                   onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
-                  onEnqueuePrompt={(prompt) => void enqueuePrompt(tab.sessionId, prompt)}
+                  onEnqueuePrompt={(input) =>
+                    void enqueuePrompt({
+                      sessionId: tab.sessionId,
+                      extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
+                      ...input,
+                    })
+                  }
+                  onResumeQueue={() => void resumeQueue(tab.sessionId)}
                   onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
                   onSwitchAccountAndRetry={({ accountId, prompt }) =>
                     void switchAccountAndRetry({
@@ -1292,6 +1481,27 @@ export function App() {
             const target = pendingRemoveAccount;
             setPendingRemoveAccount(null);
             void confirmRemoveAccount(target);
+          }}
+        />
+      )}
+      {pendingRewind && (
+        <ConfirmModal
+          title={pendingRewind.resend ? 'Regerar a resposta?' : 'Retroceder até esta mensagem?'}
+          description="Os turnos seguintes serão desfeitos e o repositório volta ao estado anterior a este turno."
+          confirmLabel={pendingRewind.resend ? 'Regerar' : 'Retroceder'}
+          danger
+          onCancel={() => setPendingRewind(null)}
+          onConfirm={() => {
+            const target = pendingRewind;
+            setPendingRewind(null);
+            if (target.resend) {
+              void regenerateLastTurn({
+                sessionId: target.sessionId,
+                extraDirs: target.resend.extraDirs,
+              });
+            } else {
+              void confirmRewindTurn({ sessionId: target.sessionId, turnIndex: target.turnIndex });
+            }
           }}
         />
       )}

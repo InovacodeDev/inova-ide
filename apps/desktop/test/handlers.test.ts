@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
+import { createCheckpoint } from '@inova/core/git-checkpoints';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
@@ -50,6 +51,9 @@ async function setup(
   const inUse = new Set<string>();
   const running = new Set<string>();
   const chatInUse = new Set<string>();
+  const clock = { iso: '2026-01-01T00:00:00.000Z' };
+  const idleListeners: ((accountId: string) => void)[] = [];
+  const pausedSnapshots: string[][] = [];
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
   const loginEvents: LoginEvent[] = [];
   const send = vi.fn<ChatRunner['send']>();
@@ -59,6 +63,10 @@ async function setup(
     cancel,
     isRunning: (sessionId) => running.has(sessionId),
     accountsInUse: () => chatInUse,
+    onAccountIdle: (listener) => {
+      idleListeners.push(listener);
+      return () => undefined;
+    },
     closeAll: vi.fn(),
   };
   const fetch = vi.fn<UsageDeps['fetch']>();
@@ -99,10 +107,11 @@ async function setup(
       platform: 'linux',
       runner: { run },
       fetch,
-      now: () => new Date('2026-01-01T00:00:00.000Z'),
+      now: () => new Date(clock.iso),
     },
     emit: (sessionId, event) => emitted.push({ sessionId, event }),
     emitLogin: (event) => loginEvents.push(event),
+    emitQueuePaused: (sessionIds) => pausedSnapshots.push(sessionIds),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
     pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
@@ -117,6 +126,9 @@ async function setup(
     inUse,
     running,
     chatInUse,
+    clock,
+    idleListeners,
+    pausedSnapshots,
     emitted,
     loginEvents,
     send,
@@ -687,6 +699,100 @@ test('getUsage reports errors in Portuguese without leaking the token', async ()
   });
 });
 
+async function exhaustAccount(input: { resetsAt: string | null }) {
+  const ctx = await setup();
+  const { account, session } = await seedSession(ctx.root);
+  await writeFile(
+    join(account.homeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token' } }),
+  );
+  unwrap(await ctx.handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  ctx.handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: input.resetsAt }],
+  });
+  ctx.handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  ctx.handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+  await ctx.handlers.listInbox();
+  await ctx.handlers.loadTranscript({ sessionId: session.id });
+  ctx.send.mockClear();
+  return { ...ctx, session };
+}
+
+function localHm(iso: string): string {
+  const date = new Date(iso);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function apiUsage(utilization: number, resetsAt: string | null) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ five_hour: { utilization, resets_at: resetsAt } }),
+  };
+}
+
+test('sendMessage blocks an exhausted account with a future reset without hitting the network', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2026-01-01T05:00:00.000Z',
+  });
+  const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(result).toMatchObject({ ok: false });
+  expect(result.ok ? '' : result.message).toBe(
+    `CONTA_ESGOTADA: A conta atingiu o limite de uso. Libera às ${localHm('2026-01-01T05:00:00.000Z')}. Troque de conta ou execute handoff.`,
+  );
+  expect(fetch).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+test('sendMessage proceeds when the reset passed and fresh usage is below the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2025-12-31T23:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(10, '2026-01-01T05:00:00.000Z'));
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledTimes(1);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'outra' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  await handlers.loadTranscript({ sessionId: session.id });
+});
+
+test('sendMessage still blocks when the reset passed but fresh usage is at the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2025-12-31T23:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(100, '2026-01-01T07:00:00.000Z'));
+  const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(result.ok ? '' : result.message).toBe(
+    `CONTA_ESGOTADA: A conta atingiu o limite de uso. Libera às ${localHm('2026-01-01T07:00:00.000Z')}. Troque de conta ou execute handoff.`,
+  );
+  expect(send).not.toHaveBeenCalled();
+  fetch.mockClear();
+  const again = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(again.ok).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test('getUsage clears the exhaustion when no window is at the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2026-01-01T05:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(20, '2026-01-01T05:00:00.000Z'));
+  unwrap(await handlers.getUsage({ accountLabel: 'pessoal' }));
+  fetch.mockClear();
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  expect(fetch).not.toHaveBeenCalled();
+  expect(send).toHaveBeenCalledTimes(1);
+  await handlers.loadTranscript({ sessionId: session.id });
+});
+
 test('getUsage falls back to the cached stream snapshot for claude', async () => {
   const { root, fetch, handlers } = await setup();
   const { session } = await seedSession(root);
@@ -1127,7 +1233,7 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
   });
   await new Promise((r) => setTimeout(r, 80));
 
-  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(send.mock.calls[1]?.[0].sessionId).toBe(s2.id);
 
   const inbox = unwrap(await handlers.listInbox());
@@ -1136,6 +1242,221 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
   expect(afterRead.find((item) => item.sessionId === s1.id)?.unread).toBe(false);
   const afterClear = unwrap(await handlers.clearReadInbox());
   expect(afterClear.some((item) => item.sessionId === s1.id)).toBe(false);
+});
+
+const OK_DONE = { kind: 'done', isError: false, costUsd: null, durationMs: 1 } as const;
+const ERROR_DONE = { kind: 'done', isError: true, costUsd: null, durationMs: 1 } as const;
+const flush = async (handlers: ReturnType<typeof createHandlers>, sessionId: string) => {
+  await handlers.listInbox();
+  await handlers.loadTranscript({ sessionId });
+};
+
+async function startQueuedSession() {
+  const ctx = await setup();
+  const { project, session } = await seedSession(ctx.root);
+  const accountId = (await loadStore(ctx.root)).accounts[0]!.id;
+  unwrap(await ctx.handlers.sendMessage({ sessionId: session.id, prompt: 'Primeiro' }));
+  ctx.chatInUse.add(accountId);
+  return { ...ctx, project, session, accountId };
+}
+
+test('session queue sends one item after each successful final output', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Terceiro' }));
+  expect(send).toHaveBeenCalledTimes(1);
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+
+  chatInUse.add(accountId);
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(0);
+});
+
+test('session queue pauses after an error done and resumes on request', async () => {
+  const { handlers, send, chatInUse, session, accountId, pausedSnapshots } =
+    await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+  expect(pausedSnapshots.at(-1)).toEqual([]);
+});
+
+test('session queue pauses after a cancelled turn and ignores empty queues', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.cancelTurn(session.id);
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+});
+
+test('session queue does not pause when an error done leaves the queue empty', async () => {
+  const { handlers, chatInUse, session, accountId } = await startQueuedSession();
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('account idle does not drain a paused session but drains others', async () => {
+  const { handlers, send, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Pausada' }));
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  await flush(handlers, session.id);
+  expect(send).toHaveBeenCalledTimes(1);
+
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Livre' }));
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(other.id);
+  expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([
+    session.id,
+  ]);
+});
+
+test('resumeSessionQueue fails and keeps the pause while the account is still exhausted', async () => {
+  const { handlers, send, chatInUse, session, accountId, pausedSnapshots } =
+    await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: '2026-01-01T05:00:00.000Z' }],
+  });
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+
+  const result = await handlers.resumeSessionQueue({ sessionId: session.id });
+  expect(result.ok ? '' : result.message).toContain('CONTA_ESGOTADA:');
+  expect(result.ok ? '' : result.message).toContain('Libera às');
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
+test('an ok done on an exhausted account pauses the queue and resume drains after the reset', async () => {
+  const { handlers, send, chatInUse, clock, session, accountId, pausedSnapshots, fetch } =
+    await startQueuedSession();
+  fetch.mockResolvedValue(apiUsage(10, '2026-01-01T09:00:00.000Z'));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: '2026-01-01T05:00:00.000Z' }],
+  });
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+  expect(send).toHaveBeenCalledTimes(1);
+
+  clock.iso = '2026-01-01T06:00:00.000Z';
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('draining an exhausted account pauses every session with queued items', async () => {
+  const { handlers, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Outra' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: null }],
+  });
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([other.id]);
+  await flush(handlers, session.id);
+});
+
+test('cancelling the last queued turn clears the session pause', async () => {
+  const { handlers, chatInUse, session, accountId, pausedSnapshots } = await startQueuedSession();
+  const first = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'A' }));
+  const second = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'B' }));
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  unwrap(await handlers.cancelQueuedTurn({ turnId: first.turnId }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  unwrap(await handlers.cancelQueuedTurn({ turnId: second.turnId }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+  expect(pausedSnapshots.at(-1)).toEqual([]);
+});
+
+test('production order: done while account in use, then idle, runs the finished session first', async () => {
+  const { handlers, send, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Antiga de outra sessão' }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Da mesma sessão' }));
+
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  expect(send).toHaveBeenCalledTimes(1);
+
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[1]?.[0].sessionId).toBe(session.id);
+  expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([other.id]);
+});
+
+test('deleting a session clears its queue pause', async () => {
+  const { handlers, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+  unwrap(await handlers.deleteSession({ sessionId: session.id, force: true }));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('queued turn passes its extra directories to the claude args', async () => {
+  const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
+  unwrap(
+    await handlers.enqueueTurn({
+      sessionId: session.id,
+      prompt: '@/Users/me/Downloads/doc.pdf resuma',
+      extraDirs: ['/Users/me/Downloads'],
+    }),
+  );
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  const args = send.mock.calls[1]?.[0]?.spec.args ?? [];
+  expect(args[args.indexOf('--add-dir') + 1]).toBe('/Users/me/Downloads');
 });
 
 test('switchSessionAccount, handoffSession, and forkSession preserve context across turns and providers', async () => {
@@ -1212,6 +1533,284 @@ test('switchSessionAccount, handoffSession, and forkSession preserve context acr
   expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
 });
 
+async function seedRewindSession(
+  root: string,
+  handlers: ReturnType<typeof createHandlers>,
+  options: { largeFile?: string } = {},
+) {
+  const exec = promisify(execFile);
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+  const project = await bindProject({ root, path: repoDir, accountLabel: 'pessoal' });
+  const session = await createSession({ root, projectId: project.id });
+  const turns = ['Turno 0', 'Turno 1'];
+  const refs: string[] = [];
+  if (options.largeFile !== undefined) {
+    await writeFile(join(repoDir, options.largeFile), 'x'.repeat(64));
+  }
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  for (const [index, text] of turns.entries()) {
+    await writeFile(join(repoDir, 'index.ts'), `export const v = ${index + 1};\n`);
+    const snapshot = await createCheckpoint({
+      repoPath: repoDir,
+      sessionId: session.id,
+      turnId: `u${index}`,
+      ...(options.largeFile === undefined ? {} : { maxFileBytes: 40 }),
+    });
+    if (!snapshot) throw new Error('checkpoint not created');
+    refs.push(snapshot.ref);
+    handlers.handleChatEvent(session.id, {
+      kind: 'checkpoint',
+      turnId: `u${index}`,
+      ref: snapshot.ref,
+      createdAt: `t${index}`,
+      skippedLargeFiles: snapshot.skippedLargeFiles,
+    });
+    handlers.handleChatEvent(session.id, { kind: 'user', text, at: `t${index}` });
+    handlers.handleChatEvent(session.id, {
+      kind: 'text',
+      blockId: `b${index}`,
+      text: `Resp ${index}`,
+    });
+    handlers.handleChatEvent(session.id, {
+      kind: 'done',
+      isError: false,
+      costUsd: null,
+      durationMs: 5,
+    });
+  }
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 99;\n');
+  await new Promise((r) => setTimeout(r, 40));
+  return { repoDir, session, refs };
+}
+
+test('rewindSession restores files, truncates the transcript, and resets agent memory', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(rewound).toEqual({ text: 'Turno 1' });
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(after).toEqual(before.slice(0, before.map((e) => e.kind).lastIndexOf('checkpoint')));
+  expect(after.some((e) => e.kind === 'user' && e.text === 'Turno 1')).toBe(false);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toContain('Turno 0');
+  expect(stored?.handoffContext).not.toContain('Turno 1');
+});
+
+test('rewindSession of the first turn clears the handoff context', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 0 }));
+
+  expect(rewound).toEqual({ text: 'Turno 0' });
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([
+    { kind: 'session', providerSessionId: 'cli-sess-1' },
+  ]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toBeNull();
+});
+
+test('rewindSession skips file restore when the turn has no checkpoint', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 1', at: 't1' });
+  await new Promise((r) => setTimeout(r, 40));
+  await writeFile(join(project.path, 'keep.txt'), 'untouched');
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(rewound).toEqual({ text: 'Turno 1' });
+  expect(await readFile(join(project.path, 'keep.txt'), 'utf8')).toBe('untouched');
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(after.filter((e) => e.kind === 'user')).toHaveLength(1);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+});
+
+test('rewinding a child session to turn 0 detaches it so the next turn does not fork the parent', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  await updateSession({ root, sessionId: parent.id, patch: { providerSessionId: 'parent-prov' } });
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  handlers.handleChatEvent(child.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(child.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  await new Promise((r) => setTimeout(r, 40));
+
+  unwrap(await handlers.rewindSession({ sessionId: child.id, turnIndex: 0 }));
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
+  expect(stored?.detachedFromParent).toBe(true);
+  expect(stored?.providerSessionId).toBeNull();
+
+  unwrap(await handlers.sendMessage({ sessionId: child.id, prompt: 'de novo' }));
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args).not.toContain('--fork-session');
+  expect(args).not.toContain('parent-prov');
+  expect(args).toContain('--session-id');
+});
+
+test('rewindSession fails without touching files or transcript while a turn is running', async () => {
+  const { root, handlers, running } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  running.add(session.id);
+
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 });
+
+  expect(result.ok).toBe(false);
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
+});
+
+test('rewindSession keeps files the checkpoint skipped for being too large', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers, { largeFile: 'big.bin' });
+
+  unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(await readFile(join(repoDir, 'big.bin'), 'utf8')).toBe('x'.repeat(64));
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+});
+
+test('rewindSession refuses while another running session shares the working tree', async () => {
+  const { root, handlers, running } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const other = await createSession({ root, projectId: session.projectId });
+  running.add(other.id);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 });
+
+  expect(result).toEqual({
+    ok: false,
+    message: 'Outra sessão está rodando neste repositório. Pare-a antes de retroceder.',
+  });
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+});
+
+test('recordFeedback appends a feedback event to the transcript and validates input', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'up' }));
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: null }));
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([
+    ...before,
+    { kind: 'feedback', turnIndex: 0, value: 'up' },
+    { kind: 'feedback', turnIndex: 0, value: null },
+  ]);
+  expect(
+    await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'meh' }),
+  ).toEqual(INVALID);
+  expect((await handlers.recordFeedback({ sessionId: 'nope', turnIndex: 0, value: 'up' })).ok).toBe(
+    false,
+  );
+});
+
+test('rewindSession keeps feedback of earlier turns recorded after the cut point', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'up' }));
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 1, value: 'down' }));
+
+  unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  const feedback = after.filter((event) => event.kind === 'feedback');
+  expect(feedback).toEqual([{ kind: 'feedback', turnIndex: 0, value: 'up' }]);
+});
+
+test('rewindSession rejects an unknown turn and invalid input without side effects', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  expect((await handlers.rewindSession({ sessionId: session.id, turnIndex: 5 })).ok).toBe(false);
+  expect(await handlers.rewindSession({ sessionId: session.id, turnIndex: -1 })).toEqual(INVALID);
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+});
+
+test('rewindSession leaves state intact when checkpoint restore throws', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session, refs } = await seedRewindSession(root, handlers);
+  const exec = promisify(execFile);
+  const commitFile = join(await tmp(), 'broken-commit');
+  await writeFile(
+    commitFile,
+    `tree ${'1'.repeat(40)}\nauthor T <t@inova.dev> 0 +0000\ncommitter T <t@inova.dev> 0 +0000\n\nbroken\n`,
+  );
+  const { stdout: brokenCommit } = await exec(
+    'git',
+    ['hash-object', '-t', 'commit', '-w', '--literally', commitFile],
+    { cwd: repoDir },
+  );
+  await exec('git', ['update-ref', refs[1] ?? '', brokenCommit.trim()], { cwd: repoDir });
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 1 })).rejects.toThrow();
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
+});
+
+test('rewindSession keeps transcript and session intact when the checkpoint restore fails', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'checkpoint',
+    turnId: 'u0',
+    ref: 'refs/inova/checkpoints/missing/0',
+    createdAt: 't0',
+    skippedLargeFiles: [],
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  await new Promise((r) => setTimeout(r, 40));
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 0 });
+
+  expect(result).toEqual({
+    ok: false,
+    message: 'O checkpoint deste turno não existe mais. Não é possível desfazer os arquivos.',
+  });
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
+});
+
 test('startComparison runs two isolated sessions in parallel, computes diffs, and applies winner', async () => {
   const exec = promisify(execFile);
   const { root, handlers, send } = await setup();
@@ -1240,7 +1839,7 @@ test('startComparison runs two isolated sessions in parallel, computes diffs, an
   expect(started.left.comparisonGroupId).toBe(started.groupId);
   expect(started.left.comparisonRole).toBe('left');
   expect(started.right.comparisonRole).toBe('right');
-  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   const cwds = send.mock.calls.map((call) => call[0].spec.cwd);
   expect(cwds).toContain(started.left.worktree?.path);
   expect(cwds).toContain(started.right.worktree?.path);
@@ -1556,4 +2155,117 @@ test('runAutoArchive archives only idle expired root sessions and skips busy one
   unwrap(await handlers.markInboxRead({ sessionId: unread.id }));
   expect(await handlers.runAutoArchive()).toEqual([unread.id]);
   expect(await archivedIds()).toEqual([idle.id, idleChild.id, unread.id].sort());
+});
+
+test('sendMessage expands a project command for a codex session but records the original text', async () => {
+  const { root, send, emitted, handlers } = await setup();
+  await addAccount({ root, provider: 'codex', label: 'cx' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'cx' });
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  const session = await createSession({ root, projectId: project.id });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.join(' ')).toContain('Faça isto: arg');
+  expect(args.join(' ')).not.toContain('/minha-skill');
+  expect(emitted.some((e) => e.event.kind === 'user' && e.event.text === '/minha-skill arg')).toBe(
+    true,
+  );
+});
+
+test('sendMessage expands a codex project command that carries file mentions', async () => {
+  const { root, send, handlers } = await setup();
+  await addAccount({ root, provider: 'codex', label: 'cx' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'cx' });
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  const session = await createSession({ root, projectId: project.id });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill @a.ts arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.join(' ')).toContain('Faça isto: @a.ts arg');
+});
+
+test('sendMessage passes a project command through literally for a claude session', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(join(project.path, '.claude', 'commands', 'minha-skill.md'), 'Faça isto');
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.at(-1)).toBe('/minha-skill arg');
+});
+
+test('sendMessage expands a gemini project command for a claude session', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.gemini', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.gemini', 'commands', 'gem.toml'),
+    'prompt = "Gemini faz: $ARGUMENTS"\n',
+  );
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/gem arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.at(-1)).toBe('Gemini faz: arg');
+});
+
+test('sendMessage expands a claude project command when a handoff prefix wraps the prompt', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  await updateSession({
+    root,
+    sessionId: session.id,
+    patch: { handoffContext: 'Contexto anterior' },
+  });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const last = (send.mock.calls[0]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(last).toContain('Contexto anterior');
+  expect(last).toContain('Faça isto: arg');
+  expect(last).not.toContain('/minha-skill');
+});
+
+test('clearSession empties the transcript and resets agent memory', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+
+  unwrap(await handlers.clearSession({ sessionId: session.id }));
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toBeNull();
+});
+
+test('clearSession detaches a child session and refuses while running', async () => {
+  const { root, handlers, running } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  running.add(child.id);
+  expect((await handlers.clearSession({ sessionId: child.id })).ok).toBe(false);
+  running.delete(child.id);
+
+  unwrap(await handlers.clearSession({ sessionId: child.id }));
+
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
+  expect(stored?.detachedFromParent).toBe(true);
 });

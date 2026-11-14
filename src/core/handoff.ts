@@ -120,6 +120,39 @@ export function buildHandoffContext(input: {
   return clip(combined, maxChars);
 }
 
+export interface TruncatedTranscript {
+  kept: ChatEvent[];
+  removedUserText: string;
+  checkpointRef: string | null;
+  skippedLargeFiles: string[];
+}
+
+export function truncateTranscriptAtTurn(
+  events: readonly ChatEvent[],
+  turnIndex: number,
+): TruncatedTranscript | null {
+  const userIndices: number[] = [];
+  for (let i = 0; i < events.length; i += 1) {
+    if (events[i]?.kind === 'user') userIndices.push(i);
+  }
+  const userPos = userIndices[turnIndex];
+  if (userPos === undefined) return null;
+  const userEvent = events[userPos];
+  if (userEvent?.kind !== 'user') return null;
+  const prevEvent = userPos > 0 ? events[userPos - 1] : undefined;
+  const hasCheckpoint = prevEvent?.kind === 'checkpoint';
+  const cut = hasCheckpoint ? userPos - 1 : userPos;
+  const earlierFeedback = events
+    .slice(cut)
+    .filter((event) => event.kind === 'feedback' && event.turnIndex < turnIndex);
+  return {
+    kept: [...events.slice(0, cut), ...earlierFeedback],
+    removedUserText: userEvent.text,
+    checkpointRef: hasCheckpoint ? prevEvent.ref : null,
+    skippedLargeFiles: hasCheckpoint ? [...prevEvent.skippedLargeFiles] : [],
+  };
+}
+
 export interface SlicedTranscript {
   slicedEvents: ChatEvent[];
   preTurnCheckpointRef: string | null;

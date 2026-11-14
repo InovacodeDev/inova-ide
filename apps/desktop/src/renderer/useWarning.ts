@@ -50,5 +50,5 @@ export function useWarning() {
 
   const dismiss = useCallback(() => setWarning(null), [setWarning]);
 
-  return { warning: current?.message ?? null, dismiss, guard, call };
+  return { warning: current?.message ?? null, dismiss, guard, call, warn: setWarning };
 }

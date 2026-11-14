@@ -13,6 +13,7 @@ export interface ModelEffortPickerProps {
   effort: EffortLevel | null;
   catalog: ProviderModels;
   disabled?: boolean;
+  openRequest?: number;
   onChange: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
 }
 
@@ -21,12 +22,20 @@ export function ModelEffortPicker({
   effort,
   catalog,
   disabled = false,
+  openRequest = 0,
   onChange,
 }: ModelEffortPickerProps) {
   const [open, setOpen] = useState(false);
   const [customDraft, setCustomDraft] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const isOpen = open && !disabled;
+
+  const handledOpenRequestRef = useRef(openRequest);
+  useEffect(() => {
+    if (openRequest === handledOpenRequestRef.current) return;
+    handledOpenRequestRef.current = openRequest;
+    setOpen(true);
+  }, [openRequest]);
 
   useEffect(() => {
     if (!isOpen) return;

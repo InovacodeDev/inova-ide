@@ -3,9 +3,11 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
 import {
+  checkpointExists,
   createCheckpoint,
   removeSessionCheckpoints,
   restoreCheckpoint,
@@ -27,6 +29,7 @@ import {
   buildHandoffContext,
   isRateLimitMessage,
   sliceTranscriptToTurn,
+  truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
 import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
@@ -85,7 +88,7 @@ import type {
   VerificationCheck,
   Workspace,
 } from '@inova/core/types';
-import { UsageError, readUsage } from '@inova/core/usage';
+import { UsageError, exhaustionResetAt, exhaustionVerdict, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
 import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
 import type {
@@ -131,6 +134,8 @@ import {
   parseRemoval,
   parseResolveComparison,
   parseRestoreCheckpoint,
+  parseRecordFeedback,
+  parseRewindSession,
   parseSessionDelete,
   parseSettingsPatch,
   parseSessionRef,
@@ -155,6 +160,7 @@ export interface HandlerDeps {
   emitLogin?: (event: LoginEvent) => void;
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
+  emitQueuePaused?: (sessionIds: string[]) => void;
   notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
   openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
@@ -216,6 +222,11 @@ function importedProviderSessionIds(store: Store, projectId: string): Set<string
   );
 }
 
+function formatLocalTime(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function titleFromPrompt(prompt: string): string {
   return (prompt.split('\n')[0] ?? prompt).slice(0, TITLE_CHARS).trim();
 }
@@ -238,7 +249,12 @@ function decideTurn(input: { session: Session; parent: Session | undefined; clau
     };
   }
   const sessionId = randomUUID();
-  if (claude && parent?.providerSessionId && !session.handoffContext) {
+  if (
+    claude &&
+    parent?.providerSessionId &&
+    !session.handoffContext &&
+    session.detachedFromParent !== true
+  ) {
     return {
       turn: { mode: 'fork', parentProviderSessionId: parent.providerSessionId, sessionId },
       newId: sessionId,
@@ -262,9 +278,11 @@ export function createHandlers(deps: HandlerDeps) {
   const cancelledTurns = new Set<string>();
   const verificationControllers = new Map<string, AbortController>();
   const turnQueue = createTurnQueue();
+  const pausedQueues = new Set<string>();
+  const preferredQueueSession = new Map<string, string>();
   const inboxMap = new Map<string, InboxItem>();
   const lastErrorBySession = new Map<string, string>();
-  const exhaustedAccounts = new Set<string>();
+  const exhaustedAccounts = new Map<string, string | null>();
   let uiFocus: { activeSessionId: string | null; windowFocused: boolean } = {
     activeSessionId: null,
     windowFocused: true,
@@ -334,10 +352,63 @@ export function createHandlers(deps: HandlerDeps) {
     deps.emitQueue?.(turnQueue.list());
   }
 
+  function setQueuePaused(input: { sessionId: string; paused: boolean }): void {
+    if (pausedQueues.has(input.sessionId) === input.paused) return;
+    if (input.paused) pausedQueues.add(input.sessionId);
+    else pausedQueues.delete(input.sessionId);
+    deps.emitQueuePaused?.([...pausedQueues]);
+  }
+
+  function exhaustionEntry(accountId: string): { resetsAt: string | null } | null {
+    const windows = streamUsage.get(accountId)?.windows ?? [];
+    if (exhaustedAccounts.has(accountId)) {
+      return { resetsAt: exhaustedAccounts.get(accountId) ?? exhaustionResetAt(windows) };
+    }
+    if (windows.some((window) => window.usedPercent >= 100)) {
+      return { resetsAt: exhaustionResetAt(windows) };
+    }
+    return null;
+  }
+
+  function isFutureReset(resetsAt: string | null): boolean {
+    return resetsAt !== null && Date.parse(resetsAt) > deps.usageDeps.now().getTime();
+  }
+
   function isAccountExhausted(accountId: string): boolean {
-    if (exhaustedAccounts.has(accountId)) return true;
-    const usage = streamUsage.get(accountId);
-    return usage?.windows.some((window) => window.usedPercent >= 100) ?? false;
+    const entry = exhaustionEntry(accountId);
+    if (entry === null) return false;
+    return entry.resetsAt === null || isFutureReset(entry.resetsAt);
+  }
+
+  function exhaustedMessage(resetsAt: string | null): string {
+    const time = resetsAt === null ? Number.NaN : Date.parse(resetsAt);
+    const release = Number.isNaN(time) ? '' : ` Libera às ${formatLocalTime(new Date(time))}.`;
+    return `CONTA_ESGOTADA: A conta atingiu o limite de uso.${release} Troque de conta ou execute handoff.`;
+  }
+
+  async function recheckExhaustion(input: {
+    account: Account;
+    resetsAt: string | null;
+  }): Promise<string | null> {
+    const { account, resetsAt } = input;
+    let fresh: UsageSnapshot | null = null;
+    try {
+      fresh = await readUsage({ account, deps: deps.usageDeps });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error;
+    }
+    const verdict = exhaustionVerdict({ resetsAt, now: deps.usageDeps.now(), fresh });
+    const apiData = fresh !== null && fresh.source !== 'unavailable' ? fresh : null;
+    if (verdict === 'available') {
+      exhaustedAccounts.delete(account.id);
+      if (apiData) streamUsage.set(account.id, apiData);
+      else streamUsage.delete(account.id);
+      return null;
+    }
+    const nextReset = apiData ? (exhaustionResetAt(apiData.windows) ?? resetsAt) : resetsAt;
+    exhaustedAccounts.set(account.id, nextReset);
+    if (apiData) streamUsage.set(account.id, apiData);
+    return exhaustedMessage(nextReset);
   }
 
   async function gitSummaryFor(cwd: string): Promise<string | undefined> {
@@ -402,6 +473,7 @@ export function createHandlers(deps: HandlerDeps) {
       lastErrorBySession.delete(id);
       sessionProjects.delete(id);
       turnQueue.cancelBySession(id);
+      setQueuePaused({ sessionId: id, paused: false });
     }
     emitQueueSnapshot();
     const deleteWork = inboxChain.then(() => {
@@ -417,8 +489,19 @@ export function createHandlers(deps: HandlerDeps) {
   }
 
   async function drainAccountQueue(accountId: string): Promise<void> {
-    if (deps.chat.accountsInUse().has(accountId) || isAccountExhausted(accountId)) return;
-    const next = turnQueue.dequeueNext(accountId);
+    if (deps.chat.accountsInUse().has(accountId)) return;
+    if (isAccountExhausted(accountId)) {
+      for (const queued of turnQueue.list(accountId)) {
+        setQueuePaused({ sessionId: queued.sessionId, paused: true });
+      }
+      return;
+    }
+    const preferred = preferredQueueSession.get(accountId);
+    preferredQueueSession.delete(accountId);
+    const next =
+      (preferred !== undefined && !pausedQueues.has(preferred)
+        ? turnQueue.dequeueNextForSession(preferred)
+        : undefined) ?? turnQueue.dequeueNext(accountId, { skipSessions: pausedQueues });
     if (!next) return;
     emitQueueSnapshot();
     const store = await loadStore(deps.root);
@@ -456,6 +539,7 @@ export function createHandlers(deps: HandlerDeps) {
         project,
         file,
         baseEnv,
+        ...(next.extraDirs ? { extraDirs: next.extraDirs } : {}),
       });
     });
   }
@@ -649,14 +733,20 @@ export function createHandlers(deps: HandlerDeps) {
         source: 'stream',
         fetchedAt: deps.usageDeps.now().toISOString(),
       });
-      if (!event.windows.some((window) => window.usedPercent >= 100)) {
+      if (event.windows.some((window) => window.usedPercent >= 100)) {
+        exhaustedAccounts.set(owner.accountId, exhaustionResetAt(event.windows));
+      } else {
         exhaustedAccounts.delete(owner.accountId);
       }
     }
     if (event.kind === 'error') {
       lastErrorBySession.set(sessionId, event.message);
       if (owner && isRateLimitMessage(event.message)) {
-        exhaustedAccounts.add(owner.accountId);
+        const windows = streamUsage.get(owner.accountId)?.windows ?? [];
+        exhaustedAccounts.set(
+          owner.accountId,
+          exhaustionResetAt(windows) ?? exhaustedAccounts.get(owner.accountId) ?? null,
+        );
       }
     }
     if (event.kind === 'verification') {
@@ -683,6 +773,15 @@ export function createHandlers(deps: HandlerDeps) {
       const lastError = lastErrorBySession.get(sessionId);
       lastErrorBySession.delete(sessionId);
       invalidateProjectFiles(sessionId);
+      const hasQueued = turnQueue.forSession(sessionId).length > 0;
+      if (event.isError || wasCancelled) {
+        if (hasQueued) setQueuePaused({ sessionId, paused: true });
+      } else if (owner && hasQueued && isAccountExhausted(owner.accountId)) {
+        setQueuePaused({ sessionId, paused: true });
+      } else {
+        setQueuePaused({ sessionId, paused: false });
+        if (owner && hasQueued) preferredQueueSession.set(owner.accountId, sessionId);
+      }
       if (event.isError && !wasCancelled) {
         const rateLimited = lastError ? isRateLimitMessage(lastError) : false;
         enqueueInboxUpdate({
@@ -693,7 +792,10 @@ export function createHandlers(deps: HandlerDeps) {
             : (lastError ?? 'Turno encerrado com erro.'),
         });
       } else if (!event.isError && !wasCancelled) {
-        if (owner) exhaustedAccounts.delete(owner.accountId);
+        const atLimit = streamUsage
+          .get(owner?.accountId ?? '')
+          ?.windows.some((window) => window.usedPercent >= 100);
+        if (owner && !atLimit) exhaustedAccounts.delete(owner.accountId);
         if (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused) {
           enqueueInboxUpdate({
             sessionId,
@@ -778,6 +880,21 @@ export function createHandlers(deps: HandlerDeps) {
     return ok(started);
   }
 
+  async function expandProjectCommand(input: {
+    projectPath: string;
+    prompt: string;
+    keepClaudeLiteral: boolean;
+  }): Promise<string> {
+    const { projectPath, prompt, keepClaudeLiteral } = input;
+    const parsed = splitLeadingSlash(prompt);
+    if (parsed === null) return prompt;
+    const commands = await listProjectCommands(projectPath);
+    const command = commands.find((item) => item.name === parsed.name);
+    if (command === undefined) return prompt;
+    if (keepClaudeLiteral && command.source === 'claude') return prompt;
+    return expandCommandPrompt(command.body, parsed.rest);
+  }
+
   async function runTurn(input: {
     sessionId: string;
     prompt: string;
@@ -805,9 +922,14 @@ export function createHandlers(deps: HandlerDeps) {
     });
     const persistNow = account.provider === 'claude' && newId !== null;
     const handoffPrefix = session.handoffContext?.trim();
+    const commandPrompt = await expandProjectCommand({
+      projectPath: project.path,
+      prompt,
+      keepClaudeLiteral: account.provider === 'claude' && !handoffPrefix,
+    });
     const promptForCli = handoffPrefix
-      ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${prompt}`
-      : prompt;
+      ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
+      : commandPrompt;
     await updateSession({
       root: deps.root,
       sessionId,
@@ -1282,10 +1404,11 @@ export function createHandlers(deps: HandlerDeps) {
             'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
           );
         }
-        if (isAccountExhausted(account.id)) {
-          return fail(
-            'CONTA_ESGOTADA: A conta atingiu o limite de uso. Troque de conta ou execute handoff.',
-          );
+        const entry = exhaustionEntry(account.id);
+        if (entry !== null) {
+          if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
+          const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+          if (blocked !== null) return fail(blocked);
         }
         const adapter = providers[account.provider];
         const baseEnv = await deps.baseEnv();
@@ -1313,7 +1436,7 @@ export function createHandlers(deps: HandlerDeps) {
         });
       }),
     enqueueTurn: (input: unknown): Promise<Result<QueuedTurn>> =>
-      validated(input, parseMessage, async ({ sessionId, prompt }) => {
+      validated(input, parseMessage, async ({ sessionId, prompt, extraDirs }) => {
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
         if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
@@ -1322,9 +1445,14 @@ export function createHandlers(deps: HandlerDeps) {
           ? resolveSessionAccount({ session, project, accounts: store.accounts })
           : undefined;
         if (!project || !account) return fail('Projeto não encontrado.');
-        const queued = turnQueue.enqueue({ sessionId, accountId: account.id, prompt });
+        const queued = turnQueue.enqueue({
+          sessionId,
+          accountId: account.id,
+          prompt,
+          extraDirs,
+        });
         emitQueueSnapshot();
-        if (!deps.chat.accountsInUse().has(account.id) && !isAccountExhausted(account.id)) {
+        if (!deps.chat.accountsInUse().has(account.id)) {
           void drainAccountQueue(account.id).catch((error: unknown) => {
             console.error(`inova: failed to drain turn queue for ${account.id}`, error);
           });
@@ -1333,11 +1461,41 @@ export function createHandlers(deps: HandlerDeps) {
       }),
     cancelQueuedTurn: (input: unknown): Promise<Result<null>> =>
       validated(input, parseTurnRef, async ({ turnId }) => {
+        const owner = turnQueue.list().find((item) => item.turnId === turnId);
         turnQueue.cancelByTurnId(turnId);
+        if (owner && turnQueue.forSession(owner.sessionId).length === 0) {
+          setQueuePaused({ sessionId: owner.sessionId, paused: false });
+        }
         emitQueueSnapshot();
         return ok(null);
       }),
     listTurnQueue: (): Promise<Result<QueuedTurn[]>> => guarded(async () => ok(turnQueue.list())),
+    listPausedQueues: (): Promise<Result<string[]>> => guarded(async () => ok([...pausedQueues])),
+    resumeSessionQueue: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        const head = turnQueue.forSession(sessionId)[0];
+        if (head) {
+          const entry = exhaustionEntry(head.accountId);
+          if (entry !== null) {
+            if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
+            const account = (await loadStore(deps.root)).accounts.find(
+              (item) => item.id === head.accountId,
+            );
+            if (account) {
+              const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+              if (blocked !== null) return fail(blocked);
+            }
+          }
+        }
+        setQueuePaused({ sessionId, paused: false });
+        if (head) {
+          preferredQueueSession.set(head.accountId, sessionId);
+          void drainAccountQueue(head.accountId).catch((error: unknown) => {
+            console.error(`inova: failed to drain turn queue for ${head.accountId}`, error);
+          });
+        }
+        return ok(null);
+      }),
     switchSessionAccount: (
       input: unknown,
     ): Promise<Result<{ session: Session; hadHistory: boolean }>> =>
@@ -1548,6 +1706,103 @@ export function createHandlers(deps: HandlerDeps) {
             return ok({ session: resultSession, strategy });
           }),
       ),
+    rewindSession: (input: unknown): Promise<Result<{ text: string }>> =>
+      validated(input, parseRewindSession, ({ sessionId, turnIndex }) =>
+        serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de voltar a conversa.');
+          }
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          const project = store.projects.find((item) => item.id === session.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const account = resolveSessionAccount({ session, project, accounts: store.accounts });
+          if (!account) return fail('Conta da sessão não encontrada.');
+          const events = await readTranscriptEvents(sessionId);
+          const truncated = truncateTranscriptAtTurn(events, turnIndex);
+          if (!truncated) return fail('Turno não encontrado.');
+          const { kept, removedUserText, checkpointRef, skippedLargeFiles } = truncated;
+          const cwd = effectiveCwd(session, project);
+          const sharesRunningTree = sessionsOf(store).some((other) => {
+            if (other.id === sessionId || !deps.chat.isRunning(other.id)) return false;
+            const otherProject = store.projects.find((item) => item.id === other.projectId);
+            return otherProject !== undefined && effectiveCwd(other, otherProject) === cwd;
+          });
+          if (sharesRunningTree) {
+            return fail('Outra sessão está rodando neste repositório. Pare-a antes de retroceder.');
+          }
+          if (
+            checkpointRef !== null &&
+            !(await checkpointExists({ repoPath: cwd, ref: checkpointRef }))
+          ) {
+            return fail(
+              'O checkpoint deste turno não existe mais. Não é possível desfazer os arquivos.',
+            );
+          }
+          try {
+            if (checkpointRef !== null) {
+              await restoreCheckpoint({
+                repoPath: cwd,
+                ref: checkpointRef,
+                preserveFiles: skippedLargeFiles,
+              });
+            }
+            const hasUserTurns = kept.some((event) => event.kind === 'user');
+            const handoffContext = hasUserTurns
+              ? buildHandoffContext({
+                  events: kept,
+                  gitSummary: await gitSummaryFor(cwd),
+                  fromProvider: account.provider,
+                  toProvider: account.provider,
+                })
+              : null;
+            provisionalSessions.delete(sessionId);
+            await updateSession({
+              root: deps.root,
+              sessionId,
+              patch: {
+                providerSessionId: null,
+                handoffContext,
+                ...(session.parentId === null ? {} : { detachedFromParent: true }),
+              },
+            });
+            await writeTranscriptEvents(sessionId, kept);
+          } finally {
+            if (checkpointRef !== null) invalidateProjectFiles(sessionId);
+          }
+          return ok({ text: removedUserText });
+        }),
+      ),
+    clearSession: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, ({ sessionId }) =>
+        serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de limpar a conversa.');
+          }
+          const session = requireSession(await loadStore(deps.root), sessionId);
+          provisionalSessions.delete(sessionId);
+          await updateSession({
+            root: deps.root,
+            sessionId,
+            patch: {
+              providerSessionId: null,
+              handoffContext: null,
+              ...(session.parentId === null ? {} : { detachedFromParent: true }),
+            },
+          });
+          await writeTranscriptEvents(sessionId, []);
+          return ok(null);
+        }),
+      ),
+    recordFeedback: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseRecordFeedback, ({ sessionId, turnIndex, value }) =>
+        serialized(async () => {
+          requireSession(await loadStore(deps.root), sessionId);
+          enqueueAppend(sessionId, { kind: 'feedback', turnIndex, value });
+          await flushTranscript(sessionId);
+          return ok(null);
+        }),
+      ),
     listExternalSessions: (input: unknown): Promise<Result<ExternalSessionView[]>> =>
       validated(input, parseProjectRef, async ({ projectId }) => {
         const store = await loadStore(deps.root);
@@ -1643,7 +1898,14 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
         try {
-          return ok(await readUsage({ account, deps: deps.usageDeps }));
+          const snapshot = await readUsage({ account, deps: deps.usageDeps });
+          if (snapshot.source === 'api') {
+            streamUsage.set(account.id, snapshot);
+            if (!snapshot.windows.some((window) => window.usedPercent >= 100)) {
+              exhaustedAccounts.delete(account.id);
+            }
+          }
+          return ok(snapshot);
         } catch (error: unknown) {
           if (!(error instanceof Error)) throw error;
           const cached = streamUsage.get(account.id);

@@ -1,7 +1,7 @@
 import type { ChatEvent, SubagentSnapshot, VerificationCheckResult } from '@inova/core/chat-types';
 
 export type ChatItem =
-  | { type: 'user'; id: string; text: string }
+  | { type: 'user'; id: string; text: string; at: string | null }
   | { type: 'assistant'; id: string; text: string; streaming: boolean }
   | {
       type: 'tool';
@@ -39,6 +39,7 @@ export interface ChatState {
   running: boolean;
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
+  feedback?: Record<number, 'up' | 'down'>;
 }
 
 const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
@@ -46,7 +47,10 @@ const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
 export const initialChatState: ChatState = { items: [], running: false };
 
 export type ChatAction =
-  { type: 'event'; event: ChatEvent } | { type: 'load'; events: ChatEvent[] } | { type: 'started' };
+  | { type: 'event'; event: ChatEvent }
+  | { type: 'load'; events: ChatEvent[] }
+  | { type: 'replace'; events: ChatEvent[] }
+  | { type: 'started' };
 
 function upsertAssistant(
   items: ChatItem[],
@@ -108,7 +112,10 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
       const { subagents: _previous, ...rest } = state;
       return {
         ...rest,
-        items: [...items, { type: 'user', id: `user-${items.length}`, text: event.text }],
+        items: [
+          ...items,
+          { type: 'user', id: `user-${items.length}`, text: event.text, at: event.at },
+        ],
       };
     }
     case 'subagent':
@@ -197,6 +204,13 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
         ),
       };
     }
+    case 'feedback': {
+      const { [event.turnIndex]: _removed, ...others } = state.feedback ?? {};
+      return {
+        ...state,
+        feedback: event.value === null ? others : { ...others, [event.turnIndex]: event.value },
+      };
+    }
     case 'session':
     case 'usage-limits':
       return state;
@@ -211,6 +225,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return applyEvent(state, action.event);
     case 'load':
       if (state.running || state.items.length > 0) return state;
+      return loadTranscript(action.events);
+    case 'replace':
+      if (state.running) return state;
       return loadTranscript(action.events);
   }
 }

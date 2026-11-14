@@ -486,6 +486,39 @@ async function readGeminiUsage(
   return { windows: parseAgyUsageGroups(groups), source: 'api' };
 }
 
+export function exhaustionResetAt(windows: readonly UsageWindow[]): string | null {
+  let latest: string | null = null;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const window of windows) {
+    if (window.usedPercent < 100 || window.resetsAt === null) continue;
+    const ms = Date.parse(window.resetsAt);
+    if (Number.isNaN(ms) || ms <= latestMs) continue;
+    latest = window.resetsAt;
+    latestMs = ms;
+  }
+  return latest;
+}
+
+export function exhaustionVerdict(input: {
+  resetsAt: string | null;
+  now: Date;
+  fresh: UsageSnapshot | null;
+}): 'exhausted' | 'available' {
+  const { fresh, resetsAt, now } = input;
+  if (fresh !== null && fresh.source !== 'unavailable') {
+    const stillLimited = fresh.windows.some((window) => {
+      if (window.usedPercent < 100) return false;
+      if (window.resetsAt === null) return true;
+      const windowReset = Date.parse(window.resetsAt);
+      return Number.isNaN(windowReset) || windowReset > now.getTime();
+    });
+    return stillLimited ? 'exhausted' : 'available';
+  }
+  if (resetsAt === null) return 'available';
+  const resetMs = Date.parse(resetsAt);
+  return Number.isNaN(resetMs) || resetMs <= now.getTime() ? 'available' : 'exhausted';
+}
+
 export async function readUsage(ctx: UsageContext): Promise<UsageSnapshot> {
   const provider = ctx.account.provider;
   const fetchedAt = ctx.deps.now().toISOString();

@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { CommandRunner } from './providers.js';
 import type { Account, ProviderId } from './types.js';
-import { readUsage, UsageError } from './usage.js';
+import type { UsageSnapshot } from './chat-types.js';
+import { exhaustionResetAt, exhaustionVerdict, readUsage, UsageError } from './usage.js';
 import type { UsageDeps } from './usage.js';
 
 const TOKEN = 'sk-ant-oat01-secret-token';
@@ -574,5 +575,55 @@ describe('readUsage gemini', () => {
         fetchedAt: NOW.toISOString(),
       });
     }
+  });
+});
+
+describe('exhaustion helpers', () => {
+  const snapshot = (source: UsageSnapshot['source'], percents: number[]): UsageSnapshot => ({
+    provider: 'claude',
+    source,
+    fetchedAt: NOW.toISOString(),
+    windows: percents.map((usedPercent) => ({ kind: 'session', usedPercent, resetsAt: null })),
+  });
+  const past = '2026-11-12T11:00:00.000Z';
+  const future = '2026-11-12T13:00:00.000Z';
+
+  it('picks the latest resetsAt among exhausted windows', () => {
+    expect(
+      exhaustionResetAt([
+        { kind: 'session', usedPercent: 100, resetsAt: past },
+        { kind: 'weekly', usedPercent: 100, resetsAt: future },
+        { kind: 'weekly', usedPercent: 50, resetsAt: '2027-01-01T00:00:00.000Z' },
+      ]),
+    ).toBe(future);
+    expect(exhaustionResetAt([{ kind: 'session', usedPercent: 100, resetsAt: null }])).toBeNull();
+    expect(exhaustionResetAt([])).toBeNull();
+  });
+
+  it('trusts fresh api data over the stored reset', () => {
+    expect(exhaustionVerdict({ resetsAt: future, now: NOW, fresh: snapshot('api', [40]) })).toBe(
+      'available',
+    );
+    expect(exhaustionVerdict({ resetsAt: past, now: NOW, fresh: snapshot('api', [100]) })).toBe(
+      'exhausted',
+    );
+  });
+
+  it('ignores fresh windows whose reset already passed', () => {
+    const stale: UsageSnapshot = {
+      provider: 'codex',
+      source: 'rollout',
+      fetchedAt: NOW.toISOString(),
+      windows: [{ kind: 'session', usedPercent: 100, resetsAt: past }],
+    };
+    expect(exhaustionVerdict({ resetsAt: past, now: NOW, fresh: stale })).toBe('available');
+  });
+
+  it('falls back to the stored reset without useful fresh data', () => {
+    const none = snapshot('unavailable', []);
+    expect(exhaustionVerdict({ resetsAt: past, now: NOW, fresh: none })).toBe('available');
+    expect(exhaustionVerdict({ resetsAt: future, now: NOW, fresh: none })).toBe('exhausted');
+    expect(exhaustionVerdict({ resetsAt: null, now: NOW, fresh: null })).toBe('available');
+    expect(exhaustionVerdict({ resetsAt: future, now: NOW, fresh: null })).toBe('exhausted');
   });
 });

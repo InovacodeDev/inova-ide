@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
+import { nativeSlashCommands, type SlashCommandAction } from '@inova/core/slash-commands';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -32,12 +33,15 @@ import {
   buildPromptWithAttachedFiles,
   detachFileTrigger,
   detectComposerTrigger,
-  filterCommands,
+  filterSlashSuggestions,
   isSameComposerTrigger,
+  nativeActionForSubmit,
+  parseLeadingSlashTag,
   parseMessageFileSegments,
   resolveDroppedPath,
   type ComposerTrigger,
   type DroppedPath,
+  type SlashSuggestion,
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
 import { DictationControl } from './DictationControl';
@@ -45,26 +49,35 @@ import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
   CloseIcon,
+  CopyIcon,
   FileIcon,
   GitForkIcon,
   ListTodoIcon,
   PencilIcon,
   PlayIcon,
+  RefreshIcon,
   RotateCcwIcon,
   SendIcon,
   StopFilledIcon,
   TerminalIcon,
+  ThumbDownIcon,
+  ThumbUpIcon,
 } from './icons';
+import { copyToClipboard } from './clipboard';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
+import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
+import { queueCountLabel, queuedCardLabel } from './queue-state';
 import {
+  agentTurnFooters,
   groupChatItems,
   summarizeWork,
   toolKind,
   toolSummary,
+  type AgentTurnFooter,
   type ChatEntry,
 } from './turn-groups';
 import { useDictation, type Dictation } from './useDictation';
@@ -95,18 +108,28 @@ export interface ChatViewProps {
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
-  busyConflict?: { prompt: string; exhausted: boolean } | null;
+  queuePaused?: boolean;
+  queueWaitingForAccount?: boolean;
+  busyConflict?: { prompt: string; exhausted: boolean; message?: string } | null;
   alternativeAccounts?: readonly AccountView[];
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onChangeMode: (mode: ExecutionMode) => void;
   onSetDefaultMode: (mode: ExecutionMode) => void;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onForkTurn?: (turnIndex: number) => void;
+  onRewindTurn?: (turnIndex: number) => void;
+  onRegenerate?: (extraDirs: string[]) => void;
+  onClearSession?: () => void;
+  onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
+  onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
-  onEnqueuePrompt?: (prompt: string) => void;
+  onEnqueuePrompt?: (input: { prompt: string; extraDirs?: string[] }) => void;
+  onResumeQueue?: () => void;
   onCancelQueuedTurn?: (turnId: string) => void;
   onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
   onDismissBusyConflict?: () => void;
+  composerSeed?: string | null;
+  onComposerSeedApplied?: () => void;
   onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
 }
@@ -255,10 +278,90 @@ interface MessageProps {
   showAgentLabel: boolean;
   provider: ProviderId | null;
   busy: boolean;
+  knownCommands: ReadonlySet<string>;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onFixVerification?: (prompt: string) => void;
   onForkTurn?: (turnIndex: number) => void;
+  onRewindTurn?: (turnIndex: number) => void;
+  onCopyText: (text: string) => void;
+  agentMeta?: ReactNode;
   onOpenHandoff?: () => void;
+}
+
+interface AgentMetaProps {
+  footer: AgentTurnFooter;
+  model: string | null;
+  feedback: 'up' | 'down' | null;
+  busy: boolean;
+  onCopyText: (text: string) => void;
+  onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
+  onRegenerate?: () => void;
+}
+
+function AgentMeta({
+  footer,
+  model,
+  feedback,
+  busy,
+  onCopyText,
+  onFeedback,
+  onRegenerate,
+}: AgentMetaProps) {
+  const time = footer.at ? formatMessageTime(footer.at) : '';
+  const vote = (value: 'up' | 'down') =>
+    onFeedback?.({ turnIndex: footer.turnIndex, value: feedback === value ? null : value });
+  return (
+    <div className="chat-meta chat-meta-agent">
+      {time ? <span className="chat-meta-time">{time}</span> : null}
+      {time ? <span className="chat-meta-sep">·</span> : null}
+      <button
+        type="button"
+        className="chat-meta-btn"
+        aria-label="Copiar resposta"
+        data-tooltip="Copiar resposta"
+        onClick={() => onCopyText(footer.text)}
+      >
+        <CopyIcon size={12} />
+      </button>
+      {onFeedback ? (
+        <>
+          <button
+            type="button"
+            className={`chat-meta-btn${feedback === 'up' ? ' chat-meta-btn-active' : ''}`}
+            aria-label="Gostei"
+            aria-pressed={feedback === 'up'}
+            data-tooltip="Gostei"
+            onClick={() => vote('up')}
+          >
+            <ThumbUpIcon size={12} />
+          </button>
+          <button
+            type="button"
+            className={`chat-meta-btn${feedback === 'down' ? ' chat-meta-btn-active' : ''}`}
+            aria-label="Não gostei"
+            aria-pressed={feedback === 'down'}
+            data-tooltip="Não gostei"
+            onClick={() => vote('down')}
+          >
+            <ThumbDownIcon size={12} />
+          </button>
+        </>
+      ) : null}
+      {onRegenerate && footer.isLastTurn ? (
+        <button
+          type="button"
+          className="chat-meta-btn"
+          aria-label="Regenerar"
+          disabled={busy}
+          data-tooltip="Regenerar: refaz este turno com a mesma mensagem"
+          onClick={onRegenerate}
+        >
+          <RefreshIcon size={12} />
+        </button>
+      ) : null}
+      {model ? <span className="chat-meta-model">{model}</span> : null}
+    </div>
+  );
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
@@ -276,33 +379,34 @@ function Message({
   showAgentLabel,
   provider,
   busy,
+  knownCommands,
   onRestoreCheckpoint,
   onFixVerification,
   onForkTurn,
+  onRewindTurn,
+  onCopyText,
+  agentMeta,
   onOpenHandoff,
 }: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
+  const time = item.type === 'user' && item.at ? formatMessageTime(item.at) : '';
   switch (item.type) {
-    case 'user':
+    case 'user': {
+      const slash = parseLeadingSlashTag({ text: item.text, known: knownCommands });
+      const bodyText = slash === null ? item.text : slash.rest;
       return (
-        <div className="chat-row">
-          <div className="chat-label chat-user-header">
-            <span>Você</span>
-            {onForkTurn ? (
-              <button
-                type="button"
-                className="chat-fork-btn"
-                disabled={busy}
-                data-tooltip="Bifurcar sessão a partir deste turno"
-                onClick={() => onForkTurn(turnIndex)}
-              >
-                <GitForkIcon size={12} />
-                Bifurcar daqui
-              </button>
-            ) : null}
-          </div>
+        <div className="chat-row chat-row-user">
           <div className="chat-user-bubble">
-            {parseMessageFileSegments(item.text).map((segment, segmentIndex) =>
+            {slash === null ? null : (
+              <>
+                <span className="chat-file-tag" title={`/${slash.name}`}>
+                  <TerminalIcon size={12} />
+                  <span className="chat-file-tag-path mono">/{slash.name}</span>
+                </span>
+                {bodyText === '' ? null : ' '}
+              </>
+            )}
+            {parseMessageFileSegments(bodyText).map((segment, segmentIndex) =>
               segment.kind === 'file' ? (
                 <span
                   key={`${segment.path}-${segmentIndex}`}
@@ -317,8 +421,46 @@ function Message({
               ),
             )}
           </div>
+          <div className="chat-meta">
+            {time ? <span className="chat-meta-time">{time}</span> : null}
+            {time ? <span className="chat-meta-sep">·</span> : null}
+            <button
+              type="button"
+              className="chat-meta-btn"
+              aria-label="Copiar mensagem"
+              data-tooltip="Copiar mensagem"
+              onClick={() => onCopyText(item.text)}
+            >
+              <CopyIcon size={12} />
+            </button>
+            {onRewindTurn ? (
+              <button
+                type="button"
+                className="chat-meta-btn"
+                aria-label="Retroceder"
+                disabled={busy}
+                data-tooltip="Retroceder: desfaz este turno e os arquivos editados"
+                onClick={() => onRewindTurn(turnIndex)}
+              >
+                <RotateCcwIcon size={12} />
+              </button>
+            ) : null}
+            {onForkTurn ? (
+              <button
+                type="button"
+                className="chat-meta-btn"
+                aria-label="Bifurcar"
+                disabled={busy}
+                data-tooltip="Bifurcar sessão a partir deste turno"
+                onClick={() => onForkTurn(turnIndex)}
+              >
+                <GitForkIcon size={12} />
+              </button>
+            ) : null}
+          </div>
         </div>
       );
+    }
     case 'assistant':
       return (
         <div className="chat-row chat-row-assistant">
@@ -327,6 +469,7 @@ function Message({
             <Markdown text={item.text} streaming={item.streaming} />
             {item.streaming ? <span className="chat-caret" aria-hidden="true" /> : null}
           </div>
+          {agentMeta}
         </div>
       );
     case 'tool':
@@ -510,6 +653,8 @@ export function ChatView({
   catalog,
   readOnly = false,
   queuedTurns = [],
+  queuePaused = false,
+  queueWaitingForAccount = false,
   busyConflict = null,
   alternativeAccounts = [],
   onChangeModelConfig,
@@ -517,11 +662,19 @@ export function ChatView({
   onSetDefaultMode,
   onRestoreCheckpoint,
   onForkTurn,
+  onRewindTurn,
+  onRegenerate,
+  onClearSession,
+  onFeedback,
+  onWarn,
   onOpenHandoff,
   onEnqueuePrompt,
+  onResumeQueue,
   onCancelQueuedTurn,
   onSwitchAccountAndRetry,
   onDismissBusyConflict,
+  composerSeed = null,
+  onComposerSeedApplied,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -531,6 +684,8 @@ export function ChatView({
   const [dragging, setDragging] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<DroppedPath[] | null>(null);
   const [grantedDirs, setGrantedDirs] = useState<string[]>([]);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [pickerOpenRequest, setPickerOpenRequest] = useState(0);
   const dictation = useDictation({
     hints: voiceHints,
     language: dictationLanguage,
@@ -570,6 +725,10 @@ export function ChatView({
     () => groupChatItems(items, running, collapseFinishedTurns),
     [items, running, collapseFinishedTurns],
   );
+  const footers = useMemo(() => agentTurnFooters({ items, running }), [items, running]);
+  const copyText = (text: string) => {
+    void copyToClipboard({ text, onError: (message) => onWarn?.(message) });
+  };
 
   const toggleDictation = dictation.toggle;
   useImperativeHandle(
@@ -589,6 +748,12 @@ export function ChatView({
     }),
     [readOnly, toggleDictation],
   );
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (composerSeed === null || !visible || editor === null) return;
+    editor.setMarkdown(composerSeed);
+    onComposerSeedApplied?.();
+  }, [composerSeed, visible, onComposerSeedApplied]);
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
 
@@ -624,8 +789,9 @@ export function ChatView({
     return () => clearTimeout(timer);
   }, [activeTrigger, projectId, sessionId]);
 
+  const commandTriggerActive = activeTrigger?.kind === 'command';
   useEffect(() => {
-    if (!activeTrigger || activeTrigger.kind !== 'command' || projectId === null) return;
+    if (projectId === null) return;
     let alive = true;
     void window.inova
       .listCommands({ projectId })
@@ -639,14 +805,28 @@ export function ChatView({
     return () => {
       alive = false;
     };
-  }, [activeTrigger?.kind, projectId]);
+  }, [commandTriggerActive, projectId]);
+
+  const nativeCommands = useMemo(() => (provider ? nativeSlashCommands(provider) : []), [provider]);
+  const knownCommands = useMemo(
+    () =>
+      new Set([
+        ...nativeCommands.map((command) => command.name),
+        ...commandResults.commands.map((command) => command.name),
+      ]),
+    [nativeCommands, commandResults.commands],
+  );
 
   const filteredCommands = useMemo(
     () =>
       activeTrigger?.kind === 'command'
-        ? filterCommands(commandResults.commands, activeTrigger.query)
+        ? filterSlashSuggestions({
+            native: nativeCommands,
+            project: commandResults.commands,
+            query: activeTrigger.query,
+          })
         : [],
-    [activeTrigger, commandResults.commands],
+    [activeTrigger, nativeCommands, commandResults.commands],
   );
 
   const commitTrigger = (next: ComposerTrigger | null) => {
@@ -687,7 +867,7 @@ export function ChatView({
     setActiveIndex(0);
   };
 
-  const applySelectedCommand = (command: ProjectCommandView) => {
+  const insertCommandTag = (command: Pick<ProjectCommandView, 'name'>) => {
     const editor = editorRef.current;
     if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
     const applied = applyCommandSuggestion({
@@ -695,8 +875,29 @@ export function ChatView({
       trigger: activeTrigger,
       command,
     });
-    const expanded = applied.text.slice(activeTrigger.start, applied.cursor);
-    editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: expanded });
+    const tag = applied.text.slice(activeTrigger.start, applied.cursor);
+    editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: tag });
+  };
+
+  const runNativeAction = (action: SlashCommandAction) => {
+    if (running) return;
+    if (action === 'clear') setConfirmingClear(true);
+    else if (action === 'model-picker') setPickerOpenRequest((current) => current + 1);
+  };
+
+  const applySelectedCommand = (suggestion: SlashSuggestion) => {
+    const editor = editorRef.current;
+    if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
+    const action = suggestion.kind === 'native' ? suggestion.command.action : 'passthrough';
+    if (action === 'passthrough') {
+      insertCommandTag(suggestion.command);
+    } else {
+      if (running) return;
+      editor.clear();
+      setDraft('');
+      setAttachedFiles([]);
+      runNativeAction(action);
+    }
     commitTrigger(null);
     setActiveIndex(0);
   };
@@ -720,6 +921,7 @@ export function ChatView({
     return {
       kind: 'command',
       items: filteredCommands,
+      nativeGroupLabel: provider ? `Comandos do ${PROVIDER_NAME[provider]}` : 'Comandos',
       loading: commandResults.loading,
       activeIndex: bounded,
       onSelect: applySelectedCommand,
@@ -731,6 +933,7 @@ export function ChatView({
     filteredCommands,
     commandResults.loading,
     activeIndex,
+    provider,
   ]);
 
   useLayoutEffect(() => {
@@ -811,30 +1014,62 @@ export function ChatView({
     setPendingDrop(null);
   };
 
-  const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => (
-    <Message
-      key={item.id}
-      item={item}
-      turnIndex={userTurnIndices[index] ?? 0}
-      provider={provider}
-      busy={running || readOnly}
-      onRestoreCheckpoint={onRestoreCheckpoint}
-      onForkTurn={onForkTurn}
-      onOpenHandoff={onOpenHandoff}
-      onFixVerification={(fixPrompt) => {
-        if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
-      }}
-      showAgentLabel={showAgentLabel}
-    />
-  );
+  const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => {
+    const footer = footers.get(index);
+    return (
+      <Message
+        key={item.id}
+        item={item}
+        onCopyText={copyText}
+        agentMeta={
+          footer ? (
+            <AgentMeta
+              footer={footer}
+              model={state.context?.model ?? null}
+              feedback={state.feedback?.[footer.turnIndex] ?? null}
+              busy={running || readOnly}
+              onCopyText={copyText}
+              onFeedback={readOnly ? undefined : onFeedback}
+              onRegenerate={readOnly || !onRegenerate ? undefined : () => onRegenerate(grantedDirs)}
+            />
+          ) : undefined
+        }
+        turnIndex={userTurnIndices[index] ?? 0}
+        provider={provider}
+        busy={running || readOnly}
+        knownCommands={knownCommands}
+        onRestoreCheckpoint={onRestoreCheckpoint}
+        onForkTurn={onForkTurn}
+        onRewindTurn={onRewindTurn}
+        onOpenHandoff={onOpenHandoff}
+        onFixVerification={(fixPrompt) => {
+          if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
+        }}
+        showAgentLabel={showAgentLabel}
+      />
+    );
+  };
 
   const submit = () => {
     const editor = editorRef.current;
     const markdown = editor === null ? draft : editor.getMarkdown();
+    const nativeAction = nativeActionForSubmit({ text: markdown, provider });
+    if (nativeAction !== null && attachedFiles.length === 0 && !running && !readOnly) {
+      editor?.clear();
+      setDraft('');
+      commitTrigger(null);
+      runNativeAction(nativeAction.action);
+      return;
+    }
     const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });
-    if (prompt === '' || running || readOnly) return;
-    stickRef.current = true;
-    onSend(prompt, grantedDirs);
+    if (prompt === '' || readOnly) return;
+    if (running) {
+      if (nativeAction !== null || !onEnqueuePrompt) return;
+      onEnqueuePrompt({ prompt, extraDirs: grantedDirs });
+    } else {
+      stickRef.current = true;
+      onSend(prompt, grantedDirs);
+    }
     editor?.clear();
     setDraft('');
     setAttachedFiles([]);
@@ -892,6 +1127,19 @@ export function ChatView({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {confirmingClear ? (
+        <ConfirmModal
+          title="Limpar a conversa?"
+          description="O histórico e a memória do agente nesta sessão serão apagados. Os arquivos não mudam."
+          confirmLabel="Limpar"
+          danger
+          onConfirm={() => {
+            setConfirmingClear(false);
+            onClearSession?.();
+          }}
+          onCancel={() => setConfirmingClear(false)}
+        />
+      ) : null}
       {pendingDrop ? (
         <ConfirmModal
           title="Permitir acesso ao arquivo?"
@@ -936,7 +1184,7 @@ export function ChatView({
                 <div className="chat-queued-head">
                   <span className="chat-queued-label">
                     <ClockIcon size={13} />
-                    Na fila — aguardando conta ficar livre
+                    {queuedCardLabel(queueWaitingForAccount)}
                   </span>
                   {onCancelQueuedTurn ? (
                     <button
@@ -966,11 +1214,28 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {queuedTurns.length > 0 ? (
+          <div
+            className={
+              queuePaused ? 'chat-queue-strip chat-queue-strip-paused' : 'chat-queue-strip'
+            }
+          >
+            <span>
+              {queueCountLabel(queuedTurns.length)}
+              {queuePaused ? ' · Fila pausada' : ''}
+            </span>
+            {queuePaused && onResumeQueue ? (
+              <button type="button" className="btn btn-sm" onClick={onResumeQueue}>
+                Retomar fila
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {busyConflict ? (
           <div className="chat-busy-banner" role="alert">
             <div className="chat-busy-text">
               {busyConflict.exhausted
-                ? 'Esta conta atingiu o limite de uso.'
+                ? (busyConflict.message ?? 'Esta conta atingiu o limite de uso.')
                 : 'Esta conta está ocupada em outra sessão.'}
             </div>
             <div className="chat-busy-actions">
@@ -979,7 +1244,7 @@ export function ChatView({
                   type="button"
                   className="btn btn-sm btn-primary"
                   data-tooltip="Enviar este turno quando a conta ficar livre"
-                  onClick={() => onEnqueuePrompt(busyConflict.prompt)}
+                  onClick={() => onEnqueuePrompt({ prompt: busyConflict.prompt })}
                 >
                   Enfileirar turno
                 </button>
@@ -1082,6 +1347,7 @@ export function ChatView({
                   effort={effort}
                   catalog={catalog}
                   disabled={readOnly || running}
+                  openRequest={pickerOpenRequest}
                   onChange={onChangeModelConfig}
                 />
                 <ModePicker
@@ -1106,12 +1372,13 @@ export function ChatView({
               >
                 <StopFilledIcon size={12} />
               </button>
-            ) : (
+            ) : null}
+            {running && !onEnqueuePrompt ? null : (
               <button
                 type="button"
                 className="chat-send"
-                aria-label="Enviar mensagem"
-                data-tooltip="Enviar mensagem"
+                aria-label={running ? 'Adicionar à fila' : 'Enviar mensagem'}
+                data-tooltip={running ? 'Adicionar à fila' : 'Enviar mensagem'}
                 data-shortcut-text="Enter"
                 disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
                 onClick={submit}

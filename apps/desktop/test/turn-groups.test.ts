@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'vitest';
 import type { ChatItem } from '../src/renderer/chat-reducer.js';
 import {
+  agentTurnFooters,
   groupChatItems,
   summarizeWork,
   toolKind,
   toolSummary,
 } from '../src/renderer/turn-groups.js';
 
-const user = (id: string): ChatItem => ({ type: 'user', id, text: 'oi' });
+const user = (id: string): ChatItem => ({ type: 'user', id, text: 'oi', at: null });
 const text = (id: string): ChatItem => ({ type: 'assistant', id, text: 'ok', streaming: false });
 const tool = (id: string, patch: Partial<Extract<ChatItem, { type: 'tool' }>> = {}): ChatItem => ({
   type: 'tool',
@@ -108,5 +109,48 @@ describe('summarizeWork', () => {
       'edit',
       'other',
     ]);
+  });
+});
+
+describe('agentTurnFooters', () => {
+  const answer = (id: string, body: string, streaming = false): ChatItem => ({
+    type: 'assistant',
+    id,
+    text: body,
+    streaming,
+  });
+  const dated = (id: string, at: string): ChatItem => ({ type: 'user', id, text: 'oi', at });
+
+  test('anchors on the last assistant text of each turn with the joined text and user time', () => {
+    const items = [
+      dated('u0', 't0'),
+      answer('a', 'Primeiro'),
+      tool('t'),
+      answer('b', 'Segundo'),
+      user('u1'),
+      answer('c', 'Terceiro'),
+    ];
+    const footers = agentTurnFooters({ items, running: false });
+    expect([...footers.keys()]).toEqual([3, 5]);
+    expect(footers.get(3)).toEqual({
+      turnIndex: 0,
+      text: 'Primeiro\n\nSegundo',
+      at: 't0',
+      isLastTurn: false,
+    });
+    expect(footers.get(5)).toEqual({ turnIndex: 1, text: 'Terceiro', at: null, isLastTurn: true });
+  });
+
+  test('skips the running last turn and streaming blocks, and ignores items before a user turn', () => {
+    const items = [
+      answer('x', 'solto'),
+      user('u0'),
+      answer('a', 'ok'),
+      user('u1'),
+      answer('b', 'p'),
+    ];
+    expect([...agentTurnFooters({ items, running: true }).keys()]).toEqual([2]);
+    const streaming = [user('u0'), answer('a', 'p', true)];
+    expect(agentTurnFooters({ items: streaming, running: false }).size).toBe(0);
   });
 });

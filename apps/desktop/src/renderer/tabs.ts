@@ -20,6 +20,12 @@ export type TabsAction =
   | { type: 'exited'; sessionId: string }
   | { type: 'rename'; sessionId: string; title: string };
 
+export const MAX_OPEN_TABS = 3;
+
+export function canOpenTab(state: TabsState, sessionId: string): boolean {
+  return state.tabs.length < MAX_OPEN_TABS || state.tabs.some((tab) => tab.sessionId === sessionId);
+}
+
 function closeTab(state: TabsState, sessionId: string): TabsState {
   const index = state.tabs.findIndex((tab) => tab.sessionId === sessionId);
   const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
@@ -50,6 +56,7 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
     if (state.tabs.some((tab) => tab.sessionId === sessionId)) {
       return { ...state, active: sessionId };
     }
+    if (!canOpenTab(state, sessionId)) return state;
     return { tabs: [...state.tabs, { ...action.tab, exited: false }], active: sessionId };
   }
   if (!state.tabs.some((tab) => tab.sessionId === action.sessionId)) return state;

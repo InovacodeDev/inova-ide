@@ -36,6 +36,8 @@ import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
 import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
+import { PanelLeftClose } from 'pulsoicon-react/icons/panel-left-close';
+import { PanelLeftOpen } from 'pulsoicon-react/icons/panel-left-open';
 import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
@@ -47,6 +49,8 @@ import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
 import { SlidersHorizontal } from 'pulsoicon-react/icons/sliders-horizontal';
 import { Square } from 'pulsoicon-react/icons/square';
 import { Terminal } from 'pulsoicon-react/icons/terminal';
+import { ThumbsDown } from 'pulsoicon-react/icons/thumbs-down';
+import { ThumbsUp } from 'pulsoicon-react/icons/thumbs-up';
 import { Trash } from 'pulsoicon-react/icons/trash';
 import { TriangleAlert } from 'pulsoicon-react/icons/triangle-alert';
 import { X } from 'pulsoicon-react/icons/x';
@@ -156,6 +160,14 @@ export function TrashIcon({ size = 16 }: IconProps) {
   return <Trash size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
+export function ThumbUpIcon({ size = 16 }: IconProps) {
+  return <ThumbsUp size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ThumbDownIcon({ size = 16 }: IconProps) {
+  return <ThumbsDown size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
 export function RefreshIcon({ size = 16 }: IconProps) {
   return <RefreshCw size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
@@ -226,6 +238,14 @@ export function ClockIcon({ size = 16 }: IconProps) {
 
 export function CompareIcon({ size = 16 }: IconProps) {
   return <GitCompare size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SidebarCollapseIcon({ size = 16 }: IconProps) {
+  return <PanelLeftClose size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SidebarExpandIcon({ size = 16 }: IconProps) {
+  return <PanelLeftOpen size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function DownloadIcon({ size = 16 }: IconProps) {

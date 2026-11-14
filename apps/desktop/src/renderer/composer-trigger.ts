@@ -1,4 +1,6 @@
-import { expandCommandPrompt } from '@inova/core/command-prompt';
+import { splitLeadingSlash } from '@inova/core/command-prompt';
+import { nativeSlashCommands, type NativeSlashCommand } from '@inova/core/slash-commands';
+import type { ProviderId } from '@inova/core/types';
 import type { ProjectCommandView } from '../shared/api';
 
 export type ComposerTrigger =
@@ -132,7 +134,23 @@ export function buildPromptWithAttachedFiles(input: {
     .map(formatFileMention);
   if (prefixTokens.length === 0) return body;
   const prefix = prefixTokens.join(' ');
-  return body === '' ? prefix : `${prefix}\n${body}`;
+  if (body === '') return prefix;
+  const slash = splitLeadingSlash(body);
+  if (slash !== null) {
+    return [`/${slash.name}`, prefix, slash.rest].filter((part) => part !== '').join(' ');
+  }
+  return `${prefix}\n${body}`;
+}
+
+export function nativeActionForSubmit(input: {
+  text: string;
+  provider: ProviderId | null;
+}): NativeSlashCommand | null {
+  if (input.provider === null) return null;
+  const parsed = splitLeadingSlash(input.text.trim());
+  if (parsed === null || parsed.rest !== '') return null;
+  const command = nativeSlashCommands(input.provider).find((item) => item.name === parsed.name);
+  return command !== undefined && command.action !== 'passthrough' ? command : null;
 }
 
 function appendTextSegment(segments: MessageFileSegment[], value: string): void {
@@ -194,16 +212,49 @@ export function applyFileSuggestion(input: {
 export function applyCommandSuggestion(input: {
   text: string;
   trigger: ComposerTrigger;
-  command: ProjectCommandView;
+  command: Pick<ProjectCommandView, 'name'>;
 }): { text: string; cursor: number } {
   const { text, trigger, command } = input;
-  const expanded = expandCommandPrompt(command.body, '');
+  const tag = `/${command.name} `;
   const before = text.slice(0, trigger.start);
   const after = text.slice(trigger.end);
   return {
-    text: `${before}${expanded}${after}`,
-    cursor: before.length + expanded.length,
+    text: `${before}${tag}${after}`,
+    cursor: before.length + tag.length,
   };
+}
+
+export type SlashSuggestion =
+  | { kind: 'native'; command: NativeSlashCommand }
+  | { kind: 'project'; command: ProjectCommandView };
+
+export function filterSlashSuggestions(input: {
+  native: readonly NativeSlashCommand[];
+  project: readonly ProjectCommandView[];
+  query: string;
+}): SlashSuggestion[] {
+  const normalized = input.query.trim().toLowerCase();
+  const native = input.native.filter(
+    (command) =>
+      normalized === '' ||
+      command.name.toLowerCase().includes(normalized) ||
+      command.description.toLowerCase().includes(normalized),
+  );
+  return [
+    ...native.map((command): SlashSuggestion => ({ kind: 'native', command })),
+    ...filterCommands(input.project, input.query).map((command): SlashSuggestion => ({
+      kind: 'project',
+      command,
+    })),
+  ];
+}
+
+export function parseLeadingSlashTag(input: {
+  text: string;
+  known: ReadonlySet<string>;
+}): { name: string; rest: string } | null {
+  const parsed = splitLeadingSlash(input.text);
+  return parsed !== null && input.known.has(parsed.name) ? parsed : null;
 }
 
 export function filterCommands(

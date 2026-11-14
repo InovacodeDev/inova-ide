@@ -18,6 +18,8 @@ import {
   PencilIcon,
   PlusIcon,
   SettingsIcon,
+  SidebarCollapseIcon,
+  SidebarExpandIcon,
   SlidersIcon,
   TrashIcon,
 } from './icons';
@@ -57,6 +59,8 @@ export interface SidebarProps {
   onRequestArchiveSession: (session: Session) => void;
   onUnarchiveSession: (session: Session) => void;
   inboxRef?: Ref<HTMLElement>;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 type PendingConfirm =
@@ -464,6 +468,8 @@ export function Sidebar(props: SidebarProps) {
     onOpenInboxItem,
     onClearReadInbox,
     inboxRef,
+    collapsed,
+    onToggleCollapsed,
   } = props;
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
   const emailByLabel = useMemo(
@@ -471,18 +477,68 @@ export function Sidebar(props: SidebarProps) {
     [accounts],
   );
 
-  return (
-    <>
-      <nav className="sidebar" aria-label="Principal">
+  if (collapsed) {
+    return (
+      <nav className="sidebar-rail" aria-label="Principal">
         <button
-          className="btn btn-primary sidebar-new"
+          type="button"
+          className="sidebar-rail-item"
+          aria-label="Nova sessão"
           data-tooltip="Criar uma nova sessão"
           data-shortcut="new-session"
           onClick={() => onNavigate('new-session')}
         >
           <PlusIcon size={16} />
-          Nova sessão
         </button>
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.view}
+            type="button"
+            className={view === item.view ? 'sidebar-rail-item active' : 'sidebar-rail-item'}
+            aria-label={item.label}
+            aria-current={view === item.view ? 'page' : undefined}
+            data-tooltip={item.label}
+            onClick={() => onNavigate(item.view)}
+          >
+            {item.icon}
+          </button>
+        ))}
+        <button
+          type="button"
+          className="sidebar-rail-item"
+          aria-label="Expandir barra lateral"
+          data-tooltip="Expandir barra lateral"
+          onClick={onToggleCollapsed}
+        >
+          <SidebarExpandIcon size={16} />
+        </button>
+      </nav>
+    );
+  }
+
+  return (
+    <>
+      <nav className="sidebar" aria-label="Principal">
+        <div className="sidebar-top">
+          <button
+            className="btn btn-primary sidebar-new"
+            data-tooltip="Criar uma nova sessão"
+            data-shortcut="new-session"
+            onClick={() => onNavigate('new-session')}
+          >
+            <PlusIcon size={16} />
+            Nova sessão
+          </button>
+          <button
+            type="button"
+            className="sidebar-collapse"
+            aria-label="Recolher barra lateral"
+            data-tooltip="Recolher barra lateral"
+            onClick={onToggleCollapsed}
+          >
+            <SidebarCollapseIcon size={16} />
+          </button>
+        </div>
         <ul className="sidebar-nav">
           {NAV_ITEMS.map((item) => (
             <li key={item.view}>

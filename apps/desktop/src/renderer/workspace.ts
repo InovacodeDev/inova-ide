@@ -1,6 +1,6 @@
 import type { Session } from '@inova/core/types';
 import type { ProjectView } from '../shared/api';
-import type { Tab, TabsState } from './tabs';
+import { MAX_OPEN_TABS, type Tab, type TabsState } from './tabs';
 
 export interface WorkspaceSnapshot {
   openSessionIds: string[];
@@ -35,7 +35,7 @@ export function restoreTabs(input: {
       .flat()
       .map((session) => [session.id, session]),
   );
-  const tabs = input.workspace.openSessionIds.flatMap((id) => {
+  const restorable = input.workspace.openSessionIds.flatMap((id) => {
     const session = known.get(id);
     if (!session) return [];
     const project = input.projects.find((candidate) => candidate.id === session.projectId);
@@ -48,8 +48,12 @@ export function restoreTabs(input: {
       },
     ];
   });
+  const tabs = restorable.slice(0, MAX_OPEN_TABS);
   const wanted = input.workspace.activeSessionId;
+  const wasDropped =
+    tabs.length < restorable.length && restorable.some((tab) => tab.sessionId === wanted);
+  const fallback = wasDropped ? tabs[0] : tabs.at(-1);
   const activeSessionId =
-    tabs.find((tab) => tab.sessionId === wanted)?.sessionId ?? tabs.at(-1)?.sessionId ?? null;
+    tabs.find((tab) => tab.sessionId === wanted)?.sessionId ?? fallback?.sessionId ?? null;
   return { tabs, activeSessionId };
 }

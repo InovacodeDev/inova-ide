@@ -93,6 +93,14 @@ async function pruneCheckpoints(input: {
   }
 }
 
+export async function checkpointExists(input: { repoPath: string; ref: string }): Promise<boolean> {
+  const found = await tryRunGit({
+    cwd: input.repoPath,
+    args: ['rev-parse', '--verify', '--quiet', `${input.ref}^{commit}`],
+  });
+  return found.ok;
+}
+
 export async function restoreCheckpoint(input: {
   repoPath: string;
   ref: string;

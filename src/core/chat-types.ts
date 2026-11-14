@@ -61,5 +61,6 @@ export type ChatEvent =
       status: 'running' | 'passed' | 'failed' | 'skipped';
       checks: VerificationCheckResult[];
     }
+  | { kind: 'feedback'; turnIndex: number; value: 'up' | 'down' | null }
   | { kind: 'error'; message: string }
   | { kind: 'done'; isError: boolean; costUsd: number | null; durationMs: number | null };

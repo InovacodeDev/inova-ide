@@ -325,6 +325,29 @@ export function parseForkSession(
   };
 }
 
+export function parseRewindSession(
+  input: unknown,
+): { sessionId: string; turnIndex: number } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { turnIndex } = input;
+  if (typeof turnIndex !== 'number' || !Number.isInteger(turnIndex) || turnIndex < 0) {
+    return undefined;
+  }
+  return { sessionId: input['sessionId'], turnIndex };
+}
+
+export function parseRecordFeedback(
+  input: unknown,
+): { sessionId: string; turnIndex: number; value: 'up' | 'down' | null } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { turnIndex, value } = input;
+  if (typeof turnIndex !== 'number' || !Number.isInteger(turnIndex) || turnIndex < 0) {
+    return undefined;
+  }
+  if (value !== 'up' && value !== 'down' && value !== null) return undefined;
+  return { sessionId: input['sessionId'], turnIndex, value };
+}
+
 export function parseImportSessions(
   input: unknown,
 ):

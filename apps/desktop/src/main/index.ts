@@ -252,6 +252,7 @@ void app.whenReady().then(async () => {
       emitLogin: (event) => sendToWindow(CHANNELS.loginEvent, event),
       emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
       emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
+      emitQueuePaused: (sessionIds) => sendToWindow(CHANNELS.queuePausedEvent, sessionIds),
       notify: notifier,
       updates,
       openExternal: (url) => shell.openExternal(url),

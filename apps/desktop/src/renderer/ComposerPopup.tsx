@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import type { ProjectCommandView } from '../shared/api';
+import { Fragment, useEffect, useRef } from 'react';
+import type { SlashSuggestion } from './composer-trigger';
 import { FileIcon, TerminalIcon } from './icons';
 import { PROVIDER_NAME } from './provider-meta';
 
@@ -14,11 +14,20 @@ export type ComposerPopupModel =
     }
   | {
       kind: 'command';
-      items: readonly ProjectCommandView[];
+      items: readonly SlashSuggestion[];
+      nativeGroupLabel: string;
       loading: boolean;
       activeIndex: number;
-      onSelect: (command: ProjectCommandView) => void;
+      onSelect: (suggestion: SlashSuggestion) => void;
     };
+
+const PROJECT_GROUP_LABEL = 'Comandos e skills do projeto';
+
+function suggestionKey(suggestion: SlashSuggestion): string {
+  if (suggestion.kind === 'native') return `native:${suggestion.command.name}`;
+  const { source, kind, name } = suggestion.command;
+  return `${source}:${kind}:${name}`;
+}
 
 export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
   const listRef = useRef<HTMLDivElement>(null);
@@ -32,7 +41,7 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
     <div
       className="composer-popup"
       role="listbox"
-      aria-label={model.kind === 'file' ? 'Arquivos do projeto' : 'Comandos e skills do projeto'}
+      aria-label={model.kind === 'file' ? 'Arquivos do projeto' : 'Comandos e skills'}
       ref={listRef}
     >
       {model.loading && model.items.length === 0 ? (
@@ -76,30 +85,44 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
           ) : null}
         </>
       ) : (
-        model.items.map((command, index) => {
+        model.items.map((suggestion, index) => {
           const active = index === model.activeIndex;
+          const { command } = suggestion;
+          const previous = model.items[index - 1];
+          const heading =
+            previous?.kind === suggestion.kind
+              ? null
+              : suggestion.kind === 'native'
+                ? model.nativeGroupLabel
+                : PROJECT_GROUP_LABEL;
           return (
-            <button
-              key={`${command.source}:${command.kind}:${command.name}`}
-              type="button"
-              role="option"
-              aria-selected={active}
-              data-active={active ? 'true' : undefined}
-              className={active ? 'composer-popup-item active' : 'composer-popup-item'}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                model.onSelect(command);
-              }}
-            >
-              <span className="composer-popup-icon">
-                <TerminalIcon size={14} />
-              </span>
-              <span className="composer-popup-title mono">/{command.name}</span>
-              <span className="composer-popup-badge">{PROVIDER_NAME[command.source]}</span>
-              {command.description !== '' ? (
-                <span className="composer-popup-sub">{command.description}</span>
-              ) : null}
-            </button>
+            <Fragment key={suggestionKey(suggestion)}>
+              {heading === null ? null : <div className="composer-popup-group">{heading}</div>}
+              <button
+                type="button"
+                role="option"
+                aria-selected={active}
+                data-active={active ? 'true' : undefined}
+                className={active ? 'composer-popup-item active' : 'composer-popup-item'}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  model.onSelect(suggestion);
+                }}
+              >
+                <span className="composer-popup-icon">
+                  <TerminalIcon size={14} />
+                </span>
+                <span className="composer-popup-title mono">/{command.name}</span>
+                {suggestion.kind === 'project' ? (
+                  <span className="composer-popup-badge">
+                    {PROVIDER_NAME[suggestion.command.source]}
+                  </span>
+                ) : null}
+                {command.description !== '' ? (
+                  <span className="composer-popup-sub">{command.description}</span>
+                ) : null}
+              </button>
+            </Fragment>
           );
         })
       )}
