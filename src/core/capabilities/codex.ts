@@ -125,7 +125,7 @@ function skillDescription(markdown: string): string | null {
   return null;
 }
 
-async function skillsIn(dir: string): Promise<{ id: string; description: string | null }[]> {
+export async function skillsIn(dir: string): Promise<{ id: string; description: string | null }[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });

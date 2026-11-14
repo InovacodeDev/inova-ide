@@ -1,7 +1,9 @@
 import { join } from 'node:path';
+import { skillsIn } from './codex.js';
 import { readIfExists } from './file-edit.js';
 import type {
   CapabilityAdapter,
+  CapabilityCategoryResult,
   CapabilityContext,
   CapabilityItem,
   CapabilityListing,
@@ -9,6 +11,7 @@ import type {
 } from './types.js';
 
 const INVALID_SETTINGS_MESSAGE = 'O settings.json do Qwen é inválido.';
+const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Qwen';
 
 type Settings = Record<string, unknown>;
 
@@ -61,15 +64,45 @@ function mcpItems(settings: Settings): CapabilityItem[] {
   );
 }
 
+async function skillCategory(
+  ctx: CapabilityContext,
+  settings: Settings,
+): Promise<CapabilityCategoryResult> {
+  const disabled = stringList(settings['skills'], 'disabled');
+  try {
+    const skills = await skillsIn(join(ctx.account.homeDir, '.qwen', 'skills'));
+    const items = skills.map((skill) =>
+      item({
+        kind: 'skill',
+        id: skill.id,
+        enabled: !disabled.includes(skill.id),
+        description: skill.description,
+      }),
+    );
+    return { kind: 'skill', items, error: null };
+  } catch (error: unknown) {
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
+  }
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   const settings = await readSettings(ctx);
   if (settings === null) {
+    const kinds = ['skill', 'mcp'] as const;
     return {
-      categories: [{ kind: 'mcp', items: [], error: INVALID_SETTINGS_MESSAGE }],
+      categories: kinds.map((kind) => ({ kind, items: [], error: INVALID_SETTINGS_MESSAGE })),
       cost: null,
     };
   }
-  return { categories: [{ kind: 'mcp', items: mcpItems(settings), error: null }], cost: null };
+  return {
+    categories: [
+      await skillCategory(ctx, settings),
+      { kind: 'mcp', items: mcpItems(settings), error: null },
+    ],
+    cost: null,
+  };
 }
 
 export const qwenCapabilities: CapabilityAdapter = {

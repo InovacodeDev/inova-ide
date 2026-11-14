@@ -52,6 +52,33 @@ describe('qwenCapabilities.list', () => {
       ]);
     });
   });
+
+  it('lists user skills honoring skills.disabled', async () => {
+    await withAccountDir(async (ctx) => {
+      for (const name of ['review', 'plan']) {
+        await mkdir(join(ctx.account.homeDir, '.qwen', 'skills', name), { recursive: true });
+        await writeFile(join(ctx.account.homeDir, '.qwen', 'skills', name, 'SKILL.md'), '# x');
+      }
+      const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(skills.map((item) => [item.id, item.enabled, item.applyMode]).sort()).toEqual([
+        ['plan', true, 'account-file'],
+        ['review', false, 'account-file'],
+      ]);
+    });
+  });
+
+  it('lists nothing without error when settings.json is missing', async () => {
+    await withAccountDir(async (ctx) => {
+      expect(await categoryOf(ctx, 'mcp')).toEqual({ kind: 'mcp', items: [], error: null });
+    }, null);
+  });
+
+  it('reports invalid settings.json as a category error', async () => {
+    await withAccountDir(async (ctx) => {
+      expect((await categoryOf(ctx, 'mcp'))?.error).toBe('O settings.json do Qwen é inválido.');
+      expect((await categoryOf(ctx, 'skill'))?.error).toBe('O settings.json do Qwen é inválido.');
+    }, '{ nope');
+  });
 });
 
 describe('qwenCapabilities.launchArgs', () => {
