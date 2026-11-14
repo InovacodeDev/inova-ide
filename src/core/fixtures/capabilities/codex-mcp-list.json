@@ -1,0 +1,20 @@
+[
+  {
+    "name": "docs",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": { "type": "stdio", "command": "docs-server", "args": [], "env": null }
+  },
+  {
+    "name": "my.server",
+    "enabled": false,
+    "disabled_reason": null,
+    "transport": { "type": "streamable_http", "url": "https://example.com/mcp" }
+  },
+  {
+    "name": "search",
+    "enabled": true,
+    "disabled_reason": null,
+    "transport": { "type": "stdio", "command": "search-server", "args": [], "env": null }
+  }
+]
