@@ -7,7 +7,7 @@ import {
   toolSummary,
 } from '../src/renderer/turn-groups.js';
 
-const user = (id: string): ChatItem => ({ type: 'user', id, text: 'oi' });
+const user = (id: string): ChatItem => ({ type: 'user', id, text: 'oi', at: null });
 const text = (id: string): ChatItem => ({ type: 'assistant', id, text: 'ok', streaming: false });
 const tool = (id: string, patch: Partial<Extract<ChatItem, { type: 'tool' }>> = {}): ChatItem => ({
   type: 'tool',

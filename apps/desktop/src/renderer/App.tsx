@@ -111,6 +111,10 @@ export function App() {
     turnIndex: number;
     isLatestTurn: boolean;
   } | null>(null);
+  const [pendingRewind, setPendingRewind] = useState<{
+    sessionId: string;
+    turnIndex: number;
+  } | null>(null);
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
@@ -527,6 +531,13 @@ export function App() {
     const created = result.value.session;
     await reloadSessions(created.projectId);
     await openChatTab(created);
+  };
+
+  const confirmRewindTurn = async (input: { sessionId: string; turnIndex: number }) => {
+    const result = await call(() => window.inova.rewindSession(input));
+    if (!result) return;
+    await loadChat(input.sessionId);
+    activeChatRef.current?.setComposerText(result.value.text);
   };
 
   useEffect(() => {
@@ -1247,6 +1258,9 @@ export function App() {
                         }
                       : undefined
                   }
+                  onRewindTurn={(turnIndex) =>
+                    setPendingRewind({ sessionId: tab.sessionId, turnIndex })
+                  }
                   onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
                   onEnqueuePrompt={(prompt) => void enqueuePrompt(tab.sessionId, prompt)}
                   onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
@@ -1325,6 +1339,20 @@ export function App() {
             const target = pendingRemoveAccount;
             setPendingRemoveAccount(null);
             void confirmRemoveAccount(target);
+          }}
+        />
+      )}
+      {pendingRewind && (
+        <ConfirmModal
+          title="Retroceder até esta mensagem?"
+          description="Os turnos seguintes e os arquivos editados por eles serão desfeitos."
+          confirmLabel="Retroceder"
+          danger
+          onCancel={() => setPendingRewind(null)}
+          onConfirm={() => {
+            const target = pendingRewind;
+            setPendingRewind(null);
+            void confirmRewindTurn(target);
           }}
         />
       )}

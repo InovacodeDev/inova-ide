@@ -45,6 +45,7 @@ import { appendDictation, formatMegabytes } from './dictation';
 import {
   ClockIcon,
   CloseIcon,
+  CopyIcon,
   FileIcon,
   GitForkIcon,
   ListTodoIcon,
@@ -59,6 +60,7 @@ import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
+import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
 import {
   groupChatItems,
@@ -73,6 +75,7 @@ import './chat.css';
 export interface ChatViewHandle {
   focusComposer: () => boolean;
   toggleDictation: () => boolean;
+  setComposerText: (text: string) => void;
 }
 
 export interface ChatViewProps {
@@ -102,6 +105,7 @@ export interface ChatViewProps {
   onSetDefaultMode: (mode: ExecutionMode) => void;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onForkTurn?: (turnIndex: number) => void;
+  onRewindTurn?: (turnIndex: number) => void;
   onOpenHandoff?: () => void;
   onEnqueuePrompt?: (prompt: string) => void;
   onCancelQueuedTurn?: (turnId: string) => void;
@@ -258,6 +262,7 @@ interface MessageProps {
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onFixVerification?: (prompt: string) => void;
   onForkTurn?: (turnIndex: number) => void;
+  onRewindTurn?: (turnIndex: number) => void;
   onOpenHandoff?: () => void;
 }
 
@@ -279,28 +284,15 @@ function Message({
   onRestoreCheckpoint,
   onFixVerification,
   onForkTurn,
+  onRewindTurn,
   onOpenHandoff,
 }: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
+  const time = item.type === 'user' && item.at ? formatMessageTime(item.at) : '';
   switch (item.type) {
     case 'user':
       return (
-        <div className="chat-row">
-          <div className="chat-label chat-user-header">
-            <span>Você</span>
-            {onForkTurn ? (
-              <button
-                type="button"
-                className="chat-fork-btn"
-                disabled={busy}
-                data-tooltip="Bifurcar sessão a partir deste turno"
-                onClick={() => onForkTurn(turnIndex)}
-              >
-                <GitForkIcon size={12} />
-                Bifurcar daqui
-              </button>
-            ) : null}
-          </div>
+        <div className="chat-row chat-row-user">
           <div className="chat-user-bubble">
             {parseMessageFileSegments(item.text).map((segment, segmentIndex) =>
               segment.kind === 'file' ? (
@@ -316,6 +308,43 @@ function Message({
                 <span key={`text-${segmentIndex}`}>{segment.value}</span>
               ),
             )}
+          </div>
+          <div className="chat-meta">
+            {time ? <span className="chat-meta-time">{time}</span> : null}
+            {time ? <span className="chat-meta-sep">·</span> : null}
+            <button
+              type="button"
+              className="chat-meta-btn"
+              aria-label="Copiar mensagem"
+              data-tooltip="Copiar mensagem"
+              onClick={() => void navigator.clipboard.writeText(item.text)}
+            >
+              <CopyIcon size={12} />
+            </button>
+            {onRewindTurn ? (
+              <button
+                type="button"
+                className="chat-meta-btn"
+                aria-label="Retroceder"
+                disabled={busy}
+                data-tooltip="Retroceder: desfaz este turno e os arquivos editados"
+                onClick={() => onRewindTurn(turnIndex)}
+              >
+                <RotateCcwIcon size={12} />
+              </button>
+            ) : null}
+            {onForkTurn ? (
+              <button
+                type="button"
+                className="chat-meta-btn"
+                aria-label="Bifurcar"
+                disabled={busy}
+                data-tooltip="Bifurcar sessão a partir deste turno"
+                onClick={() => onForkTurn(turnIndex)}
+              >
+                <GitForkIcon size={12} />
+              </button>
+            ) : null}
           </div>
         </div>
       );
@@ -517,6 +546,7 @@ export function ChatView({
   onSetDefaultMode,
   onRestoreCheckpoint,
   onForkTurn,
+  onRewindTurn,
   onOpenHandoff,
   onEnqueuePrompt,
   onCancelQueuedTurn,
@@ -585,6 +615,9 @@ export function ChatView({
         if (readOnly) return false;
         toggleDictation();
         return true;
+      },
+      setComposerText: (text) => {
+        editorRef.current?.setMarkdown(text);
       },
     }),
     [readOnly, toggleDictation],
@@ -820,6 +853,7 @@ export function ChatView({
       busy={running || readOnly}
       onRestoreCheckpoint={onRestoreCheckpoint}
       onForkTurn={onForkTurn}
+      onRewindTurn={onRewindTurn}
       onOpenHandoff={onOpenHandoff}
       onFixVerification={(fixPrompt) => {
         if (!running && !readOnly) onSend(fixPrompt, grantedDirs);

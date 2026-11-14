@@ -45,11 +45,11 @@ describe('chatReducer', () => {
 
   test('user and error events add items with index-based ids', () => {
     const state = run([
-      { kind: 'user', text: 'oi', at: 'now' },
+      { kind: 'user', text: 'oi', at: '2026-11-13T14:30:00' },
       { kind: 'error', message: 'falhou' },
     ]);
     expect(state.items).toEqual([
-      { type: 'user', id: 'user-0', text: 'oi' },
+      { type: 'user', id: 'user-0', text: 'oi', at: '2026-11-13T14:30:00' },
       { type: 'error', id: 'error-1', message: 'falhou' },
     ]);
   });

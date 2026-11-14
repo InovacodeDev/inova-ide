@@ -24,7 +24,7 @@ describe('sessionStatus', () => {
   });
 
   test('returns idle when the last item is a user message and nothing runs', () => {
-    const userMessage: ChatItem = { type: 'user', id: 'u', text: 'oi' };
+    const userMessage: ChatItem = { type: 'user', id: 'u', text: 'oi', at: null };
     expect(sessionStatus({ items: [assistant, userMessage], running: false })).toBe('idle');
   });
 

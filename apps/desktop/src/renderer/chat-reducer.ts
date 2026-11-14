@@ -1,7 +1,7 @@
 import type { ChatEvent, SubagentSnapshot, VerificationCheckResult } from '@inova/core/chat-types';
 
 export type ChatItem =
-  | { type: 'user'; id: string; text: string }
+  | { type: 'user'; id: string; text: string; at: string | null }
   | { type: 'assistant'; id: string; text: string; streaming: boolean }
   | {
       type: 'tool';
@@ -108,7 +108,10 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
       const { subagents: _previous, ...rest } = state;
       return {
         ...rest,
-        items: [...items, { type: 'user', id: `user-${items.length}`, text: event.text }],
+        items: [
+          ...items,
+          { type: 'user', id: `user-${items.length}`, text: event.text, at: event.at },
+        ],
       };
     }
     case 'subagent':

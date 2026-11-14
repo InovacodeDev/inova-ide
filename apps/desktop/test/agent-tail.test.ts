@@ -22,7 +22,7 @@ describe('agentTail', () => {
   });
 
   test('uses user text', () => {
-    const items: ChatItem[] = [{ type: 'user', id: 'u', text: 'oi' }];
+    const items: ChatItem[] = [{ type: 'user', id: 'u', text: 'oi', at: null }];
     expect(agentTail({ items, lines: 3 })).toBe('oi');
   });
 
@@ -40,7 +40,7 @@ describe('agentTail', () => {
   });
 
   test('only looks at the last item', () => {
-    const items: ChatItem[] = [{ type: 'user', id: 'u', text: 'antigo' }, tool('x')];
+    const items: ChatItem[] = [{ type: 'user', id: 'u', text: 'antigo', at: null }, tool('x')];
     expect(agentTail({ items, lines: 1 })).toBe('x');
   });
 });

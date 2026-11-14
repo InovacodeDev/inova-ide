@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { relativeTime } from '../src/renderer/relative-time';
+import { formatMessageTime, relativeTime } from '../src/renderer/relative-time';
 
 const now = new Date('2026-01-10T12:00:00.000Z');
 const ago = (ms: number) => relativeTime({ iso: new Date(now.getTime() - ms).toISOString(), now });
@@ -35,5 +35,15 @@ describe('relativeTime', () => {
 
   test('returns empty string for an invalid date', () => {
     expect(relativeTime({ iso: 'nope', now })).toBe('');
+  });
+});
+
+describe('formatMessageTime', () => {
+  test('formats local HH:MM', () => {
+    expect(formatMessageTime('2026-11-13T14:30:00')).toBe('14:30');
+  });
+
+  test('returns empty string for an invalid date', () => {
+    expect(formatMessageTime('nope')).toBe('');
   });
 });
