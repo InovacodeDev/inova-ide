@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.5.3] - 2026-11-14
+
 ### Adicionado
 
 - Abas de sessão: até 3 sessões abertas ao mesmo tempo.
