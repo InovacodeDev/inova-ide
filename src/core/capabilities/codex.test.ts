@@ -125,15 +125,20 @@ async function writeSkill(input: { dir: string; name: string; body: string }): P
 }
 
 describe('codexCapabilities.list skills', () => {
-  it('reads skills from the real home and the account', async () => {
+  it('reads skills from the real home and the account, with native disabled state', async () => {
     await withAccountDir(async (ctx) => {
       const shared = join(ctx.env['HOME'] ?? '', '.agents', 'skills');
-      await writeSkill({ dir: shared, name: 'off-skill', body: '# body\n' });
+      await writeSkill({
+        dir: shared,
+        name: 'off-skill',
+        body: '---\nname: off-skill\ndescription: "Does a thing"\n---\n# body\n',
+      });
       await writeSkill({ dir: join(ctx.account.homeDir, 'skills'), name: 'on-skill', body: '# x' });
+      await writeFile(join(ctx.account.homeDir, 'config.toml'), fixture('codex-config.toml'));
       const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
-      expect(skills.map((item) => [item.id, item.enabled])).toEqual([
-        ['off-skill', true],
-        ['on-skill', true],
+      expect(skills.map((item) => [item.id, item.description, item.enabled])).toEqual([
+        ['off-skill', 'Does a thing', false],
+        ['on-skill', null, true],
       ]);
       expect(skills[0]).toMatchObject({ applyMode: 'account-file', source: 'user' });
     });

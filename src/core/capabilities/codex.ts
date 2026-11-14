@@ -118,7 +118,47 @@ async function readIfExists(file: string): Promise<string | null> {
   }
 }
 
-async function skillsIn(dir: string): Promise<{ id: string }[]> {
+function disabledSkillNames(toml: string): Set<string> {
+  const names = new Set<string>();
+  let inBlock = false;
+  let name: string | null = null;
+  let off = false;
+  const flush = (): void => {
+    if (inBlock && name !== null && off) names.add(name);
+    name = null;
+    off = false;
+  };
+  for (const line of toml.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('[')) {
+      flush();
+      inBlock = trimmed === '[[skills.config]]';
+    } else if (inBlock) {
+      // REGEX: name = "<basic string>" key inside a [[skills.config]] block
+      name = /^name\s*=\s*"((?:[^"\\]|\\.)*)"/.exec(trimmed)?.[1] ?? name;
+      off = off || /^enabled\s*=\s*false\b/.test(trimmed);
+    }
+  }
+  flush();
+  return names;
+}
+
+function skillDescription(markdown: string): string | null {
+  const lines = markdown.split('\n').map((line) => line.trimEnd());
+  if (lines[0] !== '---') return null;
+  const end = lines.indexOf('---', 1);
+  const front = end === -1 ? lines.slice(1) : lines.slice(1, end);
+  for (const line of front) {
+    const value = /^description:\s*(.*)$/
+      .exec(line)?.[1]
+      ?.trim()
+      .replace(/^(["'])(.*)\1$/, '$2');
+    if (value !== undefined) return value === '' ? null : value;
+  }
+  return null;
+}
+
+async function skillsIn(dir: string): Promise<{ id: string; description: string | null }[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true });
@@ -131,7 +171,9 @@ async function skillsIn(dir: string): Promise<{ id: string }[]> {
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
       .map(async (entry) => {
         const markdown = await readIfExists(join(dir, entry.name, 'SKILL.md'));
-        return markdown === null ? null : { id: entry.name };
+        return markdown === null
+          ? null
+          : { id: entry.name, description: skillDescription(markdown) };
       }),
   );
   return found.flatMap((skill) => (skill === null ? [] : [skill]));
@@ -143,7 +185,11 @@ async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
     ...(home === undefined ? [] : [join(home, '.agents', 'skills')]),
     join(ctx.account.homeDir, 'skills'),
   ];
-  const perDir = await Promise.all(dirs.map(skillsIn));
+  const [config, ...perDir] = await Promise.all([
+    readIfExists(join(ctx.account.homeDir, 'config.toml')),
+    ...dirs.map(skillsIn),
+  ]);
+  const off = disabledSkillNames(config ?? '');
   const seen = new Set<string>();
   return perDir.flat().flatMap((skill): CapabilityItem[] => {
     if (seen.has(skill.id)) return [];
@@ -153,9 +199,9 @@ async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
         kind: 'skill',
         id: skill.id,
         name: skill.id,
-        description: null,
+        description: skill.description,
         source: 'user',
-        enabled: true,
+        enabled: !off.has(skill.id),
         applyMode: 'account-file',
         unsupportedReason: null,
         tokens: null,
