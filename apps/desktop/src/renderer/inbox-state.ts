@@ -31,6 +31,20 @@ export function unreadInboxCount(items: readonly InboxItem[]): number {
   return items.filter((item) => item.unread).length;
 }
 
+export function inboxFilterCounts(items: readonly InboxItem[]): Record<InboxFilter, number> {
+  let failed = 0;
+  let waiting = 0;
+  for (const item of items) {
+    if (item.kind === 'failed') failed += 1;
+    else if (item.kind === 'waiting-input') waiting += 1;
+  }
+  return {
+    all: items.length,
+    failed,
+    waiting,
+  };
+}
+
 export function shouldNotifyCompleted(input: {
   sessionId: string;
   activeSessionId: string | null;

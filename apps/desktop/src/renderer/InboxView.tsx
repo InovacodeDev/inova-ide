@@ -1,7 +1,7 @@
 import { useState, type Ref } from 'react';
 import type { InboxAttentionKind, InboxItem } from '@inova/core/types';
 import { InboxIcon } from './icons';
-import { filterInbox, unreadInboxCount, type InboxFilter } from './inbox-state';
+import { filterInbox, inboxFilterCounts, unreadInboxCount, type InboxFilter } from './inbox-state';
 import { ProviderBadge } from './ProviderBadge';
 import { relativeTime } from './relative-time';
 
@@ -27,6 +27,7 @@ const FILTER_OPTIONS: { id: InboxFilter; label: string }[] = [
 export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProps) {
   const [filter, setFilter] = useState<InboxFilter>('all');
   const unread = unreadInboxCount(items);
+  const counts = inboxFilterCounts(items);
   const visible = filterInbox(items, filter);
   const hasRead = items.some((item) => !item.unread);
   const now = new Date();
@@ -36,7 +37,7 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
       <div className="inbox-header">
         <span className="inbox-title-wrap">
           <InboxIcon size={14} />
-          <span className="section-label">Caixa de entrada</span>
+          <span className="inbox-heading">Caixa de entrada</span>
           {unread > 0 ? <span className="inbox-badge">{unread}</span> : null}
         </span>
         {hasRead ? (
@@ -57,7 +58,10 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
                 className={filter === option.id ? 'inbox-filter active' : 'inbox-filter'}
                 onClick={() => setFilter(option.id)}
               >
-                {option.label}
+                <span>{option.label}</span>
+                {counts[option.id] > 0 ? (
+                  <span className="inbox-filter-count">{counts[option.id]}</span>
+                ) : null}
               </button>
             ))}
           </div>
@@ -69,10 +73,13 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
                 <li key={item.sessionId}>
                   <button
                     type="button"
-                    className={item.unread ? 'inbox-item unread' : 'inbox-item'}
+                    className={`inbox-item inbox-item-${item.kind}${item.unread ? ' unread' : ''}`}
                     onClick={() => onOpenItem(item.sessionId)}
                   >
                     <div className="inbox-item-top">
+                      {item.unread ? (
+                        <span className="inbox-unread-dot" aria-label="Não lida" />
+                      ) : null}
                       <ProviderBadge provider={item.provider} size={16} />
                       <span className="inbox-item-title">{item.sessionTitle}</span>
                       <span className={`inbox-kind inbox-kind-${item.kind}`}>
@@ -81,8 +88,8 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
                     </div>
                     <div className="inbox-item-summary">{item.summary}</div>
                     <div className="inbox-item-meta">
-                      <span>{item.projectName}</span>
-                      <span>{relativeTime({ iso: item.at, now })}</span>
+                      <span className="inbox-item-project">{item.projectName}</span>
+                      <span className="inbox-item-time">{relativeTime({ iso: item.at, now })}</span>
                     </div>
                   </button>
                 </li>

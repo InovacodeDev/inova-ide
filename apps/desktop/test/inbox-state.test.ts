@@ -3,6 +3,7 @@ import type { InboxItem } from '@inova/core/types';
 import {
   clearReadInbox,
   filterInbox,
+  inboxFilterCounts,
   markInboxRead,
   shouldNotifyCompleted,
   unreadInboxCount,
@@ -39,6 +40,7 @@ describe('inbox-state', () => {
 
     expect(items.map((item) => item.sessionId)).toEqual(['s2', 's3', 's1']);
     expect(unreadInboxCount(items)).toBe(3);
+    expect(inboxFilterCounts(items)).toEqual({ all: 3, failed: 1, waiting: 1 });
     expect(filterInbox(items, 'failed').map((item) => item.sessionId)).toEqual(['s2']);
     expect(filterInbox(items, 'waiting').map((item) => item.sessionId)).toEqual(['s3']);
 

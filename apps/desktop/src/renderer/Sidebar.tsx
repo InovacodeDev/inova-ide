@@ -14,6 +14,7 @@ import {
   DownloadIcon,
   FolderIcon,
   GridIcon,
+  InboxIcon,
   KeyIcon,
   PencilIcon,
   PlusIcon,
@@ -24,6 +25,7 @@ import {
   TrashIcon,
 } from './icons';
 import { ProviderBadge } from './ProviderBadge';
+import { unreadInboxCount } from './inbox-state';
 import { relativeTime } from './relative-time';
 import { STATUS_LABEL, type SessionStatus } from './session-status';
 import {
@@ -477,6 +479,8 @@ export function Sidebar(props: SidebarProps) {
     [accounts],
   );
 
+  const unreadCount = unreadInboxCount(inboxItems);
+
   if (collapsed) {
     return (
       <nav className="sidebar-rail" aria-label="Principal">
@@ -503,6 +507,18 @@ export function Sidebar(props: SidebarProps) {
             {item.icon}
           </button>
         ))}
+        {unreadCount > 0 ? (
+          <button
+            type="button"
+            className="sidebar-rail-item sidebar-rail-inbox"
+            aria-label={`Caixa de entrada (${unreadCount} não ${unreadCount === 1 ? 'lida' : 'lidas'})`}
+            data-tooltip={`Caixa de entrada: ${unreadCount} não ${unreadCount === 1 ? 'lida' : 'lidas'}`}
+            onClick={onToggleCollapsed}
+          >
+            <InboxIcon size={16} />
+            <span className="sidebar-rail-badge">{unreadCount}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           className="sidebar-rail-item"
