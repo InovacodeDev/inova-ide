@@ -112,7 +112,7 @@ export interface ChatViewProps {
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onForkTurn?: (turnIndex: number) => void;
   onRewindTurn?: (turnIndex: number) => void;
-  onRegenerate?: () => void;
+  onRegenerate?: (extraDirs: string[]) => void;
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
@@ -957,7 +957,7 @@ export function ChatView({
               busy={running || readOnly}
               onCopyText={copyText}
               onFeedback={readOnly ? undefined : onFeedback}
-              onRegenerate={readOnly ? undefined : onRegenerate}
+              onRegenerate={readOnly || !onRegenerate ? undefined : () => onRegenerate(grantedDirs)}
             />
           ) : undefined
         }

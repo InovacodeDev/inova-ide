@@ -540,7 +540,8 @@ export function App() {
     activeChatRef.current?.setComposerText(result.value.text);
   };
 
-  const regenerateLastTurn = async (sessionId: string) => {
+  const regenerateLastTurn = async (input: { sessionId: string; extraDirs: string[] }) => {
+    const { sessionId, extraDirs } = input;
     const userTurns = (chats[sessionId]?.items ?? []).filter((item) => item.type === 'user');
     if (userTurns.length === 0) return;
     const result = await call(() =>
@@ -548,7 +549,7 @@ export function App() {
     );
     if (!result) return;
     await loadChat(sessionId, 'replace');
-    await sendMessage(sessionId, result.value.text);
+    await sendMessage(sessionId, result.value.text, extraDirs);
   };
 
   const recordFeedback = async (input: {
@@ -1288,7 +1289,9 @@ export function App() {
                   onRewindTurn={(turnIndex) =>
                     setPendingRewind({ sessionId: tab.sessionId, turnIndex })
                   }
-                  onRegenerate={() => void regenerateLastTurn(tab.sessionId)}
+                  onRegenerate={(extraDirs) =>
+                    void regenerateLastTurn({ sessionId: tab.sessionId, extraDirs })
+                  }
                   onFeedback={({ turnIndex, value }) =>
                     void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
                   }
