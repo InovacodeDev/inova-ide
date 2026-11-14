@@ -58,6 +58,10 @@ export async function gitRunWithStdin(input: {
     child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
     child.once('error', reject);
+    // NOTE: git may exit before reading all of stdin, which raises EPIPE on the pipe. The exit code delivered by 'close' is the real outcome, so only other stdin errors reject.
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EPIPE') reject(error);
+    });
     child.once('close', (code) => {
       if (code === 0) {
         resolve(Buffer.concat(out).toString('utf8'));

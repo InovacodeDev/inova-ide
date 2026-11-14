@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Checkpoints do git não derrubam mais o processo quando o `git` termina antes de ler toda a lista de arquivos. Esse erro também fazia o build da v0.5.4 falhar.
+
 ## [0.5.4] - 2026-11-14
 
 ### Alterado
