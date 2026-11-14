@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { skillsIn } from './codex.js';
-import { isMissingFile, readIfExists } from './file-edit.js';
+import { isMissingFile, readIfExists, serialize, updateJsonFile } from './file-edit.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -12,6 +12,8 @@ import type {
   SetEnabledInput,
 } from './types.js';
 
+const COMMAND_TIMEOUT_MS = 30_000;
+const NOT_FOUND_MESSAGE = 'qwen não encontrado.';
 const INVALID_SETTINGS_MESSAGE = 'O settings.json do Qwen é inválido.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Qwen';
 const EXTENSION_LIST_FAILED_MESSAGE = 'Não foi possível listar as extensões do Qwen';
@@ -148,9 +150,47 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   };
 }
 
-export const qwenCapabilities: CapabilityAdapter = {
-  list,
-  launchArgs: () => [],
-  setEnabled: (input: SetEnabledInput) =>
-    Promise.reject(new Error(`Falha ao desligar ${input.ref.id}.`)),
-};
+function withListMembership(input: {
+  root: Settings;
+  path: readonly [string, string];
+  name: string;
+  enabled: boolean;
+}): Settings {
+  const [group, key] = input.path;
+  const parent = isRecord(input.root[group]) ? input.root[group] : {};
+  const rest = stringList(parent, key).filter((entry) => entry !== input.name);
+  const list = input.enabled ? rest : [...rest, input.name];
+  return { ...input.root, [group]: { ...parent, [key]: list } };
+}
+
+async function toggleExtension(input: SetEnabledInput): Promise<void> {
+  const { ctx, ref, enabled } = input;
+  const result = await ctx.runner.run({
+    command: 'qwen',
+    args: ['extensions', enabled ? 'enable' : 'disable', ref.id],
+    env: ctx.env,
+    timeoutMs: COMMAND_TIMEOUT_MS,
+  });
+  if (!('exitCode' in result)) throw new Error(NOT_FOUND_MESSAGE);
+  if (result.exitCode !== 0) {
+    throw new Error(`Falha ao ${enabled ? 'ligar' : 'desligar'} ${ref.id}.`);
+  }
+}
+
+function setEnabled(input: SetEnabledInput): Promise<void> {
+  const { ctx, ref, enabled } = input;
+  const file = settingsFile(ctx);
+  const path =
+    ref.kind === 'skill' ? (['skills', 'disabled'] as const) : (['mcp', 'excluded'] as const);
+  return serialize(`qwen:${ctx.account.id}`, () =>
+    ref.kind === 'plugin'
+      ? toggleExtension(input)
+      : updateJsonFile({
+          file,
+          backupRoot: ctx.backupRoot,
+          update: (root) => withListMembership({ root, path, name: ref.id, enabled }),
+        }),
+  );
+}
+
+export const qwenCapabilities: CapabilityAdapter = { list, launchArgs: () => [], setEnabled };
