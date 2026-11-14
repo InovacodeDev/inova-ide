@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   backupFile,
   CapabilityFileError,
+  setTomlArrayMembership,
   setTomlTableKey,
   tomlTableHeader,
   updateJsonFile,
@@ -117,6 +118,36 @@ describe('setTomlTableKey', () => {
     const toml = 'mcp_servers = { x = { command = "a" } }\n';
     expect(() =>
       setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false }),
+    ).toThrow(CapabilityFileError);
+  });
+});
+
+describe('setTomlArrayMembership', () => {
+  const toml = '[skills]\ndisabled = ["a"]\n';
+  const base = { table: 'skills', key: 'disabled' };
+
+  it('adds a member', () => {
+    expect(setTomlArrayMembership({ ...base, toml, member: 'b', present: true })).toBe(
+      '[skills]\ndisabled = ["a", "b"]\n',
+    );
+  });
+
+  it('removes a member', () => {
+    expect(setTomlArrayMembership({ ...base, toml, member: 'a', present: false })).toBe(
+      '[skills]\ndisabled = []\n',
+    );
+  });
+
+  it('creates the table when absent', () => {
+    expect(setTomlArrayMembership({ ...base, toml: '', member: 'a', present: true })).toBe(
+      '[skills]\ndisabled = ["a"]\n',
+    );
+  });
+
+  it('throws on a multi-line array', () => {
+    const multi = '[skills]\ndisabled = [\n  "a",\n]\n';
+    expect(() =>
+      setTomlArrayMembership({ ...base, toml: multi, member: 'b', present: true }),
     ).toThrow(CapabilityFileError);
   });
 });

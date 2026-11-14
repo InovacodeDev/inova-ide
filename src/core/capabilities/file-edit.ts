@@ -135,3 +135,52 @@ export function setTomlTableKey(input: {
   lines.splice(section.header + 1, 0, assignment);
   return lines.join('\n');
 }
+
+function parseQuotedMembers(file: string, items: string): string[] {
+  const members: string[] = [];
+  for (const match of items.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+    const parsed: unknown = JSON.parse(`"${match[1] ?? ''}"`);
+    if (typeof parsed !== 'string') throw new CapabilityFileError(file, 'invalid array member');
+    members.push(parsed);
+  }
+  return members;
+}
+
+export function setTomlArrayMembership(input: {
+  toml: string;
+  table: string;
+  key: string;
+  member: string;
+  present: boolean;
+}): string {
+  const lines = input.toml.split('\n');
+  const section = findSection(lines, `[${input.table}]`);
+  const render = (members: readonly string[]): string =>
+    `${input.key} = [${members.map((entry) => JSON.stringify(entry)).join(', ')}]`;
+
+  if (!section) {
+    if (!input.present) return input.toml;
+    assertKnownTableForm(lines, input.table);
+    return appendBlock(input.toml, `[${input.table}]\n${render([input.member])}\n`);
+  }
+
+  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(input.key)}\\s*=\\s*(.*)$`);
+  for (let index = section.header + 1; index < section.end; index += 1) {
+    const match = keyPattern.exec(lines[index] ?? '');
+    if (!match) continue;
+    const value = (match[2] ?? '').trim();
+    const single = /^\[(.*)\]\s*(#.*)?$/.exec(value);
+    if (!single) {
+      throw new CapabilityFileError(`${input.table}.${input.key}`, 'unsupported array form');
+    }
+    const members = parseQuotedMembers(input.table, single[1] ?? '');
+    const next = members.filter((entry) => entry !== input.member);
+    if (input.present) next.push(input.member);
+    lines[index] = `${match[1] ?? ''}${render(next)}`;
+    return lines.join('\n');
+  }
+
+  if (!input.present) return input.toml;
+  lines.splice(section.header + 1, 0, render([input.member]));
+  return lines.join('\n');
+}
