@@ -1,5 +1,65 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { CommandRunner } from '../providers.js';
 import { codexCapabilities } from './codex.js';
+import type { CapabilityContext } from './types.js';
+
+function fixture(name: string): string {
+  return readFileSync(new URL(`../fixtures/capabilities/${name}`, import.meta.url), 'utf8');
+}
+type RunResult = Awaited<ReturnType<CommandRunner['run']>>;
+type Overrides = Partial<Record<'mcp' | 'plugin', RunResult>>;
+
+function runnerWith(overrides: Overrides): CommandRunner {
+  return {
+    run: async (cmd) => {
+      if (cmd.args[0] === 'plugin') {
+        return overrides.plugin ?? { exitCode: 0, stdout: fixture('codex-plugin-list.json') };
+      }
+      return overrides.mcp ?? { exitCode: 0, stdout: fixture('codex-mcp-list.json') };
+    },
+  };
+}
+
+function contextWith(input: {
+  overrides?: Overrides;
+  disabledCapabilities?: CapabilityContext['account']['disabledCapabilities'];
+}): CapabilityContext {
+  return {
+    account: {
+      id: 'acc-1',
+      provider: 'codex',
+      label: 'Codex',
+      homeDir: '/nonexistent/acc',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      disabledCapabilities: input.disabledCapabilities,
+    },
+    runner: runnerWith(input.overrides ?? {}),
+    env: {},
+    projectPath: null,
+    backupRoot: '/tmp/backups',
+  };
+}
+
+async function categoryOf(ctx: CapabilityContext, kind: string) {
+  const { categories } = await codexCapabilities.list(ctx);
+  return categories.find((entry) => entry.kind === kind);
+}
+
+describe('codexCapabilities.list', () => {
+  it('lists MCP servers as launch items, honoring disabledCapabilities', async () => {
+    const category = await categoryOf(
+      contextWith({ disabledCapabilities: [{ kind: 'mcp', id: 'search' }] }),
+      'mcp',
+    );
+    expect(category?.error).toBeNull();
+    expect(category?.items.map((item) => [item.id, item.enabled, item.applyMode])).toEqual([
+      ['docs', true, 'launch'],
+      ['my.server', false, 'launch'],
+      ['search', false, 'launch'],
+    ]);
+  });
+});
 
 describe('codexCapabilities.launchArgs', () => {
   it('disables only MCP refs with -c pairs', () => {
