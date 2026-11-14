@@ -774,7 +774,7 @@ export function createHandlers(deps: HandlerDeps) {
       lastErrorBySession.delete(sessionId);
       invalidateProjectFiles(sessionId);
       const hasQueued = turnQueue.forSession(sessionId).length > 0;
-      if (event.isError || wasCancelled) {
+      if (event.isError && !wasCancelled) {
         if (hasQueued) setQueuePaused({ sessionId, paused: true });
       } else if (owner && hasQueued && isAccountExhausted(owner.accountId)) {
         setQueuePaused({ sessionId, paused: true });
