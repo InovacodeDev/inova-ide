@@ -59,16 +59,30 @@ describe('geminiCapabilities.list', () => {
     expect(category).toEqual({ kind: 'mcp', items: [], error: null });
   });
 
+  it('lists plugins as account-file items', async () => {
+    const plugins = await categoryOf(contextWith({}), 'plugin');
+    expect(plugins?.items.map((item) => [item.id, item.enabled, item.applyMode])).toEqual([
+      ['dummyplug', true, 'account-file'],
+      ['offplug', false, 'account-file'],
+    ]);
+  });
+
   it('reports a per-category error on non-zero exit', async () => {
-    const ctx = contextWith({ overrides: { mcp: { exitCode: 1, stdout: '' } } });
+    const ctx = contextWith({
+      overrides: { mcp: { exitCode: 1, stdout: '' }, plugin: { exitCode: 1, stdout: '' } },
+    });
     expect((await categoryOf(ctx, 'mcp'))?.error).toBe(
       'Não foi possível listar os servidores MCP do agy.',
     );
+    expect((await categoryOf(ctx, 'plugin'))?.error).toBe(
+      'Não foi possível listar os plugins do agy.',
+    );
   });
 
-  it('reports unknown mcp output as an error', async () => {
-    const ctx = contextWith({ overrides: { mcp: { exitCode: 0, stdout: 'oops\n' } } });
-    expect((await categoryOf(ctx, 'mcp'))?.error).not.toBeNull();
+  it('reports invalid plugin JSON as an error', async () => {
+    const ctx = contextWith({ overrides: { plugin: { exitCode: 0, stdout: 'oops' } } });
+    expect((await categoryOf(ctx, 'plugin'))?.items).toEqual([]);
+    expect((await categoryOf(ctx, 'plugin'))?.error).not.toBeNull();
   });
 
   it('reports a missing binary in every category', async () => {
@@ -78,7 +92,10 @@ describe('geminiCapabilities.list', () => {
       runner: { run: async () => ({ notFound: true }) as unknown as RunResult },
     };
     const { categories } = await geminiCapabilities.list(missing);
-    expect(categories.map((entry) => entry.error)).toEqual(['agy não encontrado.']);
+    expect(categories.map((entry) => entry.error)).toEqual([
+      'agy não encontrado.',
+      'agy não encontrado.',
+    ]);
   });
 });
 

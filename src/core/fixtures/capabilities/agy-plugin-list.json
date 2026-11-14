@@ -1,0 +1,18 @@
+[
+  {
+    "name": "dummyplug",
+    "enabled": true,
+    "version": "1.0.0",
+    "source": "antigravity",
+    "path": "/home/account/.gemini/config/plugins/dummyplug",
+    "skills": ["hello", "wave"]
+  },
+  {
+    "name": "offplug",
+    "enabled": false,
+    "version": "2.1.0",
+    "source": "antigravity",
+    "path": "/home/account/.gemini/config/plugins/offplug",
+    "skills": ["bye"]
+  }
+]

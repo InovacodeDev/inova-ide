@@ -1,6 +1,7 @@
 import type { CommandRunner } from '../providers.js';
 import type {
   CapabilityAdapter,
+  CapabilityCategoryResult,
   CapabilityContext,
   CapabilityItem,
   CapabilityListing,
@@ -10,8 +11,22 @@ import type {
 const COMMAND_TIMEOUT_MS = 30_000;
 const NOT_FOUND_MESSAGE = 'agy não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do agy.';
+const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do agy.';
 const MCP_TABLE_HEADER = /^NAME\s+TYPE\s+STATUS\b/;
 const MCP_EMPTY_MESSAGE = 'No MCP servers configured.';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseJson(stdout: string): unknown {
+  try {
+    return JSON.parse(stdout);
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
 
 function baseItem(input: Pick<CapabilityItem, 'kind' | 'id' | 'enabled'>): CapabilityItem {
   return {
@@ -41,21 +56,64 @@ function parseMcpItems(stdout: string): CapabilityItem[] | null {
   });
 }
 
+function parsePlugins(stdout: string): Record<string, unknown>[] | null {
+  const parsed = parseJson(stdout);
+  if (!Array.isArray(parsed)) return null;
+  return parsed.filter(
+    (entry): entry is Record<string, unknown> =>
+      isRecord(entry) && typeof entry['name'] === 'string',
+  );
+}
+
+function pluginItems(plugins: Record<string, unknown>[]): CapabilityItem[] {
+  return plugins.map((plugin) =>
+    baseItem({
+      kind: 'plugin',
+      id: String(plugin['name']),
+      enabled: plugin['enabled'] !== false,
+    }),
+  );
+}
+
 function runAgy(ctx: CapabilityContext, args: string[]): ReturnType<CommandRunner['run']> {
   return ctx.runner.run({ command: 'agy', args, env: ctx.env, timeoutMs: COMMAND_TIMEOUT_MS });
 }
 
+function category(input: {
+  kind: CapabilityCategoryResult['kind'];
+  items: CapabilityItem[] | null;
+  error: string;
+}): CapabilityCategoryResult {
+  return input.items === null
+    ? { kind: input.kind, items: [], error: input.error }
+    : { kind: input.kind, items: input.items, error: null };
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const mcp = await runAgy(ctx, ['mcp', 'list']);
-  if (!('exitCode' in mcp)) {
-    return { categories: [{ kind: 'mcp', items: [], error: NOT_FOUND_MESSAGE }], cost: null };
+  const [mcp, plugins] = await Promise.all([
+    runAgy(ctx, ['mcp', 'list']),
+    runAgy(ctx, ['plugin', 'list', '--json']),
+  ]);
+  if (!('exitCode' in mcp) || !('exitCode' in plugins)) {
+    const kinds = ['mcp', 'plugin'] as const;
+    return {
+      categories: kinds.map((kind) => ({ kind, items: [], error: NOT_FOUND_MESSAGE })),
+      cost: null,
+    };
   }
-  const items = mcp.exitCode === 0 ? parseMcpItems(mcp.stdout) : null;
+  const parsedPlugins = plugins.exitCode === 0 ? parsePlugins(plugins.stdout) : null;
   return {
     categories: [
-      items === null
-        ? { kind: 'mcp', items: [], error: MCP_LIST_FAILED_MESSAGE }
-        : { kind: 'mcp', items, error: null },
+      category({
+        kind: 'mcp',
+        items: mcp.exitCode === 0 ? parseMcpItems(mcp.stdout) : null,
+        error: MCP_LIST_FAILED_MESSAGE,
+      }),
+      category({
+        kind: 'plugin',
+        items: parsedPlugins === null ? null : pluginItems(parsedPlugins),
+        error: PLUGIN_LIST_FAILED_MESSAGE,
+      }),
     ],
     cost: null,
   };
