@@ -19,6 +19,12 @@ const ANSI_ESCAPE =
   /\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]|\u001b[@-Z\\-_]/g;
 // REGEX: match an HTTPS OAuth URL at start of occurrence
 const URL_START = /https:\/\/[^\s"'<>]+/;
+// REGEX: OSC 8 hyperlink opener "ESC ] 8 ; params ; URL" ending at BEL or ST, capturing an HTTPS URL
+const OSC8_HTTPS_LINK =
+  /\u001b\]8;[^;\u0007\u001b]*;(https:\/\/[^\u0007\u001b\s]+)(?:\u0007|\u001b\\)/;
+// REGEX: secondary device attributes query "ESC [ > c" or "ESC [ > 0 c"
+const SECONDARY_DA_QUERY = /\u001b\[>0?c/;
+const SECONDARY_DA_REPLY = '\x1b[>0;10;1c';
 // REGEX: match an indented wrapped continuation line of a long URL in TUI output
 const URL_WRAP_CONTINUATION =
   /^[ ]*\n[ ]{2,}([A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+)(?=[ ]*(?:\n|$))/;
@@ -28,6 +34,8 @@ export function stripAnsi(text: string): string {
 }
 
 export function extractAuthUrl(rawOutput: string): string | null {
+  const hyperlink = OSC8_HTTPS_LINK.exec(rawOutput)?.[1];
+  if (hyperlink !== undefined) return hyperlink;
   const clean = stripAnsi(rawOutput).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const match = URL_START.exec(clean);
   if (!match) return null;
@@ -82,6 +90,7 @@ interface FlowState {
   pollTimer: ReturnType<typeof setInterval> | null;
   timeoutTimer: ReturnType<typeof setTimeout> | null;
   actionTimer: ReturnType<typeof setTimeout> | null;
+  finishLogin: (() => Promise<void>) | null;
 }
 
 export interface LoginFlowDeps {
@@ -89,6 +98,7 @@ export interface LoginFlowDeps {
   checkStatus: (input: { account: Account; baseEnv: NodeJS.ProcessEnv }) => Promise<AuthStatus>;
   emit: (event: LoginEvent) => void;
   onAuthenticated?: (accountId: string) => void;
+  beginLogin?: (account: Account) => Promise<() => Promise<void>>;
   readTokensTimestamp?: (homeDir: string) => Promise<number>;
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -112,6 +122,7 @@ export interface LoginFlowManager {
 export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
   const flows = new Map<string, FlowState>();
   const flowsByAccount = new Map<string, string>();
+  const finishingByAccount = new Map<string, Promise<void>>();
   const pollMs = deps.pollIntervalMs ?? DEFAULT_POLL_MS;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const alreadyAuthMs = deps.alreadyAuthSettleMs ?? ALREADY_AUTH_SETTLE_MS;
@@ -146,6 +157,22 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
     }
   }
 
+  function finishFlow(flow: FlowState): Promise<void> {
+    const finish = flow.finishLogin;
+    if (finish === null) return finishingByAccount.get(flow.account.id) ?? Promise.resolve();
+    flow.finishLogin = null;
+    const accountId = flow.account.id;
+    const finishing = finish()
+      .catch((error: unknown) => {
+        console.error(`inova: failed to finish login for account ${accountId}`, error);
+      })
+      .finally(() => {
+        if (finishingByAccount.get(accountId) === finishing) finishingByAccount.delete(accountId);
+      });
+    finishingByAccount.set(accountId, finishing);
+    return finishing;
+  }
+
   function closePtySafely(sessionId: string): void {
     try {
       deps.sessions.close(sessionId);
@@ -168,6 +195,7 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
     cleanupFlow(flow);
     emitState(flow, 'verifying');
     closePtySafely(flow.sessionId);
+    await finishFlow(flow);
     deps.onAuthenticated?.(flow.account.id);
     emitState(flow, 'succeeded');
   }
@@ -178,6 +206,7 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
     flow.canceled = true;
     cleanupFlow(flow);
     closePtySafely(sessionId);
+    void finishFlow(flow);
     emitState(flow, 'canceled');
   }
 
@@ -186,6 +215,7 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
       if (flow.settled) return;
       cleanupFlow(flow);
       closePtySafely(flow.sessionId);
+      void finishFlow(flow);
       emitState(flow, 'failed', 'Tempo limite da autenticação excedido. Tente novamente.');
     }, timeoutMs);
 
@@ -198,24 +228,44 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
     }
   }
 
+  async function openLoginSession(input: {
+    account: Account;
+    spec: LaunchSpec;
+    file: string;
+    baseEnv: NodeJS.ProcessEnv;
+  }): Promise<{ sessionId: string; initialStatus: AuthStatus; initialTimestamp: number }> {
+    const { account, spec, file, baseEnv } = input;
+    const [initialStatus, initialTimestamp] = await Promise.all([
+      deps.checkStatus({ account, baseEnv }),
+      hasFilePolling(account.provider)
+        ? readTimestamp(account.provider, account.homeDir)
+        : Promise.resolve(0),
+    ]);
+    const sessionId = deps.sessions.open({
+      spec,
+      file,
+      accountId: account.id,
+      cols: DEFAULT_COLS,
+      rows: DEFAULT_ROWS,
+    });
+    return { sessionId, initialStatus, initialTimestamp };
+  }
+
   return {
     cancel,
     async start({ account, spec, file, baseEnv }) {
       const existing = flowsByAccount.get(account.id);
       if (existing !== undefined) cancel(existing);
-      const [initialStatus, initialTimestamp] = await Promise.all([
-        deps.checkStatus({ account, baseEnv }),
-        hasFilePolling(account.provider)
-          ? readTimestamp(account.provider, account.homeDir)
-          : Promise.resolve(0),
-      ]);
-      const sessionId = deps.sessions.open({
-        spec,
-        file,
-        accountId: account.id,
-        cols: DEFAULT_COLS,
-        rows: DEFAULT_ROWS,
-      });
+      await finishingByAccount.get(account.id);
+      const finishLogin = deps.beginLogin ? await deps.beginLogin(account) : null;
+      let opened: { sessionId: string; initialStatus: AuthStatus; initialTimestamp: number };
+      try {
+        opened = await openLoginSession({ account, spec, file, baseEnv });
+      } catch (error: unknown) {
+        await finishLogin?.();
+        throw error;
+      }
+      const { sessionId, initialStatus, initialTimestamp } = opened;
       const flow: FlowState = {
         sessionId,
         account,
@@ -234,6 +284,7 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
         pollTimer: null,
         timeoutTimer: null,
         actionTimer: null,
+        finishLogin,
       };
       flows.set(sessionId, flow);
       flowsByAccount.set(account.id, sessionId);
@@ -254,6 +305,7 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
       if (!flow || flow.settled) return;
       if (chunk.includes('\x1b[6n')) deps.sessions.write(sessionId, '\x1b[1;1R');
       if (chunk.includes('\x1b[c')) deps.sessions.write(sessionId, '\x1b[?62;c');
+      if (SECONDARY_DA_QUERY.test(chunk)) deps.sessions.write(sessionId, SECONDARY_DA_REPLY);
 
       const combined = flow.buffer + chunk;
       flow.buffer =
@@ -278,7 +330,9 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
       }
 
       const foundUrl = extractAuthUrl(flow.buffer);
-      const needsCode = /paste code here|enter.*code|c[oó]digo.*autoriza/i.test(clean);
+      const needsCode = /paste code here|paste it below|enter.*code|c[oó]digo.*autoriza/i.test(
+        clean,
+      );
       const browserHint = /opening browser|signing in|visit:|browser/i.test(clean);
       const urlChanged = foundUrl !== null && foundUrl !== flow.authUrl;
       const codeChanged = needsCode && !flow.codePrompt;
@@ -295,11 +349,13 @@ export function createLoginFlowManager(deps: LoginFlowDeps): LoginFlowManager {
       if (!flow || flow.settled) return;
       cleanupFlow(flow);
       if (flow.canceled) {
+        await finishFlow(flow);
         emitState(flow, 'canceled');
         return;
       }
       emitState(flow, 'verifying');
       const status = await deps.checkStatus({ account: flow.account, baseEnv: flow.baseEnv });
+      await finishFlow(flow);
       if (status === 'logged-in') {
         deps.onAuthenticated?.(flow.account.id);
         emitState(flow, 'succeeded');

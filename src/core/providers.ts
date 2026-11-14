@@ -1,7 +1,7 @@
-import { lstat, mkdir, readFile, rename, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import type { ProviderId } from './types.js';
+import type { Account, ProviderId } from './types.js';
 
 export type AuthStatus = 'logged-in' | 'logged-out' | 'binary-missing' | 'unknown';
 
@@ -20,6 +20,7 @@ export interface ProviderAdapter {
   binary: string;
   homeEnvVar: string;
   strippedEnvVars: readonly string[];
+  forcedEnv?: Readonly<Record<string, string>>;
   loginArgs: readonly string[];
   installHint: string;
   initHome(homeDir: string): Promise<void>;
@@ -124,10 +125,10 @@ const codex: ProviderAdapter = {
   },
 };
 
-const AGY_STATE_REL_PATH = join('.gemini', 'antigravity-cli', 'jetski_state.pbtxt');
-const AGY_ONBOARDING_REL_PATH = join('.gemini', 'antigravity-cli', 'cache', 'onboarding.json');
 const AGY_TOKEN_REL_PATH = join('.gemini', 'antigravity-cli', 'antigravity-oauth-token');
-const AGY_ONBOARDED_PATTERN = /\bagent_onboarding_completed:\s*AGENT_ONBOARDING_STATE_COMPLETED\b/;
+const AGY_REAUTH_BACKUP_SUFFIX = '.inova-reauth';
+// NOTE: agy keeps its OAuth token in one global macOS Keychain item (service "gemini"), shared by every HOME. With HOME isolated, /usr/bin/security finds no default keychain, so macOS shows the "Keychain Not Found" dialog on every token refresh. An SSH session makes agy use only the token file inside the account home.
+const AGY_FILE_TOKEN_STORAGE_ENV = { SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0' } as const;
 const AGY_GLOBAL_SYMLINKS = [
   '.gitconfig',
   '.gitignore_global',
@@ -144,36 +145,44 @@ async function readOptionalText(file: string): Promise<string | 'missing' | 'err
   }
 }
 
-function isOnboardingCompleteJson(raw: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return false;
-  }
-  if (typeof parsed !== 'object' || parsed === null) return false;
-  const record = parsed as Record<string, unknown>;
-  return (
-    record['onboardingComplete'] === true ||
-    record['consumerOnboardingComplete'] === true ||
-    record['enterpriseOnboardingComplete'] === true
-  );
-}
-
 export async function readGeminiAuthState(homeDir: string): Promise<AuthStatus> {
-  const state = await readOptionalText(join(homeDir, AGY_STATE_REL_PATH));
-  if (state === 'error') return 'unknown';
-  if (state !== 'missing' && AGY_ONBOARDED_PATTERN.test(state)) return 'logged-in';
-
-  const onboarding = await readOptionalText(join(homeDir, AGY_ONBOARDING_REL_PATH));
-  if (onboarding === 'error') return 'unknown';
-  if (onboarding !== 'missing' && isOnboardingCompleteJson(onboarding)) return 'logged-in';
-
   const token = await readOptionalText(join(homeDir, AGY_TOKEN_REL_PATH));
   if (token === 'error') return 'unknown';
-  if (token !== 'missing' && token.trim() !== '') return 'logged-in';
+  return token !== 'missing' && token.trim() !== '' ? 'logged-in' : 'logged-out';
+}
 
-  return 'logged-out';
+async function renameIfExists(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch (error: unknown) {
+    if (!isMissingFile(error)) throw error;
+  }
+}
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    await lstat(file);
+    return true;
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return false;
+    throw error;
+  }
+}
+
+export async function beginForcedReauth(
+  account: Pick<Account, 'provider' | 'homeDir'>,
+): Promise<() => Promise<void>> {
+  if (account.provider !== 'gemini') return noop;
+  const token = join(account.homeDir, AGY_TOKEN_REL_PATH);
+  const backup = `${token}${AGY_REAUTH_BACKUP_SUFFIX}`;
+  await renameIfExists(token, backup);
+  return async () => {
+    if (await fileExists(token)) {
+      await rm(backup, { force: true });
+      return;
+    }
+    await renameIfExists(backup, token);
+  };
 }
 
 async function linkIfNeeded(src: string, dst: string): Promise<void> {
@@ -215,6 +224,7 @@ const gemini: ProviderAdapter = {
     'GOOGLE_CLOUD_PROJECT',
     'GOOGLE_CLOUD_PROJECT_ID',
   ],
+  forcedEnv: AGY_FILE_TOKEN_STORAGE_ENV,
   loginArgs: [],
   installHint: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
   initHome: noop,
@@ -283,7 +293,7 @@ function createFileAuthAdapter(config: FileAuthConfig): ProviderAdapter {
 }
 
 export const PROVIDER_CREDENTIAL_FILES: Partial<Record<ProviderId, readonly string[]>> = {
-  gemini: [AGY_ONBOARDING_REL_PATH, AGY_TOKEN_REL_PATH, AGY_STATE_REL_PATH],
+  gemini: [AGY_TOKEN_REL_PATH],
   deepseek: ['.credentials.yaml', 'credentials.yaml', 'auth.json'],
   kimi: [join('credentials', 'kimi-code.json'), 'kimi-code.json', 'auth.json'],
   grok: ['auth.json', 'credentials.json'],
