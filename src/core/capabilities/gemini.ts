@@ -1,5 +1,6 @@
 import type { CommandRunner } from '../providers.js';
 import { serialize } from './file-edit.js';
+import { baseItem, isRecord } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -17,10 +18,6 @@ const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do agy.';
 const MCP_TABLE_HEADER = /^NAME\s+TYPE\s+STATUS\b/;
 const MCP_EMPTY_MESSAGE = 'No MCP servers configured.';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function parseJson(stdout: string): unknown {
   try {
     return JSON.parse(stdout);
@@ -28,19 +25,6 @@ function parseJson(stdout: string): unknown {
     if (error instanceof SyntaxError) return null;
     throw error;
   }
-}
-
-function baseItem(input: Pick<CapabilityItem, 'kind' | 'id' | 'enabled'>): CapabilityItem {
-  return {
-    ...input,
-    name: input.id,
-    description: null,
-    source: 'user',
-    applyMode: 'account-file',
-    unsupportedReason: null,
-    tokens: null,
-    group: null,
-  };
 }
 
 function parseMcpItems(stdout: string): CapabilityItem[] | null {
