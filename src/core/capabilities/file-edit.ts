@@ -136,14 +136,26 @@ export function setTomlTableKey(input: {
   return lines.join('\n');
 }
 
-function parseQuotedMembers(file: string, items: string): string[] {
-  const members: string[] = [];
-  for (const match of items.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-    const parsed: unknown = JSON.parse(`"${match[1] ?? ''}"`);
-    if (typeof parsed !== 'string') throw new CapabilityFileError(file, 'invalid array member');
-    members.push(parsed);
+function parseTomlBasicString(file: string, quoted: string): string {
+  try {
+    const parsed: unknown = JSON.parse(quoted);
+    if (typeof parsed === 'string') return parsed;
+  } catch {
+    throw new CapabilityFileError(file, 'unsupported string escape');
   }
-  return members;
+  throw new CapabilityFileError(file, 'invalid string');
+}
+
+// REGEX: array body made only of double-quoted strings separated by commas, trailing comma allowed
+const QUOTED_ARRAY_BODY = /^\s*(?:"(?:[^"\\]|\\.)*"\s*(?:,\s*"(?:[^"\\]|\\.)*"\s*)*,?\s*)?$/;
+
+function parseQuotedMembers(file: string, items: string): string[] {
+  if (!QUOTED_ARRAY_BODY.test(items)) {
+    throw new CapabilityFileError(file, 'array has members other than double-quoted strings');
+  }
+  return [...items.matchAll(/"(?:[^"\\]|\\.)*"/g)].map((match) =>
+    parseTomlBasicString(file, match[0]),
+  );
 }
 
 export function setTomlArrayMembership(input: {
@@ -199,7 +211,9 @@ function findSkillConfigBlock(lines: readonly string[], name: string): Section |
     while (end < lines.length && !(lines[end] ?? '').trimStart().startsWith('[')) end += 1;
     for (let index = cursor + 1; index < end; index += 1) {
       const match = namePattern.exec(lines[index] ?? '');
-      if (match && JSON.parse(`"${match[1] ?? ''}"`) === name) return { header: cursor, end };
+      if (match && parseTomlBasicString(SKILL_CONFIG_HEADER, `"${match[1] ?? ''}"`) === name) {
+        return { header: cursor, end };
+      }
     }
     cursor = end;
   }

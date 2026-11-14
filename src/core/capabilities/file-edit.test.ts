@@ -153,9 +153,30 @@ describe('setTomlArrayMembership', () => {
       setTomlArrayMembership({ ...base, toml: multi, member: 'b', present: true }),
     ).toThrow(CapabilityFileError);
   });
+
+  it('throws instead of dropping single-quoted members', () => {
+    const single = "[skills]\ndisabled = ['a']\n";
+    expect(() =>
+      setTomlArrayMembership({ ...base, toml: single, member: 'b', present: true }),
+    ).toThrow(CapabilityFileError);
+  });
+
+  it('throws a CapabilityFileError for an invalid escape in a member', () => {
+    const bad = '[skills]\ndisabled = ["\\e"]\n';
+    expect(() =>
+      setTomlArrayMembership({ ...base, toml: bad, member: 'b', present: true }),
+    ).toThrow(CapabilityFileError);
+  });
 });
 
 describe('setTomlSkillConfig', () => {
+  it('throws a CapabilityFileError for an invalid escape in a skill name', () => {
+    const bad = '[[skills.config]]\nname = "\\e"\nenabled = false\n';
+    expect(() => setTomlSkillConfig({ toml: bad, name: 'a', enabled: false })).toThrow(
+      CapabilityFileError,
+    );
+  });
+
   it('adds a block when disabling and removes only that block when enabling', () => {
     const base = '[a]\nx = 1\n';
     const withA = setTomlSkillConfig({ toml: base, name: 'a', enabled: false });
