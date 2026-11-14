@@ -104,7 +104,7 @@ export function App() {
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
   const [busyConflicts, setBusyConflicts] = useState<
-    Record<string, { prompt: string; exhausted: boolean }>
+    Record<string, { prompt: string; exhausted: boolean; message?: string }>
   >({});
   const [pendingFork, setPendingFork] = useState<{
     session: Session;
@@ -456,12 +456,28 @@ export function App() {
             [sessionId]: { prompt, exhausted: false },
           }));
         } else if (result.message.startsWith('CONTA_ESGOTADA:')) {
-          setBusyConflicts((current) => ({ ...current, [sessionId]: { prompt, exhausted: true } }));
+          const message = result.message.slice('CONTA_ESGOTADA:'.length).trim();
+          setBusyConflicts((current) => ({
+            ...current,
+            [sessionId]: { prompt, exhausted: true, message },
+          }));
         } else {
           await call(() => Promise.resolve(result));
         }
       }
       return false;
+    }
+    if (busyConflicts[sessionId]?.exhausted) {
+      const { sessions: knownSessions, projects: knownProjects } = latest.current;
+      const projectId = Object.keys(knownSessions).find((id) =>
+        knownSessions[id]?.some((item) => item.id === sessionId),
+      );
+      const session = projectId
+        ? knownSessions[projectId]?.find((item) => item.id === sessionId)
+        : undefined;
+      const project = knownProjects.find((candidate) => candidate.id === projectId);
+      const account = effectiveAccountOf(session, project);
+      if (account) void loadUsage(account.label);
     }
     setBusyConflicts((current) => {
       if (!(sessionId in current)) return current;

@@ -688,6 +688,88 @@ test('getUsage reports errors in Portuguese without leaking the token', async ()
   });
 });
 
+async function exhaustAccount(input: { resetsAt: string | null }) {
+  const ctx = await setup();
+  const { account, session } = await seedSession(ctx.root);
+  await writeFile(
+    join(account.homeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token' } }),
+  );
+  unwrap(await ctx.handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  ctx.handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: input.resetsAt }],
+  });
+  ctx.handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  ctx.handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+  await ctx.handlers.listInbox();
+  ctx.send.mockClear();
+  return { ...ctx, session };
+}
+
+function apiUsage(utilization: number, resetsAt: string | null) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ five_hour: { utilization, resets_at: resetsAt } }),
+  };
+}
+
+test('sendMessage blocks an exhausted account with a future reset without hitting the network', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2026-01-01T05:00:00.000Z',
+  });
+  const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(result).toMatchObject({ ok: false });
+  expect(result.ok ? '' : result.message).toMatch(/^CONTA_ESGOTADA: .*Libera às \d{2}:\d{2}\./);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+});
+
+test('sendMessage proceeds when the reset passed and fresh usage is below the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2025-12-31T23:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(10, '2026-01-01T05:00:00.000Z'));
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledTimes(1);
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'outra' }));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledTimes(2);
+});
+
+test('sendMessage still blocks when the reset passed but fresh usage is at the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2025-12-31T23:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(100, '2026-01-01T07:00:00.000Z'));
+  const result = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(result.ok ? '' : result.message).toMatch(/^CONTA_ESGOTADA: .*Libera às \d{2}:\d{2}\./);
+  expect(send).not.toHaveBeenCalled();
+  fetch.mockClear();
+  const again = await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' });
+  expect(again.ok).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test('getUsage clears the exhaustion when no window is at the limit', async () => {
+  const { handlers, fetch, send, session } = await exhaustAccount({
+    resetsAt: '2026-01-01T05:00:00.000Z',
+  });
+  fetch.mockResolvedValue(apiUsage(20, '2026-01-01T05:00:00.000Z'));
+  unwrap(await handlers.getUsage({ accountLabel: 'pessoal' }));
+  fetch.mockClear();
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
+  expect(fetch).not.toHaveBeenCalled();
+  expect(send).toHaveBeenCalledTimes(1);
+});
+
 test('getUsage falls back to the cached stream snapshot for claude', async () => {
   const { root, fetch, handlers } = await setup();
   const { session } = await seedSession(root);

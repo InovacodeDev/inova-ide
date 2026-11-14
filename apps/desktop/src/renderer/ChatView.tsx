@@ -107,7 +107,7 @@ export interface ChatViewProps {
   catalog: ProviderModels;
   readOnly?: boolean;
   queuedTurns?: readonly QueuedTurn[];
-  busyConflict?: { prompt: string; exhausted: boolean } | null;
+  busyConflict?: { prompt: string; exhausted: boolean; message?: string } | null;
   alternativeAccounts?: readonly AccountView[];
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onChangeMode: (mode: ExecutionMode) => void;
@@ -1206,7 +1206,7 @@ export function ChatView({
           <div className="chat-busy-banner" role="alert">
             <div className="chat-busy-text">
               {busyConflict.exhausted
-                ? 'Esta conta atingiu o limite de uso.'
+                ? (busyConflict.message ?? 'Esta conta atingiu o limite de uso.')
                 : 'Esta conta está ocupada em outra sessão.'}
             </div>
             <div className="chat-busy-actions">

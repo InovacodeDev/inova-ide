@@ -88,7 +88,7 @@ import type {
   VerificationCheck,
   Workspace,
 } from '@inova/core/types';
-import { UsageError, readUsage } from '@inova/core/usage';
+import { UsageError, exhaustionResetAt, exhaustionVerdict, readUsage } from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
 import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
 import type {
@@ -221,6 +221,11 @@ function importedProviderSessionIds(store: Store, projectId: string): Set<string
   );
 }
 
+function formatLocalTime(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function titleFromPrompt(prompt: string): string {
   return (prompt.split('\n')[0] ?? prompt).slice(0, TITLE_CHARS).trim();
 }
@@ -274,7 +279,7 @@ export function createHandlers(deps: HandlerDeps) {
   const turnQueue = createTurnQueue();
   const inboxMap = new Map<string, InboxItem>();
   const lastErrorBySession = new Map<string, string>();
-  const exhaustedAccounts = new Set<string>();
+  const exhaustedAccounts = new Map<string, string | null>();
   let uiFocus: { activeSessionId: string | null; windowFocused: boolean } = {
     activeSessionId: null,
     windowFocused: true,
@@ -344,10 +349,56 @@ export function createHandlers(deps: HandlerDeps) {
     deps.emitQueue?.(turnQueue.list());
   }
 
+  function exhaustionEntry(accountId: string): { resetsAt: string | null } | null {
+    const windows = streamUsage.get(accountId)?.windows ?? [];
+    if (exhaustedAccounts.has(accountId)) {
+      return { resetsAt: exhaustedAccounts.get(accountId) ?? exhaustionResetAt(windows) };
+    }
+    if (windows.some((window) => window.usedPercent >= 100)) {
+      return { resetsAt: exhaustionResetAt(windows) };
+    }
+    return null;
+  }
+
+  function isFutureReset(resetsAt: string | null): boolean {
+    return resetsAt !== null && Date.parse(resetsAt) > deps.usageDeps.now().getTime();
+  }
+
   function isAccountExhausted(accountId: string): boolean {
-    if (exhaustedAccounts.has(accountId)) return true;
-    const usage = streamUsage.get(accountId);
-    return usage?.windows.some((window) => window.usedPercent >= 100) ?? false;
+    const entry = exhaustionEntry(accountId);
+    if (entry === null) return false;
+    return entry.resetsAt === null || isFutureReset(entry.resetsAt);
+  }
+
+  function exhaustedMessage(resetsAt: string | null): string {
+    const time = resetsAt === null ? Number.NaN : Date.parse(resetsAt);
+    const release = Number.isNaN(time) ? '' : ` Libera às ${formatLocalTime(new Date(time))}.`;
+    return `CONTA_ESGOTADA: A conta atingiu o limite de uso.${release} Troque de conta ou execute handoff.`;
+  }
+
+  async function recheckExhaustion(input: {
+    account: Account;
+    resetsAt: string | null;
+  }): Promise<string | null> {
+    const { account, resetsAt } = input;
+    let fresh: UsageSnapshot | null = null;
+    try {
+      fresh = await readUsage({ account, deps: deps.usageDeps });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error;
+    }
+    const verdict = exhaustionVerdict({ resetsAt, now: deps.usageDeps.now(), fresh });
+    const apiData = fresh !== null && fresh.source !== 'unavailable' ? fresh : null;
+    if (verdict === 'available') {
+      exhaustedAccounts.delete(account.id);
+      if (apiData) streamUsage.set(account.id, apiData);
+      else streamUsage.delete(account.id);
+      return null;
+    }
+    const nextReset = apiData ? (exhaustionResetAt(apiData.windows) ?? resetsAt) : resetsAt;
+    exhaustedAccounts.set(account.id, nextReset);
+    if (apiData) streamUsage.set(account.id, apiData);
+    return exhaustedMessage(nextReset);
   }
 
   async function gitSummaryFor(cwd: string): Promise<string | undefined> {
@@ -659,14 +710,20 @@ export function createHandlers(deps: HandlerDeps) {
         source: 'stream',
         fetchedAt: deps.usageDeps.now().toISOString(),
       });
-      if (!event.windows.some((window) => window.usedPercent >= 100)) {
+      if (event.windows.some((window) => window.usedPercent >= 100)) {
+        exhaustedAccounts.set(owner.accountId, exhaustionResetAt(event.windows));
+      } else {
         exhaustedAccounts.delete(owner.accountId);
       }
     }
     if (event.kind === 'error') {
       lastErrorBySession.set(sessionId, event.message);
       if (owner && isRateLimitMessage(event.message)) {
-        exhaustedAccounts.add(owner.accountId);
+        const windows = streamUsage.get(owner.accountId)?.windows ?? [];
+        exhaustedAccounts.set(
+          owner.accountId,
+          exhaustionResetAt(windows) ?? exhaustedAccounts.get(owner.accountId) ?? null,
+        );
       }
     }
     if (event.kind === 'verification') {
@@ -1312,10 +1369,13 @@ export function createHandlers(deps: HandlerDeps) {
             'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
           );
         }
-        if (isAccountExhausted(account.id)) {
-          return fail(
-            'CONTA_ESGOTADA: A conta atingiu o limite de uso. Troque de conta ou execute handoff.',
-          );
+        const entry = exhaustionEntry(account.id);
+        let recovered = false;
+        if (entry !== null) {
+          if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
+          const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+          if (blocked !== null) return fail(blocked);
+          recovered = true;
         }
         const adapter = providers[account.provider];
         const baseEnv = await deps.baseEnv();
@@ -1331,7 +1391,7 @@ export function createHandlers(deps: HandlerDeps) {
               'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
             );
           }
-          return runTurn({
+          const started = await runTurn({
             sessionId,
             prompt,
             account,
@@ -1340,6 +1400,12 @@ export function createHandlers(deps: HandlerDeps) {
             baseEnv,
             extraDirs,
           });
+          if (recovered) {
+            void drainAccountQueue(account.id).catch((error: unknown) => {
+              console.error(`inova: failed to drain turn queue for ${account.id}`, error);
+            });
+          }
+          return started;
         });
       }),
     enqueueTurn: (input: unknown): Promise<Result<QueuedTurn>> =>
@@ -1770,7 +1836,14 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
         try {
-          return ok(await readUsage({ account, deps: deps.usageDeps }));
+          const snapshot = await readUsage({ account, deps: deps.usageDeps });
+          if (snapshot.source === 'api') {
+            streamUsage.set(account.id, snapshot);
+            if (!snapshot.windows.some((window) => window.usedPercent >= 100)) {
+              exhaustedAccounts.delete(account.id);
+            }
+          }
+          return ok(snapshot);
         } catch (error: unknown) {
           if (!(error instanceof Error)) throw error;
           const cached = streamUsage.get(account.id);
