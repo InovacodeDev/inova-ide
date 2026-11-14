@@ -4,12 +4,12 @@ import {
   mkdir,
   readFile,
   readlink,
-  rename,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
+import { writeAtomic } from './capabilities/file-edit.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
 
@@ -91,13 +91,6 @@ async function readOptionalFile(path: string): Promise<string | null> {
     if (isMissingFile(error)) return null;
     throw error;
   }
-}
-
-async function writeAtomic(file: string, content: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true });
-  const temp = `${file}.inova.tmp`;
-  await writeFile(temp, content, { mode: 0o600 });
-  await rename(temp, file);
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
