@@ -325,6 +325,17 @@ export function parseForkSession(
   };
 }
 
+export function parseRewindSession(
+  input: unknown,
+): { sessionId: string; turnIndex: number } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { turnIndex } = input;
+  if (typeof turnIndex !== 'number' || !Number.isInteger(turnIndex) || turnIndex < 0) {
+    return undefined;
+  }
+  return { sessionId: input['sessionId'], turnIndex };
+}
+
 export function parseImportSessions(
   input: unknown,
 ):

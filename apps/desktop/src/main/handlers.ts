@@ -27,6 +27,7 @@ import {
   buildHandoffContext,
   isRateLimitMessage,
   sliceTranscriptToTurn,
+  truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
 import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
@@ -131,6 +132,7 @@ import {
   parseRemoval,
   parseResolveComparison,
   parseRestoreCheckpoint,
+  parseRewindSession,
   parseSessionDelete,
   parseSettingsPatch,
   parseSessionRef,
@@ -1547,6 +1549,46 @@ export function createHandlers(deps: HandlerDeps) {
             await writeTranscriptEvents(resultSession.id, sliced.slicedEvents);
             return ok({ session: resultSession, strategy });
           }),
+      ),
+    rewindSession: (input: unknown): Promise<Result<{ text: string }>> =>
+      validated(input, parseRewindSession, ({ sessionId, turnIndex }) =>
+        serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de voltar a conversa.');
+          }
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          const project = store.projects.find((item) => item.id === session.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const account = resolveSessionAccount({ session, project, accounts: store.accounts });
+          if (!account) return fail('Conta da sessão não encontrada.');
+          const events = await readTranscriptEvents(sessionId);
+          const truncated = truncateTranscriptAtTurn(events, turnIndex);
+          if (!truncated) return fail('Turno não encontrado.');
+          const { kept, removedUserText, checkpointRef } = truncated;
+          const cwd = effectiveCwd(session, project);
+          if (checkpointRef !== null) {
+            await restoreCheckpoint({ repoPath: cwd, ref: checkpointRef, preserveFiles: [] });
+          }
+          const hasUserTurns = kept.some((event) => event.kind === 'user');
+          const handoffContext = hasUserTurns
+            ? buildHandoffContext({
+                events: kept,
+                gitSummary: await gitSummaryFor(cwd),
+                fromProvider: account.provider,
+                toProvider: account.provider,
+              })
+            : null;
+          await writeTranscriptEvents(sessionId, kept);
+          provisionalSessions.delete(sessionId);
+          await updateSession({
+            root: deps.root,
+            sessionId,
+            patch: { providerSessionId: null, handoffContext },
+          });
+          invalidateProjectFiles(sessionId);
+          return ok({ text: removedUserText });
+        }),
       ),
     listExternalSessions: (input: unknown): Promise<Result<ExternalSessionView[]>> =>
       validated(input, parseProjectRef, async ({ projectId }) => {

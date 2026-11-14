@@ -20,6 +20,7 @@ import {
   parseRemoval,
   parseResolveComparison,
   parseRestoreCheckpoint,
+  parseRewindSession,
   parseSessionDelete,
   parseSessionRef,
   parseSessionUpdate,
@@ -321,6 +322,14 @@ test('orchestration, fork, handoff, queue, and uiFocus validation', () => {
     copyWorktreeFiles: true,
   });
   expect(parseForkSession({ sessionId: 's1', turnIndex: -1 })).toBeUndefined();
+  expect(parseRewindSession({ sessionId: 's1', turnIndex: 2 })).toEqual({
+    sessionId: 's1',
+    turnIndex: 2,
+  });
+  expect(parseRewindSession({ sessionId: 's1', turnIndex: -1 })).toBeUndefined();
+  expect(parseRewindSession({ sessionId: 's1', turnIndex: 1.5 })).toBeUndefined();
+  expect(parseRewindSession({ sessionId: '', turnIndex: 0 })).toBeUndefined();
+  expect(parseRewindSession({ sessionId: 's1' })).toBeUndefined();
   const importInput = {
     projectId: 'p1',
     provider: 'claude',

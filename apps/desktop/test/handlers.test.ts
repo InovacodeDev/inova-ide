@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
+import { createCheckpoint } from '@inova/core/git-checkpoints';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
@@ -1210,6 +1211,166 @@ test('switchSessionAccount, handoffSession, and forkSession preserve context acr
   unwrap(await handlers.sendMessage({ sessionId: s2.id, prompt: 'Continuar' }));
   expect(send.mock.calls[0]?.[0].provider).toBe('codex');
   expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
+});
+
+async function seedRewindSession(root: string, handlers: ReturnType<typeof createHandlers>) {
+  const exec = promisify(execFile);
+  await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+  const project = await bindProject({ root, path: repoDir, accountLabel: 'pessoal' });
+  const session = await createSession({ root, projectId: project.id });
+  const turns = ['Turno 0', 'Turno 1'];
+  const refs: string[] = [];
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  for (const [index, text] of turns.entries()) {
+    await writeFile(join(repoDir, 'index.ts'), `export const v = ${index + 1};\n`);
+    const snapshot = await createCheckpoint({
+      repoPath: repoDir,
+      sessionId: session.id,
+      turnId: `u${index}`,
+    });
+    if (!snapshot) throw new Error('checkpoint not created');
+    refs.push(snapshot.ref);
+    handlers.handleChatEvent(session.id, {
+      kind: 'checkpoint',
+      turnId: `u${index}`,
+      ref: snapshot.ref,
+      createdAt: `t${index}`,
+      skippedLargeFiles: [],
+    });
+    handlers.handleChatEvent(session.id, { kind: 'user', text, at: `t${index}` });
+    handlers.handleChatEvent(session.id, {
+      kind: 'text',
+      blockId: `b${index}`,
+      text: `Resp ${index}`,
+    });
+    handlers.handleChatEvent(session.id, {
+      kind: 'done',
+      isError: false,
+      costUsd: null,
+      durationMs: 5,
+    });
+  }
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 99;\n');
+  await new Promise((r) => setTimeout(r, 40));
+  return { repoDir, session, refs };
+}
+
+test('rewindSession restores files, truncates the transcript, and resets agent memory', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(rewound).toEqual({ text: 'Turno 1' });
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(after).toEqual(
+    before.slice(
+      0,
+      before.findLastIndex((e) => e.kind === 'checkpoint'),
+    ),
+  );
+  expect(after.some((e) => e.kind === 'user' && e.text === 'Turno 1')).toBe(false);
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toContain('Turno 0');
+  expect(stored?.handoffContext).not.toContain('Turno 1');
+});
+
+test('rewindSession of the first turn clears the handoff context', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 0 }));
+
+  expect(rewound).toEqual({ text: 'Turno 0' });
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([
+    { kind: 'session', providerSessionId: 'cli-sess-1' },
+  ]);
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toBeNull();
+});
+
+test('rewindSession skips file restore when the turn has no checkpoint', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 1', at: 't1' });
+  await new Promise((r) => setTimeout(r, 40));
+  await writeFile(join(project.path, 'keep.txt'), 'untouched');
+
+  const rewound = unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(rewound).toEqual({ text: 'Turno 1' });
+  expect(await readFile(join(project.path, 'keep.txt'), 'utf8')).toBe('untouched');
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(after.filter((e) => e.kind === 'user')).toHaveLength(1);
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+});
+
+test('rewindSession fails without touching files or transcript while a turn is running', async () => {
+  const { root, handlers, running } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  running.add(session.id);
+
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 });
+
+  expect(result.ok).toBe(false);
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
+});
+
+test('rewindSession rejects an unknown turn and invalid input without side effects', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  expect((await handlers.rewindSession({ sessionId: session.id, turnIndex: 5 })).ok).toBe(false);
+  expect(await handlers.rewindSession({ sessionId: session.id, turnIndex: -1 })).toEqual(INVALID);
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+});
+
+test('rewindSession keeps transcript and session intact when the checkpoint restore fails', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedSession(root);
+  handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'checkpoint',
+    turnId: 'u0',
+    ref: 'refs/inova/checkpoints/missing/0',
+    createdAt: 't0',
+    skippedLargeFiles: [],
+  });
+  handlers.handleChatEvent(session.id, { kind: 'user', text: 'Turno 0', at: 't0' });
+  await new Promise((r) => setTimeout(r, 40));
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 0 })).rejects.toThrow();
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
 test('startComparison runs two isolated sessions in parallel, computes diffs, and applies winner', async () => {
