@@ -23,20 +23,21 @@ export function ModelsSection(props: {
 }) {
   const { settings, defaultModes, onUpdate, onSetDefaultMode } = props;
   return (
-    <SettingGroup>
+    <>
       {PROVIDERS.map((provider) => {
         const catalog = PROVIDER_MODELS[provider];
         const modes = PROVIDER_MODES[provider];
         const current = settings.models[provider];
+        const name = PROVIDER_NAME[provider];
         return (
-          <SettingRow
+          <SettingGroup
             key={provider}
-            title={PROVIDER_NAME[provider]}
-            description="Usado quando a sessão não escolhe modelo, esforço ou modo."
+            title={name}
+            description="Padrões usados quando a sessão não escolhe outro valor."
           >
-            <div className="settings-model-defaults">
+            <SettingRow title="Modelo" description="Modelo que inicia novas sessões.">
               <PlatformSelect
-                ariaLabel={`Modelo padrão: ${PROVIDER_NAME[provider]}`}
+                ariaLabel={`Modelo padrão: ${name}`}
                 value={current.model ?? ''}
                 options={resolveModelOptions({ model: current.model, catalog }).map((option) => ({
                   value: option.id,
@@ -49,8 +50,10 @@ export function ModelsSection(props: {
                   })
                 }
               />
+            </SettingRow>
+            <SettingRow title="Esforço" description="Quanto o modelo raciocina antes de responder.">
               <PlatformSelect
-                ariaLabel={`Esforço padrão: ${PROVIDER_NAME[provider]}`}
+                ariaLabel={`Esforço padrão: ${name}`}
                 value={current.effort}
                 options={catalog.efforts.map((level) => ({
                   value: level,
@@ -60,8 +63,10 @@ export function ModelsSection(props: {
                   onUpdate({ models: { [provider]: { ...current, effort: value as EffortLevel } } })
                 }
               />
+            </SettingRow>
+            <SettingRow title="Modo" description="Quanto o agente pode agir sem pedir aprovação.">
               <PlatformSelect
-                ariaLabel={`Modo padrão: ${PROVIDER_NAME[provider]}`}
+                ariaLabel={`Modo padrão: ${name}`}
                 value={effectiveModeForSession({ provider, defaultModes })}
                 options={modes.options.map((option) => ({
                   value: option.id,
@@ -73,10 +78,10 @@ export function ModelsSection(props: {
                   if (chosen) onSetDefaultMode(provider, chosen.id);
                 }}
               />
-            </div>
-          </SettingRow>
+            </SettingRow>
+          </SettingGroup>
         );
       })}
-    </SettingGroup>
+    </>
   );
 }

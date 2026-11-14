@@ -201,19 +201,17 @@
   height: 34px;
   padding: 0;
   border-radius: var(--radius);
-  border: 1px solid var(--border-control);
-  background: var(--surface);
+  border: 0;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
   transition:
     background 0.12s ease,
-    border-color 0.12s ease,
     color 0.12s ease;
 }
 
 .icon-btn:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: var(--border-strong);
   color: var(--text);
 }
 
