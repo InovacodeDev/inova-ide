@@ -6,9 +6,11 @@ import {
   backupFile,
   CapabilityFileError,
   setTomlArrayMembership,
+  setTomlSkillConfig,
   setTomlTableKey,
   tomlTableHeader,
   updateJsonFile,
+  updateTomlFile,
 } from './file-edit.js';
 
 let dir: string;
@@ -149,5 +151,36 @@ describe('setTomlArrayMembership', () => {
     expect(() =>
       setTomlArrayMembership({ ...base, toml: multi, member: 'b', present: true }),
     ).toThrow(CapabilityFileError);
+  });
+});
+
+describe('setTomlSkillConfig', () => {
+  it('adds a block when disabling and removes only that block when enabling', () => {
+    const base = '[a]\nx = 1\n';
+    const withA = setTomlSkillConfig({ toml: base, name: 'a', enabled: false });
+    expect(withA).toBe(`${base}\n[[skills.config]]\nname = "a"\nenabled = false\n`);
+    const withBoth = setTomlSkillConfig({ toml: withA, name: 'b', enabled: false });
+    expect(withBoth).toContain('name = "b"');
+    const onlyB = setTomlSkillConfig({ toml: withBoth, name: 'a', enabled: true });
+    expect(onlyB).not.toContain('name = "a"');
+    expect(onlyB).toContain('name = "b"');
+    expect(setTomlSkillConfig({ toml: withA, name: 'a', enabled: true })).toBe(base);
+  });
+
+  it('does not duplicate an existing block', () => {
+    const once = setTomlSkillConfig({ toml: '', name: 'a', enabled: false });
+    expect(setTomlSkillConfig({ toml: once, name: 'a', enabled: false })).toBe(once);
+  });
+});
+
+describe('updateTomlFile', () => {
+  it('backs up and rewrites the file', async () => {
+    const file = join(dir, 'c.toml');
+    const backupRoot = join(dir, 'bk');
+    await writeFile(file, 'a = 1\n');
+    await updateTomlFile({ file, backupRoot, update: (toml) => `${toml}b = 2\n` });
+    expect(await readFile(file, 'utf8')).toBe('a = 1\nb = 2\n');
+    const [name] = await readdir(backupRoot);
+    expect(await readFile(join(backupRoot, name ?? ''), 'utf8')).toBe('a = 1\n');
   });
 });

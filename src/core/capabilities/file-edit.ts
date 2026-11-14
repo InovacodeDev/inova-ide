@@ -184,3 +184,63 @@ export function setTomlArrayMembership(input: {
   lines.splice(section.header + 1, 0, render([input.member]));
   return lines.join('\n');
 }
+
+const SKILL_CONFIG_HEADER = '[[skills.config]]';
+
+function findSkillConfigBlock(lines: readonly string[], name: string): Section | null {
+  const namePattern = /^\s*name\s*=\s*"((?:[^"\\]|\\.)*)"/;
+  let cursor = 0;
+  while (cursor < lines.length) {
+    if ((lines[cursor] ?? '').trim() !== SKILL_CONFIG_HEADER) {
+      cursor += 1;
+      continue;
+    }
+    let end = cursor + 1;
+    while (end < lines.length && !(lines[end] ?? '').trimStart().startsWith('[')) end += 1;
+    for (let index = cursor + 1; index < end; index += 1) {
+      const match = namePattern.exec(lines[index] ?? '');
+      if (match && JSON.parse(`"${match[1] ?? ''}"`) === name) return { header: cursor, end };
+    }
+    cursor = end;
+  }
+  return null;
+}
+
+export function setTomlSkillConfig(input: {
+  toml: string;
+  name: string;
+  enabled: boolean;
+}): string {
+  const lines = input.toml.split('\n');
+  const block = findSkillConfigBlock(lines, input.name);
+  if (input.enabled) {
+    if (!block) return input.toml;
+    lines.splice(block.header, block.end - block.header);
+    return lines.join('\n');
+  }
+  if (!block) {
+    return appendBlock(
+      input.toml,
+      `${SKILL_CONFIG_HEADER}\nname = ${JSON.stringify(input.name)}\nenabled = false\n`,
+    );
+  }
+  for (let index = block.header + 1; index < block.end; index += 1) {
+    const match = /^(\s*)enabled\s*=/.exec(lines[index] ?? '');
+    if (match) {
+      lines[index] = `${match[1] ?? ''}enabled = false`;
+      return lines.join('\n');
+    }
+  }
+  lines.splice(block.header + 1, 0, 'enabled = false');
+  return lines.join('\n');
+}
+
+export async function updateTomlFile(input: {
+  file: string;
+  backupRoot: string;
+  update: (toml: string) => string;
+}): Promise<void> {
+  const raw = (await readIfExists(input.file)) ?? '';
+  await backupFile({ file: input.file, backupRoot: input.backupRoot });
+  await writeAtomic(input.file, input.update(raw));
+}
