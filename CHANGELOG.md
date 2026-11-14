@@ -8,7 +8,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ### Adicionado
 
+- Chat rico com cartões especializados por ferramenta (`edit`, `shell`, `lookup`, `todo` e genérico), bloco recolhível de raciocínio, estado vazio com chips de início rápido e barra de status viva com cronômetro.
+- Topo unificado com abas integradas no cabeçalho, cabeçalho de sessão em linha única, trilho lateral fixo e inspector lateral acoplável com abas (`Contexto`, `Git`, `Subagentes` e `Sessão`).
+- Aba `Git` no inspector e modal de diff dividido por arquivo/hunk com reversão granular por arquivo ou em lote.
+- Paleta de comandos (`⌘P` / `Ctrl+P` e botão `Comandos` no topo) para navegar entre sessões, abrir novas sessões em projetos e trocar modelo, modo ou visão.
 - Ao clicar em "Reiniciar para atualizar", um cartão com barra de progresso mostra cada etapa da instalação (preparar, atualizar o Homebrew, baixar e instalar, finalizar, reiniciar).
+
+### Alterado
+
+- Caixa de entrada na barra lateral redesenhada com cabeçalho compacto, contadores nos filtros, destaque de severidade/leitura nos cartões e badge de mensagens não lidas no trilho recolhido.
 
 ## [0.6.1] - 2026-11-14
 
