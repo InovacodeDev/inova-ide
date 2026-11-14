@@ -124,6 +124,7 @@ export interface TruncatedTranscript {
   kept: ChatEvent[];
   removedUserText: string;
   checkpointRef: string | null;
+  skippedLargeFiles: string[];
 }
 
 export function truncateTranscriptAtTurn(
@@ -148,6 +149,7 @@ export function truncateTranscriptAtTurn(
     kept: [...events.slice(0, cut), ...earlierFeedback],
     removedUserText: userEvent.text,
     checkpointRef: hasCheckpoint ? prevEvent.ref : null,
+    skippedLargeFiles: hasCheckpoint ? [...prevEvent.skippedLargeFiles] : [],
   };
 }
 

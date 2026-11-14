@@ -128,6 +128,21 @@ describe('handoff', () => {
       expect(result?.checkpointRef).toBe('refs/inova/checkpoints/s/1');
     });
 
+    test('returns the large files the checkpoint skipped', () => {
+      const events: ChatEvent[] = [
+        {
+          kind: 'checkpoint',
+          turnId: 'u0',
+          ref: 'refs/inova/checkpoints/s/0',
+          createdAt: 't0',
+          skippedLargeFiles: ['big.bin'],
+        },
+        { kind: 'user', text: 'Turno 0', at: 't0' },
+      ];
+      expect(truncateTranscriptAtTurn(events, 0)?.skippedLargeFiles).toEqual(['big.bin']);
+      expect(truncateTranscriptAtTurn(withCheckpoints, 0)?.skippedLargeFiles).toEqual([]);
+    });
+
     test('turn 0 keeps nothing', () => {
       const result = truncateTranscriptAtTurn(withCheckpoints, 0);
       expect(result?.kept).toEqual([]);

@@ -1213,7 +1213,11 @@ test('switchSessionAccount, handoffSession, and forkSession preserve context acr
   expect(send.mock.calls[0]?.[0].spec.args.join(' ')).toContain('Contexto de handoff');
 });
 
-async function seedRewindSession(root: string, handlers: ReturnType<typeof createHandlers>) {
+async function seedRewindSession(
+  root: string,
+  handlers: ReturnType<typeof createHandlers>,
+  options: { largeFile?: string } = {},
+) {
   const exec = promisify(execFile);
   await addAccount({ root, provider: 'claude', label: 'pessoal' });
   const repoDir = await tmp();
@@ -1227,6 +1231,9 @@ async function seedRewindSession(root: string, handlers: ReturnType<typeof creat
   const session = await createSession({ root, projectId: project.id });
   const turns = ['Turno 0', 'Turno 1'];
   const refs: string[] = [];
+  if (options.largeFile !== undefined) {
+    await writeFile(join(repoDir, options.largeFile), 'x'.repeat(64));
+  }
   handlers.handleChatEvent(session.id, { kind: 'session', providerSessionId: 'cli-sess-1' });
   for (const [index, text] of turns.entries()) {
     await writeFile(join(repoDir, 'index.ts'), `export const v = ${index + 1};\n`);
@@ -1234,6 +1241,7 @@ async function seedRewindSession(root: string, handlers: ReturnType<typeof creat
       repoPath: repoDir,
       sessionId: session.id,
       turnId: `u${index}`,
+      ...(options.largeFile === undefined ? {} : { maxFileBytes: 40 }),
     });
     if (!snapshot) throw new Error('checkpoint not created');
     refs.push(snapshot.ref);
@@ -1242,7 +1250,7 @@ async function seedRewindSession(root: string, handlers: ReturnType<typeof creat
       turnId: `u${index}`,
       ref: snapshot.ref,
       createdAt: `t${index}`,
-      skippedLargeFiles: [],
+      skippedLargeFiles: snapshot.skippedLargeFiles,
     });
     handlers.handleChatEvent(session.id, { kind: 'user', text, at: `t${index}` });
     handlers.handleChatEvent(session.id, {
@@ -1361,6 +1369,33 @@ test('rewindSession fails without touching files or transcript while a turn is r
   expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
+test('rewindSession keeps files the checkpoint skipped for being too large', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers, { largeFile: 'big.bin' });
+
+  unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  expect(await readFile(join(repoDir, 'big.bin'), 'utf8')).toBe('x'.repeat(64));
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 2;\n');
+});
+
+test('rewindSession refuses while another running session shares the working tree', async () => {
+  const { root, handlers, running } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const other = await createSession({ root, projectId: session.projectId });
+  running.add(other.id);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 });
+
+  expect(result).toEqual({
+    ok: false,
+    message: 'Outra sessão está rodando neste repositório. Pare-a antes de retroceder.',
+  });
+  expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+});
+
 test('recordFeedback appends a feedback event to the transcript and validates input', async () => {
   const { root, handlers } = await setup();
   const { session } = await seedRewindSession(root, handlers);
@@ -1421,8 +1456,12 @@ test('rewindSession keeps transcript and session intact when the checkpoint rest
   await new Promise((r) => setTimeout(r, 40));
   const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
 
-  await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 0 })).rejects.toThrow();
+  const result = await handlers.rewindSession({ sessionId: session.id, turnIndex: 0 });
 
+  expect(result).toEqual({
+    ok: false,
+    message: 'O checkpoint deste turno não existe mais. Não é possível desfazer os arquivos.',
+  });
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
   const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
   expect(stored?.providerSessionId).toBe('cli-sess-1');
@@ -1822,6 +1861,43 @@ test('sendMessage passes a project command through literally for a claude sessio
 
   const args = send.mock.calls[0]?.[0].spec.args ?? [];
   expect(args.at(-1)).toBe('/minha-skill arg');
+});
+
+test('sendMessage expands a gemini project command for a claude session', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.gemini', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.gemini', 'commands', 'gem.toml'),
+    'prompt = "Gemini faz: $ARGUMENTS"\n',
+  );
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/gem arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.at(-1)).toBe('Gemini faz: arg');
+});
+
+test('sendMessage expands a claude project command when a handoff prefix wraps the prompt', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  await updateSession({
+    root,
+    sessionId: session.id,
+    patch: { handoffContext: 'Contexto anterior' },
+  });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const last = (send.mock.calls[0]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(last).toContain('Contexto anterior');
+  expect(last).toContain('Faça isto: arg');
+  expect(last).not.toContain('/minha-skill');
 });
 
 test('clearSession empties the transcript and resets agent memory', async () => {

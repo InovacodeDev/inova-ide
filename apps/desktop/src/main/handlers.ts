@@ -7,6 +7,7 @@ import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prom
 import { listProjectCommands } from '@inova/core/commands';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
 import {
+  checkpointExists,
   createCheckpoint,
   removeSessionCheckpoints,
   restoreCheckpoint,
@@ -787,12 +788,19 @@ export function createHandlers(deps: HandlerDeps) {
     return ok(started);
   }
 
-  async function expandProjectCommand(projectPath: string, prompt: string): Promise<string> {
+  async function expandProjectCommand(input: {
+    projectPath: string;
+    prompt: string;
+    keepClaudeLiteral: boolean;
+  }): Promise<string> {
+    const { projectPath, prompt, keepClaudeLiteral } = input;
     const parsed = splitLeadingSlash(prompt);
     if (parsed === null) return prompt;
     const commands = await listProjectCommands(projectPath);
     const command = commands.find((item) => item.name === parsed.name);
-    return command === undefined ? prompt : expandCommandPrompt(command.body, parsed.rest);
+    if (command === undefined) return prompt;
+    if (keepClaudeLiteral && command.source === 'claude') return prompt;
+    return expandCommandPrompt(command.body, parsed.rest);
   }
 
   async function runTurn(input: {
@@ -822,8 +830,11 @@ export function createHandlers(deps: HandlerDeps) {
     });
     const persistNow = account.provider === 'claude' && newId !== null;
     const handoffPrefix = session.handoffContext?.trim();
-    const commandPrompt =
-      account.provider === 'claude' ? prompt : await expandProjectCommand(project.path, prompt);
+    const commandPrompt = await expandProjectCommand({
+      projectPath: project.path,
+      prompt,
+      keepClaudeLiteral: account.provider === 'claude' && !handoffPrefix,
+    });
     const promptForCli = handoffPrefix
       ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
       : commandPrompt;
@@ -1582,11 +1593,31 @@ export function createHandlers(deps: HandlerDeps) {
           const events = await readTranscriptEvents(sessionId);
           const truncated = truncateTranscriptAtTurn(events, turnIndex);
           if (!truncated) return fail('Turno não encontrado.');
-          const { kept, removedUserText, checkpointRef } = truncated;
+          const { kept, removedUserText, checkpointRef, skippedLargeFiles } = truncated;
           const cwd = effectiveCwd(session, project);
+          const sharesRunningTree = sessionsOf(store).some((other) => {
+            if (other.id === sessionId || !deps.chat.isRunning(other.id)) return false;
+            const otherProject = store.projects.find((item) => item.id === other.projectId);
+            return otherProject !== undefined && effectiveCwd(other, otherProject) === cwd;
+          });
+          if (sharesRunningTree) {
+            return fail('Outra sessão está rodando neste repositório. Pare-a antes de retroceder.');
+          }
+          if (
+            checkpointRef !== null &&
+            !(await checkpointExists({ repoPath: cwd, ref: checkpointRef }))
+          ) {
+            return fail(
+              'O checkpoint deste turno não existe mais. Não é possível desfazer os arquivos.',
+            );
+          }
           try {
             if (checkpointRef !== null) {
-              await restoreCheckpoint({ repoPath: cwd, ref: checkpointRef, preserveFiles: [] });
+              await restoreCheckpoint({
+                repoPath: cwd,
+                ref: checkpointRef,
+                preserveFiles: skippedLargeFiles,
+              });
             }
             const hasUserTurns = kept.some((event) => event.kind === 'user');
             const handoffContext = hasUserTurns
