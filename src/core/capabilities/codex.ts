@@ -26,7 +26,7 @@ const COMMAND_TIMEOUT_MS = 30_000;
 const NOT_FOUND_MESSAGE = 'codex não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Codex.';
 const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Codex.';
-const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Codex.';
+const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Codex';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -118,7 +118,9 @@ function skillDescription(markdown: string): string | null {
       .exec(line)?.[1]
       ?.trim()
       .replace(/^(["'])(.*)\1$/, '$2');
-    if (value !== undefined) return value === '' ? null : value;
+    if (value === undefined) continue;
+    // REGEX: YAML block scalar indicator (">" or "|" with optional chomping/indent marks)
+    return value === '' || /^[>|][+-]?\d*$/.test(value) ? null : value;
   }
   return null;
 }
@@ -178,16 +180,11 @@ async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
 
 async function skillCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
   try {
-    return category({
-      kind: 'skill',
-      items: await listSkills(ctx),
-      error: SKILL_LIST_FAILED_MESSAGE,
-    });
+    return { kind: 'skill', items: await listSkills(ctx), error: null };
   } catch (error: unknown) {
-    if (error instanceof Error) {
-      return category({ kind: 'skill', items: null, error: SKILL_LIST_FAILED_MESSAGE });
-    }
-    throw error;
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
   }
 }
 

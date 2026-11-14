@@ -144,6 +144,28 @@ describe('codexCapabilities.list skills', () => {
     });
   });
 
+  it('returns a null description for YAML block scalars', async () => {
+    await withAccountDir(async (ctx) => {
+      const dir = join(ctx.account.homeDir, 'skills');
+      await writeSkill({ dir, name: 'folded', body: '---\ndescription: >\n  long text\n---\n' });
+      await writeSkill({ dir, name: 'literal', body: '---\ndescription: |-\n  long text\n---\n' });
+      const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(skills.map((item) => [item.id, item.description])).toEqual([
+        ['folded', null],
+        ['literal', null],
+      ]);
+    });
+  });
+
+  it('includes the error code when a skill directory cannot be read', async () => {
+    await withAccountDir(async (ctx) => {
+      await writeFile(join(ctx.account.homeDir, 'skills'), 'not a directory');
+      expect((await categoryOf(ctx, 'skill'))?.error).toBe(
+        'Não foi possível listar as skills do Codex (ENOTDIR).',
+      );
+    });
+  });
+
   it('reads back as disabled a skill whose name needs TOML escaping', async () => {
     await withAccountDir(async (ctx) => {
       const name = 'we"ird\\skill';
