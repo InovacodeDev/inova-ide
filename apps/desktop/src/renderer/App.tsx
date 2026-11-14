@@ -134,7 +134,8 @@ export function App() {
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
   const { warning, dismiss, guard, call, warn } = useWarning();
-  const updates = useUpdates();
+  const updates = useUpdates(call);
+  const [confirmUpdateRestart, setConfirmUpdateRestart] = useState(false);
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
@@ -1036,6 +1037,7 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
+  const runningCount = Object.values(chats).filter((chat) => chat.running).length;
   const mainClassName = sidebarCollapsed ? 'main rail-offset' : 'main';
   const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
@@ -1116,7 +1118,19 @@ export function App() {
         </div>
       )}
       <Header
-        runningCount={Object.values(chats).filter((chat) => chat.running).length}
+        runningCount={runningCount}
+        update={
+          updates.updateAvailable && updates.info?.latest
+            ? {
+                latest: updates.info.latest,
+                installing: updates.installing,
+                onInstall: () => {
+                  if (runningCount > 0) setConfirmUpdateRestart(true);
+                  else void updates.install();
+                },
+              }
+            : null
+        }
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
       />
       <div className="app-body">
@@ -1479,6 +1493,18 @@ export function App() {
           onSubmitCode={async (input) => {
             const res = await call(() => window.inova.submitLoginCode(input));
             return res !== undefined;
+          }}
+        />
+      )}
+      {confirmUpdateRestart && (
+        <ConfirmModal
+          title="Reiniciar para atualizar?"
+          description={`${runningCount === 1 ? 'Há 1 sessão executando' : `Há ${runningCount} sessões executando`}. Reiniciar interrompe o turno em andamento.`}
+          confirmLabel="Atualizar e reiniciar"
+          onCancel={() => setConfirmUpdateRestart(false)}
+          onConfirm={() => {
+            setConfirmUpdateRestart(false);
+            void updates.install();
           }}
         />
       )}

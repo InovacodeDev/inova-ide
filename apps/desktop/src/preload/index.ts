@@ -32,6 +32,7 @@ const api: InovaApi = {
   openDataFolder: () => ipcRenderer.invoke(CHANNELS.openDataFolder),
   getAppInfo: () => ipcRenderer.invoke(CHANNELS.getAppInfo),
   checkForUpdate: () => ipcRenderer.invoke(CHANNELS.checkForUpdate),
+  installUpdate: () => ipcRenderer.invoke(CHANNELS.installUpdate),
   openExternalUrl: (input) => ipcRenderer.invoke(CHANNELS.openExternalUrl, input),
   onUpdateAvailable: (callback) => subscribe(CHANNELS.updateAvailable, callback),
   deleteSession: (input) => ipcRenderer.invoke(CHANNELS.deleteSession, input),

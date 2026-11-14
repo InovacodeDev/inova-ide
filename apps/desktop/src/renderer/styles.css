@@ -128,6 +128,32 @@ a:hover {
   background: var(--accent);
 }
 
+.app-update-btn {
+  gap: 6px;
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.btn.app-update-btn:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+.app-update-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: app-spin 0.85s linear infinite;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-body {
   position: relative;
   flex: 1;

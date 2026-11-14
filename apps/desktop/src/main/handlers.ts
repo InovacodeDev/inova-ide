@@ -167,6 +167,7 @@ export interface HandlerDeps {
   openPath?: (path: string) => Promise<void>;
   openExternal?: (url: string) => Promise<void>;
   updates?: { current: string; check: () => Promise<Result<UpdateInfo>> };
+  installUpdate?: () => Promise<Result<null>>;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
   pickFolder: () => Promise<string | null>;
   pickAttachments: (kind: AttachmentKind) => Promise<PickedAttachment[]>;
@@ -1265,6 +1266,10 @@ export function createHandlers(deps: HandlerDeps) {
     checkForUpdate: (): Promise<Result<UpdateInfo>> =>
       guarded(async () =>
         deps.updates ? deps.updates.check() : fail('Verificação de atualização indisponível.'),
+      ),
+    installUpdate: (): Promise<Result<null>> =>
+      guarded(async () =>
+        deps.installUpdate ? deps.installUpdate() : fail('Atualização automática indisponível.'),
       ),
     openExternalUrl: (input: unknown): Promise<Result<null>> =>
       validated(input, parseExternalUrl, async (url) => {

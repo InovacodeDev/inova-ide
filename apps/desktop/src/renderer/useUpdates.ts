@@ -6,9 +6,11 @@ import {
   shouldShowUpdateToast,
   shouldShowWhatsNew,
 } from './update-state';
+import type { WarningCall } from './useWarning';
 
-export function useUpdates() {
+export function useUpdates(call: WarningCall) {
   const [version, setVersion] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(UPDATE_DISMISSED_KEY));
   const [changelog, setChangelog] = useState<{ whatsNew: boolean } | null>(null);
@@ -39,9 +41,17 @@ export function useUpdates() {
     setDismissed(info.latest);
   }, [info]);
 
+  const install = useCallback(async () => {
+    setInstalling(true);
+    const result = await call(() => window.inova.installUpdate());
+    if (!result) setInstalling(false);
+  }, [call]);
+
   return {
     version,
     info,
+    installing,
+    install,
     updateAvailable: info?.available === true,
     toastVisible: shouldShowUpdateToast({ info, dismissed }),
     dismissToast,
