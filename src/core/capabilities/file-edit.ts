@@ -231,8 +231,13 @@ export function setTomlArrayMembership(input: {
 
 const SKILL_CONFIG_HEADER = '[[skills.config]]';
 
-function findSkillConfigBlock(lines: readonly string[], name: string): Section | null {
+interface SkillConfigBlock extends Section {
+  name: string;
+}
+
+function skillConfigBlocks(lines: readonly string[]): SkillConfigBlock[] {
   const namePattern = /^\s*name\s*=\s*"((?:[^"\\]|\\.)*)"/;
+  const blocks: SkillConfigBlock[] = [];
   let cursor = 0;
   while (cursor < lines.length) {
     if ((lines[cursor] ?? '').trim() !== SKILL_CONFIG_HEADER) {
@@ -243,13 +248,31 @@ function findSkillConfigBlock(lines: readonly string[], name: string): Section |
     while (end < lines.length && !(lines[end] ?? '').trimStart().startsWith('[')) end += 1;
     for (let index = cursor + 1; index < end; index += 1) {
       const match = namePattern.exec(lines[index] ?? '');
-      if (match && parseTomlBasicString(SKILL_CONFIG_HEADER, `"${match[1] ?? ''}"`) === name) {
-        return { header: cursor, end };
+      if (match) {
+        const name = parseTomlBasicString(SKILL_CONFIG_HEADER, `"${match[1] ?? ''}"`);
+        blocks.push({ header: cursor, end, name });
+        break;
       }
     }
     cursor = end;
   }
-  return null;
+  return blocks;
+}
+
+function findSkillConfigBlock(lines: readonly string[], name: string): Section | null {
+  return skillConfigBlocks(lines).find((block) => block.name === name) ?? null;
+}
+
+export function listDisabledSkillConfigs(toml: string): Set<string> {
+  const lines = toml.split('\n');
+  const disabled = skillConfigBlocks(lines)
+    .filter((block) =>
+      lines
+        .slice(block.header + 1, block.end)
+        .some((line) => /^\s*enabled\s*=\s*false\b/.test(line)),
+    )
+    .map((block) => block.name);
+  return new Set(disabled);
 }
 
 export function setTomlSkillConfig(input: {

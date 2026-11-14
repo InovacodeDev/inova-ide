@@ -144,6 +144,16 @@ describe('codexCapabilities.list skills', () => {
     });
   });
 
+  it('reads back as disabled a skill whose name needs TOML escaping', async () => {
+    await withAccountDir(async (ctx) => {
+      const name = 'we"ird\\skill';
+      await writeSkill({ dir: join(ctx.account.homeDir, 'skills'), name, body: '# x' });
+      await codexCapabilities.setEnabled({ ctx, ref: { kind: 'skill', id: name }, enabled: false });
+      const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(skills.map((item) => [item.id, item.enabled])).toEqual([[name, false]]);
+    });
+  });
+
   it('lists nothing and no error when config.toml and skill dirs are missing', async () => {
     await withAccountDir(async (ctx) => {
       expect(await categoryOf(ctx, 'skill')).toMatchObject({ items: [], error: null });

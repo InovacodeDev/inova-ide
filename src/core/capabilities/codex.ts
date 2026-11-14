@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { CommandRunner } from '../providers.js';
 import {
   isMissingFile,
+  listDisabledSkillConfigs,
   readIfExists,
   serialize,
   setTomlSkillConfig,
@@ -107,31 +108,6 @@ function category(input: {
     : { kind: input.kind, items: input.items, error: null };
 }
 
-function disabledSkillNames(toml: string): Set<string> {
-  const names = new Set<string>();
-  let inBlock = false;
-  let name: string | null = null;
-  let off = false;
-  const flush = (): void => {
-    if (inBlock && name !== null && off) names.add(name);
-    name = null;
-    off = false;
-  };
-  for (const line of toml.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('[')) {
-      flush();
-      inBlock = trimmed === '[[skills.config]]';
-    } else if (inBlock) {
-      // REGEX: name = "<basic string>" key inside a [[skills.config]] block
-      name = /^name\s*=\s*"((?:[^"\\]|\\.)*)"/.exec(trimmed)?.[1] ?? name;
-      off = off || /^enabled\s*=\s*false\b/.test(trimmed);
-    }
-  }
-  flush();
-  return names;
-}
-
 function skillDescription(markdown: string): string | null {
   const lines = markdown.split('\n').map((line) => line.trimEnd());
   if (lines[0] !== '---') return null;
@@ -178,7 +154,7 @@ async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
     readIfExists(join(ctx.account.homeDir, 'config.toml')),
     ...dirs.map(skillsIn),
   ]);
-  const off = disabledSkillNames(config ?? '');
+  const off = listDisabledSkillConfigs(config ?? '');
   const seen = new Set<string>();
   return perDir.flat().flatMap((skill): CapabilityItem[] => {
     if (seen.has(skill.id)) return [];
