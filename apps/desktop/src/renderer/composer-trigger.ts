@@ -1,4 +1,5 @@
-import { expandCommandPrompt } from '@inova/core/command-prompt';
+import { splitLeadingSlash } from '@inova/core/command-prompt';
+import type { NativeSlashCommand } from '@inova/core/slash-commands';
 import type { ProjectCommandView } from '../shared/api';
 
 export type ComposerTrigger =
@@ -194,16 +195,49 @@ export function applyFileSuggestion(input: {
 export function applyCommandSuggestion(input: {
   text: string;
   trigger: ComposerTrigger;
-  command: ProjectCommandView;
+  command: Pick<ProjectCommandView, 'name'>;
 }): { text: string; cursor: number } {
   const { text, trigger, command } = input;
-  const expanded = expandCommandPrompt(command.body, '');
+  const tag = `/${command.name} `;
   const before = text.slice(0, trigger.start);
   const after = text.slice(trigger.end);
   return {
-    text: `${before}${expanded}${after}`,
-    cursor: before.length + expanded.length,
+    text: `${before}${tag}${after}`,
+    cursor: before.length + tag.length,
   };
+}
+
+export type SlashSuggestion =
+  | { kind: 'native'; command: NativeSlashCommand }
+  | { kind: 'project'; command: ProjectCommandView };
+
+export function filterSlashSuggestions(input: {
+  native: readonly NativeSlashCommand[];
+  project: readonly ProjectCommandView[];
+  query: string;
+}): SlashSuggestion[] {
+  const normalized = input.query.trim().toLowerCase();
+  const native = input.native.filter(
+    (command) =>
+      normalized === '' ||
+      command.name.toLowerCase().includes(normalized) ||
+      command.description.toLowerCase().includes(normalized),
+  );
+  return [
+    ...native.map((command): SlashSuggestion => ({ kind: 'native', command })),
+    ...filterCommands(input.project, input.query).map((command): SlashSuggestion => ({
+      kind: 'project',
+      command,
+    })),
+  ];
+}
+
+export function parseLeadingSlashTag(input: {
+  text: string;
+  known: ReadonlySet<string>;
+}): { name: string; rest: string } | null {
+  const parsed = splitLeadingSlash(input.text);
+  return parsed !== null && input.known.has(parsed.name) ? parsed : null;
 }
 
 export function filterCommands(

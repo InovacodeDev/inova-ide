@@ -540,6 +540,12 @@ export function App() {
     activeChatRef.current?.setComposerText(result.value.text);
   };
 
+  const clearConversation = async (sessionId: string) => {
+    const result = await call(() => window.inova.clearSession({ sessionId }));
+    if (!result) return;
+    await loadChat(sessionId, 'replace');
+  };
+
   const regenerateLastTurn = async (input: { sessionId: string; extraDirs: string[] }) => {
     const { sessionId, extraDirs } = input;
     const userTurns = (chats[sessionId]?.items ?? []).filter((item) => item.type === 'user');
@@ -1292,6 +1298,7 @@ export function App() {
                   onRegenerate={(extraDirs) =>
                     void regenerateLastTurn({ sessionId: tab.sessionId, extraDirs })
                   }
+                  onClearSession={() => void clearConversation(tab.sessionId)}
                   onFeedback={({ turnIndex, value }) =>
                     void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
                   }

@@ -71,6 +71,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.handoffSession, (input) => handlers.handoffSession(input));
   handle(CHANNELS.forkSession, (input) => handlers.forkSession(input));
   handle(CHANNELS.rewindSession, (input) => handlers.rewindSession(input));
+  handle(CHANNELS.clearSession, (input) => handlers.clearSession(input));
   handle(CHANNELS.recordFeedback, (input) => handlers.recordFeedback(input));
   handle(CHANNELS.listExternalSessions, (input) => handlers.listExternalSessions(input));
   handle(CHANNELS.importSessions, (input) => handlers.importSessions(input));

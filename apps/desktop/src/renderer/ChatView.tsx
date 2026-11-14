@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
+import { nativeSlashCommands } from '@inova/core/slash-commands';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -32,12 +33,14 @@ import {
   buildPromptWithAttachedFiles,
   detachFileTrigger,
   detectComposerTrigger,
-  filterCommands,
+  filterSlashSuggestions,
   isSameComposerTrigger,
+  parseLeadingSlashTag,
   parseMessageFileSegments,
   resolveDroppedPath,
   type ComposerTrigger,
   type DroppedPath,
+  type SlashSuggestion,
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
 import { DictationControl } from './DictationControl';
@@ -113,6 +116,7 @@ export interface ChatViewProps {
   onForkTurn?: (turnIndex: number) => void;
   onRewindTurn?: (turnIndex: number) => void;
   onRegenerate?: (extraDirs: string[]) => void;
+  onClearSession?: () => void;
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
@@ -268,6 +272,7 @@ interface MessageProps {
   showAgentLabel: boolean;
   provider: ProviderId | null;
   busy: boolean;
+  knownCommands: ReadonlySet<string>;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onFixVerification?: (prompt: string) => void;
   onForkTurn?: (turnIndex: number) => void;
@@ -368,6 +373,7 @@ function Message({
   showAgentLabel,
   provider,
   busy,
+  knownCommands,
   onRestoreCheckpoint,
   onFixVerification,
   onForkTurn,
@@ -379,11 +385,22 @@ function Message({
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   const time = item.type === 'user' && item.at ? formatMessageTime(item.at) : '';
   switch (item.type) {
-    case 'user':
+    case 'user': {
+      const slash = parseLeadingSlashTag({ text: item.text, known: knownCommands });
+      const bodyText = slash === null ? item.text : slash.rest;
       return (
         <div className="chat-row chat-row-user">
           <div className="chat-user-bubble">
-            {parseMessageFileSegments(item.text).map((segment, segmentIndex) =>
+            {slash === null ? null : (
+              <>
+                <span className="chat-file-tag" title={`/${slash.name}`}>
+                  <TerminalIcon size={12} />
+                  <span className="chat-file-tag-path mono">/{slash.name}</span>
+                </span>
+                {bodyText === '' ? null : ' '}
+              </>
+            )}
+            {parseMessageFileSegments(bodyText).map((segment, segmentIndex) =>
               segment.kind === 'file' ? (
                 <span
                   key={`${segment.path}-${segmentIndex}`}
@@ -437,6 +454,7 @@ function Message({
           </div>
         </div>
       );
+    }
     case 'assistant':
       return (
         <div className="chat-row chat-row-assistant">
@@ -638,6 +656,7 @@ export function ChatView({
   onForkTurn,
   onRewindTurn,
   onRegenerate,
+  onClearSession,
   onFeedback,
   onWarn,
   onOpenHandoff,
@@ -654,6 +673,8 @@ export function ChatView({
   const [dragging, setDragging] = useState(false);
   const [pendingDrop, setPendingDrop] = useState<DroppedPath[] | null>(null);
   const [grantedDirs, setGrantedDirs] = useState<string[]>([]);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [pickerOpenRequest, setPickerOpenRequest] = useState(0);
   const dictation = useDictation({
     hints: voiceHints,
     language: dictationLanguage,
@@ -754,8 +775,9 @@ export function ChatView({
     return () => clearTimeout(timer);
   }, [activeTrigger, projectId, sessionId]);
 
+  const commandTriggerActive = activeTrigger?.kind === 'command';
   useEffect(() => {
-    if (!activeTrigger || activeTrigger.kind !== 'command' || projectId === null) return;
+    if (projectId === null) return;
     let alive = true;
     void window.inova
       .listCommands({ projectId })
@@ -769,14 +791,28 @@ export function ChatView({
     return () => {
       alive = false;
     };
-  }, [activeTrigger?.kind, projectId]);
+  }, [commandTriggerActive, projectId]);
+
+  const nativeCommands = useMemo(() => (provider ? nativeSlashCommands(provider) : []), [provider]);
+  const knownCommands = useMemo(
+    () =>
+      new Set([
+        ...nativeCommands.map((command) => command.name),
+        ...commandResults.commands.map((command) => command.name),
+      ]),
+    [nativeCommands, commandResults.commands],
+  );
 
   const filteredCommands = useMemo(
     () =>
       activeTrigger?.kind === 'command'
-        ? filterCommands(commandResults.commands, activeTrigger.query)
+        ? filterSlashSuggestions({
+            native: nativeCommands,
+            project: commandResults.commands,
+            query: activeTrigger.query,
+          })
         : [],
-    [activeTrigger, commandResults.commands],
+    [activeTrigger, nativeCommands, commandResults.commands],
   );
 
   const commitTrigger = (next: ComposerTrigger | null) => {
@@ -817,7 +853,7 @@ export function ChatView({
     setActiveIndex(0);
   };
 
-  const applySelectedCommand = (command: ProjectCommandView) => {
+  const insertCommandTag = (command: Pick<ProjectCommandView, 'name'>) => {
     const editor = editorRef.current;
     if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
     const applied = applyCommandSuggestion({
@@ -825,8 +861,21 @@ export function ChatView({
       trigger: activeTrigger,
       command,
     });
-    const expanded = applied.text.slice(activeTrigger.start, applied.cursor);
-    editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: expanded });
+    const tag = applied.text.slice(activeTrigger.start, applied.cursor);
+    editor.replaceRange({ start: activeTrigger.start, end: activeTrigger.end, text: tag });
+  };
+
+  const applySelectedCommand = (suggestion: SlashSuggestion) => {
+    const editor = editorRef.current;
+    if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
+    const action = suggestion.kind === 'native' ? suggestion.command.action : 'passthrough';
+    if (action === 'passthrough') {
+      insertCommandTag(suggestion.command);
+    } else {
+      editor.clear();
+      if (action === 'clear') setConfirmingClear(true);
+      else setPickerOpenRequest((current) => current + 1);
+    }
     commitTrigger(null);
     setActiveIndex(0);
   };
@@ -850,6 +899,7 @@ export function ChatView({
     return {
       kind: 'command',
       items: filteredCommands,
+      nativeGroupLabel: provider ? `Comandos do ${PROVIDER_NAME[provider]}` : 'Comandos',
       loading: commandResults.loading,
       activeIndex: bounded,
       onSelect: applySelectedCommand,
@@ -861,6 +911,7 @@ export function ChatView({
     filteredCommands,
     commandResults.loading,
     activeIndex,
+    provider,
   ]);
 
   useLayoutEffect(() => {
@@ -964,6 +1015,7 @@ export function ChatView({
         turnIndex={userTurnIndices[index] ?? 0}
         provider={provider}
         busy={running || readOnly}
+        knownCommands={knownCommands}
         onRestoreCheckpoint={onRestoreCheckpoint}
         onForkTurn={onForkTurn}
         onRewindTurn={onRewindTurn}
@@ -1040,6 +1092,19 @@ export function ChatView({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {confirmingClear ? (
+        <ConfirmModal
+          title="Limpar a conversa?"
+          description="O histórico e a memória do agente nesta sessão serão apagados. Os arquivos não mudam."
+          confirmLabel="Limpar"
+          danger
+          onConfirm={() => {
+            setConfirmingClear(false);
+            onClearSession?.();
+          }}
+          onCancel={() => setConfirmingClear(false)}
+        />
+      ) : null}
       {pendingDrop ? (
         <ConfirmModal
           title="Permitir acesso ao arquivo?"
@@ -1230,6 +1295,7 @@ export function ChatView({
                   effort={effort}
                   catalog={catalog}
                   disabled={readOnly || running}
+                  openRequest={pickerOpenRequest}
                   onChange={onChangeModelConfig}
                 />
                 <ModePicker

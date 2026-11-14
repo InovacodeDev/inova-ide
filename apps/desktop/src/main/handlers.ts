@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
 import {
@@ -786,6 +787,14 @@ export function createHandlers(deps: HandlerDeps) {
     return ok(started);
   }
 
+  async function expandProjectCommand(projectPath: string, prompt: string): Promise<string> {
+    const parsed = splitLeadingSlash(prompt);
+    if (parsed === null) return prompt;
+    const commands = await listProjectCommands(projectPath);
+    const command = commands.find((item) => item.name === parsed.name);
+    return command === undefined ? prompt : expandCommandPrompt(command.body, parsed.rest);
+  }
+
   async function runTurn(input: {
     sessionId: string;
     prompt: string;
@@ -813,9 +822,11 @@ export function createHandlers(deps: HandlerDeps) {
     });
     const persistNow = account.provider === 'claude' && newId !== null;
     const handoffPrefix = session.handoffContext?.trim();
+    const commandPrompt =
+      account.provider === 'claude' ? prompt : await expandProjectCommand(project.path, prompt);
     const promptForCli = handoffPrefix
-      ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${prompt}`
-      : prompt;
+      ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
+      : commandPrompt;
     await updateSession({
       root: deps.root,
       sessionId,
@@ -1601,6 +1612,27 @@ export function createHandlers(deps: HandlerDeps) {
             if (checkpointRef !== null) invalidateProjectFiles(sessionId);
           }
           return ok({ text: removedUserText });
+        }),
+      ),
+    clearSession: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, ({ sessionId }) =>
+        serialized(async () => {
+          if (deps.chat.isRunning(sessionId)) {
+            return fail('Pare o turno em andamento antes de limpar a conversa.');
+          }
+          const session = requireSession(await loadStore(deps.root), sessionId);
+          provisionalSessions.delete(sessionId);
+          await updateSession({
+            root: deps.root,
+            sessionId,
+            patch: {
+              providerSessionId: null,
+              handoffContext: null,
+              ...(session.parentId === null ? {} : { detachedFromParent: true }),
+            },
+          });
+          await writeTranscriptEvents(sessionId, []);
+          return ok(null);
         }),
       ),
     recordFeedback: (input: unknown): Promise<Result<null>> =>

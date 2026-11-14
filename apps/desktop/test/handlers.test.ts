@@ -1773,3 +1773,62 @@ test('runAutoArchive archives only idle expired root sessions and skips busy one
   expect(await handlers.runAutoArchive()).toEqual([unread.id]);
   expect(await archivedIds()).toEqual([idle.id, idleChild.id, unread.id].sort());
 });
+
+test('sendMessage expands a project command for a codex session but records the original text', async () => {
+  const { root, send, emitted, handlers } = await setup();
+  await addAccount({ root, provider: 'codex', label: 'cx' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'cx' });
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(
+    join(project.path, '.claude', 'commands', 'minha-skill.md'),
+    'Faça isto: $ARGUMENTS',
+  );
+  const session = await createSession({ root, projectId: project.id });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.join(' ')).toContain('Faça isto: arg');
+  expect(args.join(' ')).not.toContain('/minha-skill');
+  expect(emitted.some((e) => e.event.kind === 'user' && e.event.text === '/minha-skill arg')).toBe(
+    true,
+  );
+});
+
+test('sendMessage passes a project command through literally for a claude session', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await mkdir(join(project.path, '.claude', 'commands'), { recursive: true });
+  await writeFile(join(project.path, '.claude', 'commands', 'minha-skill.md'), 'Faça isto');
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/minha-skill arg' }));
+
+  const args = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(args.at(-1)).toBe('/minha-skill arg');
+});
+
+test('clearSession empties the transcript and resets agent memory', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+
+  unwrap(await handlers.clearSession({ sessionId: session.id }));
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toBeNull();
+});
+
+test('clearSession detaches a child session and refuses while running', async () => {
+  const { root, handlers, running } = await setup();
+  const { project, session: parent } = await seedSession(root);
+  const child = await createSession({ root, projectId: project.id, parentId: parent.id });
+  running.add(child.id);
+  expect((await handlers.clearSession({ sessionId: child.id })).ok).toBe(false);
+  running.delete(child.id);
+
+  unwrap(await handlers.clearSession({ sessionId: child.id }));
+
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
+  expect(stored?.detachedFromParent).toBe(true);
+});

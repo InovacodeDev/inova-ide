@@ -199,6 +199,8 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     sessionId: 's',
     turnIndex: 1,
   });
+  void api.clearSession({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:clearSession', { sessionId: 's' });
   void api.listExternalSessions({ projectId: 'p' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:listExternalSessions', { projectId: 'p' });
   const importInput = {

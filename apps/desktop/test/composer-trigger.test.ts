@@ -6,11 +6,14 @@ import {
   detachFileTrigger,
   detectComposerTrigger,
   filterCommands,
+  filterSlashSuggestions,
   formatFileMention,
   isSameComposerTrigger,
+  parseLeadingSlashTag,
   parseMessageFileSegments,
   resolveDroppedPath,
 } from '../src/renderer/composer-trigger.js';
+import { nativeSlashCommands } from '@inova/core/slash-commands';
 import type { ProjectCommandView } from '../src/shared/api.js';
 
 test('detectComposerTrigger recognizes @file tokens at start or after whitespace', () => {
@@ -54,7 +57,31 @@ test('applyFileSuggestion replaces @query with @path and trailing space', () => 
   });
 });
 
-test('applyCommandSuggestion expands command body into composer', () => {
+test('filterSlashSuggestions lists provider commands before project commands', () => {
+  const project: ProjectCommandView[] = [
+    { name: 'clean', description: 'Limpeza', source: 'claude', kind: 'skill', body: 'x' },
+  ];
+  const result = filterSlashSuggestions({
+    native: nativeSlashCommands('claude'),
+    project,
+    query: 'cl',
+  });
+  expect(result[0]).toMatchObject({ kind: 'native', command: { name: 'clear' } });
+  expect(result.at(-1)).toMatchObject({ kind: 'project', command: { name: 'clean' } });
+});
+
+test('parseLeadingSlashTag matches only a known leading command', () => {
+  const known = new Set(['review']);
+  expect(parseLeadingSlashTag({ text: '/review agora', known })).toEqual({
+    name: 'review',
+    rest: 'agora',
+  });
+  expect(parseLeadingSlashTag({ text: '/review', known })).toEqual({ name: 'review', rest: '' });
+  expect(parseLeadingSlashTag({ text: '/xyz oi', known })).toBeNull();
+  expect(parseLeadingSlashTag({ text: 'oi /review', known })).toBeNull();
+});
+
+test('applyCommandSuggestion inserts the command name as a tag token', () => {
   const command: ProjectCommandView = {
     name: 'review',
     description: 'Code review',
@@ -64,8 +91,8 @@ test('applyCommandSuggestion expands command body into composer', () => {
   };
   const trigger = { kind: 'command' as const, query: 'rev', start: 0, end: 4 };
   expect(applyCommandSuggestion({ text: '/rev', trigger, command })).toEqual({
-    text: 'Review  carefully.',
-    cursor: 18,
+    text: '/review ',
+    cursor: 8,
   });
 });
 
