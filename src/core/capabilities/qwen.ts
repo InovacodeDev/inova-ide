@@ -1,8 +1,8 @@
 import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { skillsIn } from './codex.js';
 import { isMissingFile, readIfExists, serialize, updateJsonFile } from './file-edit.js';
+import { baseItem, isRecord, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -20,10 +20,6 @@ const EXTENSION_LIST_FAILED_MESSAGE = 'Não foi possível listar as extensões d
 const INVALID_EXTENSION_MESSAGE = 'Uma extensão do Qwen tem qwen-extension.json inválido.';
 
 type Settings = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function settingsFile(ctx: CapabilityContext): string {
   return join(ctx.account.homeDir, '.qwen', 'settings.json');
@@ -48,26 +44,10 @@ function stringList(parent: unknown, key: string): string[] {
     : [];
 }
 
-function item(
-  input: Pick<CapabilityItem, 'kind' | 'id' | 'enabled' | 'description'>,
-): CapabilityItem {
-  return {
-    ...input,
-    name: input.id,
-    source: 'user',
-    applyMode: 'account-file',
-    unsupportedReason: null,
-    tokens: null,
-    group: null,
-  };
-}
-
 function mcpItems(settings: Settings): CapabilityItem[] {
   const excluded = stringList(settings['mcp'], 'excluded');
   const servers = isRecord(settings['mcpServers']) ? Object.keys(settings['mcpServers']) : [];
-  return servers.map((id) =>
-    item({ kind: 'mcp', id, enabled: !excluded.includes(id), description: null }),
-  );
+  return servers.map((id) => baseItem({ kind: 'mcp', id, enabled: !excluded.includes(id) }));
 }
 
 async function skillCategory(
@@ -78,7 +58,7 @@ async function skillCategory(
   try {
     const skills = await skillsIn(join(ctx.account.homeDir, '.qwen', 'skills'));
     const items = skills.map((skill) =>
-      item({
+      baseItem({
         kind: 'skill',
         id: skill.id,
         enabled: !disabled.includes(skill.id),
@@ -116,7 +96,7 @@ async function extensionNames(dir: string): Promise<string[]> {
 async function extensionCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
   try {
     const names = await extensionNames(join(ctx.account.homeDir, '.qwen', 'extensions'));
-    const items = names.map((id) => item({ kind: 'plugin', id, enabled: true, description: null }));
+    const items = names.map((id) => baseItem({ kind: 'plugin', id, enabled: true }));
     return { kind: 'plugin', items, error: null };
   } catch (error: unknown) {
     if (error instanceof SyntaxError) {

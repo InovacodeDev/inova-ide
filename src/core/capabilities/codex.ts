@@ -1,9 +1,6 @@
-import type { Dirent } from 'node:fs';
-import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandRunner } from '../providers.js';
 import {
-  isMissingFile,
   listDisabledSkillConfigs,
   readIfExists,
   serialize,
@@ -12,6 +9,7 @@ import {
   tomlTableHeader,
   updateTomlFile,
 } from './file-edit.js';
+import { isRecord, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -27,10 +25,6 @@ const NOT_FOUND_MESSAGE = 'codex não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Codex.';
 const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Codex.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Codex';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function isDisabled(disabled: readonly CapabilityRef[], ref: CapabilityRef): boolean {
   return disabled.some((entry) => entry.kind === ref.kind && entry.id === ref.id);
@@ -106,44 +100,6 @@ function category(input: {
   return input.items === null
     ? { kind: input.kind, items: [], error: input.error }
     : { kind: input.kind, items: input.items, error: null };
-}
-
-function skillDescription(markdown: string): string | null {
-  const lines = markdown.split('\n').map((line) => line.trimEnd());
-  if (lines[0] !== '---') return null;
-  const end = lines.indexOf('---', 1);
-  const front = end === -1 ? lines.slice(1) : lines.slice(1, end);
-  for (const line of front) {
-    const value = /^description:\s*(.*)$/
-      .exec(line)?.[1]
-      ?.trim()
-      .replace(/^(["'])(.*)\1$/, '$2');
-    if (value === undefined) continue;
-    // REGEX: YAML block scalar indicator (">" or "|" with optional chomping/indent marks)
-    return value === '' || /^[>|][+-]?\d*$/.test(value) ? null : value;
-  }
-  return null;
-}
-
-export async function skillsIn(dir: string): Promise<{ id: string; description: string | null }[]> {
-  let entries: Dirent[];
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch (error: unknown) {
-    if (isMissingFile(error)) return [];
-    throw error;
-  }
-  const found = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-      .map(async (entry) => {
-        const markdown = await readIfExists(join(dir, entry.name, 'SKILL.md'));
-        return markdown === null
-          ? null
-          : { id: entry.name, description: skillDescription(markdown) };
-      }),
-  );
-  return found.flatMap((skill) => (skill === null ? [] : [skill]));
 }
 
 async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {
