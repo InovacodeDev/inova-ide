@@ -12,7 +12,7 @@ Esta entrega executa o Subprojeto 1 de um roadmap sequencial em 4 etapas:
 | 1. Chat Rico, Tool Cards, Status Vivo e Raciocínio | Tool cards especializados, eventos de raciocínio, status vivo e estado vazio rico | Concluído |
 | 2. Shell Unificado e Inspector Encaixável | Unificação do topo e painel direito fixo com abas | Concluído |
 | 3. Alterações Git e Diff Viewer na Sessão | Lista de arquivos alterados, diff por arquivo e reversão granular | Concluído |
-| 4. Command Palette (`⌘K`) | Navegação rápida por sessões, projetos, modelos e ações | Planejado |
+| 4. Command Palette (`⌘K`) | Navegação rápida por sessões, projetos, modelos e ações | Concluído |
 
 ## Arquitetura do Subprojeto 1
 
@@ -87,3 +87,16 @@ Função pura `presentTool(item)` mapeia entradas de ferramentas para 5 apresent
 
 - Aba `Git` em `SessionDetails`: mostra resumo `+X / -Y`, lista arquivos alterados com abertura direta do diff no arquivo clicado e botões de reversão por arquivo ou em lote.
 - `SessionDiffModal`: substitui o bloco `<pre>` simples por layout dividido com lista lateral à esquerda, diff numerado por hunk à direita, reversão por arquivo, reversão total e aplicação do worktree no projeto principal.
+
+## Arquitetura do Subprojeto 4
+
+### 1. Estado e Busca da Command Palette (`command-palette-state.ts`, `shortcuts.ts`, `useGlobalShortcuts.ts`)
+
+- `buildCommandPaletteItems`: agrega ações globais, sessões (priorizando sessão ativa e ocultando arquivadas apenas atrás do filtro), projetos vinculados, modelos disponíveis para a conta da sessão ativa e modos de execução suportados pelo provedor ativo.
+- `filterCommandPaletteItems` e `groupCommandPaletteItems`: busca multi-token com pontuação por título, subtítulo, categoria, badge e keywords, mantendo agrupamento canônico (`Ações`, `Sessões`, `Projetos`, `Modelos`, `Modos`).
+- `shortcuts.ts` e `useGlobalShortcuts.ts`: adiciona o atalho global `open-command-palette` (`⌘P` no macOS / `Ctrl+P` nos demais sistemas) sem colidir com atalhos de formatação do composer.
+
+### 2. Interface e Integração (`CommandPaletteModal.tsx`, `Header.tsx`, `App.tsx`)
+
+- `CommandPaletteModal`: diálogo acessível com campo de busca em foco automático, navegação circular por teclado (`↑`/`↓`, `Enter`, `Esc`), badges de item ativo e exibição do atalho de cada ação.
+- `Header` e `App`: botão `Comandos` no topo unificado e despacho direto para trocar de aba/sessão, abrir nova sessão no projeto, alternar modelo, modo, barras laterais, diff Git ou verificação do projeto.

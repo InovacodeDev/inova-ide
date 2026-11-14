@@ -1,5 +1,6 @@
 export type ShortcutId =
   | 'open-settings'
+  | 'open-command-palette'
   | 'new-session'
   | 'close-tab'
   | 'select-tab'
@@ -60,6 +61,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     group: 'Geral',
     label: 'Abrir caixa de entrada',
     binding: 'mod+shift+u',
+    global: true,
+  },
+  {
+    id: 'open-command-palette',
+    group: 'Geral',
+    label: 'Abrir paleta de comandos',
+    binding: 'mod+p',
     global: true,
   },
   {
@@ -185,13 +193,16 @@ export function resolveShortcutCommand(input: {
   event: ShortcutEvent;
   isMac: boolean;
   settingsOpen: boolean;
+  commandPaletteOpen?: boolean;
   otherModalOpen: boolean;
 }): ShortcutCommand | null {
-  const { event, isMac, settingsOpen, otherModalOpen } = input;
+  const { event, isMac, settingsOpen, commandPaletteOpen = false, otherModalOpen } = input;
   if (otherModalOpen) return null;
   const tabIndex = matchTabIndex(event, isMac);
   const id = tabIndex === null ? findShortcut(event, isMac) : 'select-tab';
-  if (id === null || (settingsOpen && id !== 'open-settings')) return null;
+  if (id === null) return null;
+  if (settingsOpen && id !== 'open-settings') return null;
+  if (commandPaletteOpen && id !== 'open-command-palette') return null;
   return { id, tabIndex };
 }
 

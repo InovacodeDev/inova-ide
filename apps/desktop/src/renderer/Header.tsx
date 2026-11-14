@@ -1,4 +1,4 @@
-import { LogoIcon, RefreshIcon, SettingsIcon } from './icons';
+import { LogoIcon, RefreshIcon, SearchIcon, SettingsIcon } from './icons';
 import type { SessionStatus } from './session-status';
 import type { Tab } from './tabs';
 import { TabBar } from './TabBar';
@@ -6,6 +6,7 @@ import { TabBar } from './TabBar';
 interface HeaderProps {
   runningCount: number;
   update: { latest: string; installing: boolean; onInstall: () => void } | null;
+  onOpenCommandPalette?: () => void;
   onOpenSettings: () => void;
   tabs?: Tab[];
   activeTabId?: string | null;
@@ -19,6 +20,7 @@ interface HeaderProps {
 export function Header({
   runningCount,
   update,
+  onOpenCommandPalette,
   onOpenSettings,
   tabs,
   activeTabId = null,
@@ -71,6 +73,19 @@ export function Header({
               <RefreshIcon size={13} />
             )}
             {update.installing ? 'Atualizando…' : 'Reiniciar para atualizar'}
+          </button>
+        ) : null}
+        {onOpenCommandPalette ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm app-command-palette-btn"
+            aria-label="Abrir paleta de comandos"
+            data-tooltip="Paleta de comandos"
+            data-shortcut="open-command-palette"
+            onClick={onOpenCommandPalette}
+          >
+            <SearchIcon size={14} />
+            <span>Comandos</span>
           </button>
         ) : null}
         <button

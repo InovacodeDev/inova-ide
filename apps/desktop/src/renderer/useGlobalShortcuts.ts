@@ -5,11 +5,13 @@ import { resolveShortcutCommand, type ShortcutCommand } from './shortcuts';
 interface GlobalShortcutsInput {
   isMac: boolean;
   settingsOpen: boolean;
+  commandPaletteOpen?: boolean;
   run: (command: ShortcutCommand) => boolean;
 }
 
-function otherModalOpen(settingsOpen: boolean): boolean {
-  return openModalCount() > (settingsOpen ? 1 : 0);
+function otherModalOpen(input: { settingsOpen: boolean; commandPaletteOpen: boolean }): boolean {
+  const allowed = (input.settingsOpen ? 1 : 0) + (input.commandPaletteOpen ? 1 : 0);
+  return openModalCount() > allowed;
 }
 
 export function useGlobalShortcuts(input: GlobalShortcutsInput): void {
@@ -19,12 +21,13 @@ export function useGlobalShortcuts(input: GlobalShortcutsInput): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
-      const { isMac, settingsOpen, run } = inputRef.current;
+      const { isMac, settingsOpen, commandPaletteOpen = false, run } = inputRef.current;
       const command = resolveShortcutCommand({
         event,
         isMac,
         settingsOpen,
-        otherModalOpen: otherModalOpen(settingsOpen),
+        commandPaletteOpen,
+        otherModalOpen: otherModalOpen({ settingsOpen, commandPaletteOpen }),
       });
       if (command !== null && run(command)) event.preventDefault();
     };

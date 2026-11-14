@@ -126,12 +126,28 @@ describe('resolveShortcutCommand', () => {
     expect(resolveShortcutCommand({ ...open, event: cmdN })).toBeNull();
     expect(resolveShortcutCommand({ ...open, event: cmdTwo })).toBeNull();
   });
+
+  test('open-command-palette resolves mod+p and isolates while open', () => {
+    const cmdP = press({ key: 'p', code: 'KeyP', metaKey: true });
+    expect(resolveShortcutCommand({ ...base, event: cmdP })).toEqual({
+      id: 'open-command-palette',
+      tabIndex: null,
+    });
+    const paletteOpen = { ...base, commandPaletteOpen: true };
+    expect(resolveShortcutCommand({ ...paletteOpen, event: cmdP })?.id).toBe(
+      'open-command-palette',
+    );
+    expect(resolveShortcutCommand({ ...paletteOpen, event: cmdN })).toBeNull();
+    expect(resolveShortcutCommand({ ...paletteOpen, event: cmdTwo })).toBeNull();
+  });
 });
 
 describe('formatShortcut', () => {
   test('formats the catalog binding of a shortcut id for the platform', () => {
     expect(formatShortcut({ id: 'open-settings', isMac: true })).toBe('⌘,');
     expect(formatShortcut({ id: 'open-settings', isMac: false })).toBe('Ctrl+,');
+    expect(formatShortcut({ id: 'open-command-palette', isMac: true })).toBe('⌘P');
+    expect(formatShortcut({ id: 'open-command-palette', isMac: false })).toBe('Ctrl+P');
   });
 });
 

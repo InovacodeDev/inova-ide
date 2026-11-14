@@ -119,8 +119,21 @@ a:hover {
 .app-header-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
   margin-left: auto;
+  flex: none;
+}
+
+.app-command-palette-btn {
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.app-command-palette-btn:hover {
+  border-color: var(--border-control);
+  color: var(--text);
 }
 
 .app-running {

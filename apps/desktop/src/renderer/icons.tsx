@@ -44,6 +44,7 @@ import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
 import { RotateCcw } from 'pulsoicon-react/icons/rotate-ccw';
+import { Search } from 'pulsoicon-react/icons/search';
 import { Settings } from 'pulsoicon-react/icons/settings';
 import { Shield } from 'pulsoicon-react/icons/shield';
 import { ShieldAlert } from 'pulsoicon-react/icons/shield-alert';
@@ -260,6 +261,10 @@ export function PanelRightOpenIcon({ size = 16 }: IconProps) {
 
 export function DownloadIcon({ size = 16 }: IconProps) {
   return <Download size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SearchIcon({ size = 16 }: IconProps) {
+  return <Search size={size} strokeWidth={1.8} aria-hidden="true" />;
 }
 
 export function SettingsIcon({ size = 16 }: IconProps) {

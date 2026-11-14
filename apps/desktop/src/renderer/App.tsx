@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
 import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
+import { PROVIDER_MODES, resolveExecutionMode } from '@inova/core/modes';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -25,6 +26,8 @@ import { AccountsView } from './AccountsView';
 import { agentTail } from './agent-tail';
 import { AgentsView } from './AgentsView';
 import { ChatView, type ChatViewHandle } from './ChatView';
+import { buildCommandPaletteItems, type CommandPaletteItem } from './command-palette-state';
+import { CommandPaletteModal } from './CommandPaletteModal';
 import { CompareView } from './CompareView';
 import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
@@ -39,7 +42,7 @@ import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
 import { ProjectSettingsModal } from './ProjectSettingsModal';
-import { accountDisplayName } from './provider-meta';
+import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
 import { SessionDetails } from './SessionDetails';
 import { SessionDiffModal } from './SessionDiffModal';
 import { SessionHeader } from './SessionHeader';
@@ -144,6 +147,7 @@ export function App() {
   const [confirmUpdateRestart, setConfirmUpdateRestart] = useState(false);
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
   const inboxRef = useRef<HTMLElement>(null);
   const activeChatRef = useRef<ChatViewHandle>(null);
@@ -1116,6 +1120,10 @@ export function App() {
         if (settings === null) return false;
         setSettingsOpen(true);
         return true;
+      case 'open-command-palette':
+        if (settingsOpen) return false;
+        setCommandPaletteOpen((current) => !current);
+        return true;
       case 'new-session':
         setView('new-session');
         return true;
@@ -1155,7 +1163,208 @@ export function App() {
     }
   };
 
-  useGlobalShortcuts({ isMac: IS_MAC, settingsOpen, run: runShortcut });
+  useGlobalShortcuts({ isMac: IS_MAC, settingsOpen, commandPaletteOpen, run: runShortcut });
+
+  const activeProvider = activeAccount?.provider ?? activeTab?.provider ?? null;
+  const activeCatalog = activeProvider
+    ? ((activeAccountLabel ? modelsByAccount[activeAccountLabel] : undefined) ??
+      PROVIDER_MODELS[activeProvider])
+    : null;
+  const activeModelConfig =
+    activeSession && activeProvider && settings
+      ? resolveModelConfig({
+          provider: activeProvider,
+          model: activeSession.model ?? null,
+          effort: activeSession.effort ?? null,
+          settings,
+        })
+      : { model: activeSession?.model ?? null, effort: activeSession?.effort ?? null };
+  const activeMode =
+    activeSession && activeProvider
+      ? resolveExecutionMode({
+          provider: activeProvider,
+          sessionMode: activeSession.mode,
+          defaultModes,
+        })
+      : null;
+
+  const commandPaletteItems: CommandPaletteItem[] = commandPaletteOpen
+    ? (() => {
+        const projectMap = new Map(projects.map((project) => [project.id, project] as const));
+        return buildCommandPaletteItems({
+          actions: [
+            {
+              id: 'action:new-session',
+              title: 'Nova sessão',
+              subtitle: 'Abrir formulário de nova sessão',
+              shortcutId: 'new-session',
+              keywords: ['criar', 'chat'],
+            },
+            {
+              id: 'action:toggle-sidebar',
+              title: sidebarCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral',
+              keywords: ['sidebar', 'painel'],
+            },
+            ...(activeSession
+              ? [
+                  {
+                    id: 'action:toggle-inspector',
+                    title: detailsCollapsed
+                      ? 'Abrir inspetor da sessão'
+                      : 'Recolher inspetor da sessão',
+                    keywords: ['inspector', 'contexto', 'detalhes'],
+                  },
+                  {
+                    id: 'action:open-git-diff',
+                    title: 'Inspecionar diff Git da sessão',
+                    keywords: ['git', 'diff', 'alteracoes'],
+                  },
+                  {
+                    id: 'action:run-verification',
+                    title: 'Executar verificação do projeto',
+                    keywords: ['check', 'testes', 'lint'],
+                  },
+                ]
+              : []),
+            {
+              id: 'action:view-workspace',
+              title: 'Ir para Workspace',
+              keywords: ['chat', 'conversa'],
+            },
+            {
+              id: 'action:view-agents',
+              title: 'Ir para Agentes em paralelo',
+              keywords: ['agentes', 'execucao'],
+            },
+            {
+              id: 'action:view-compare',
+              title: 'Ir para Comparar modelos',
+              keywords: ['compare', 'diff'],
+            },
+            {
+              id: 'action:view-accounts',
+              title: 'Ir para Contas',
+              keywords: ['contas', 'uso'],
+            },
+            ...(settings !== null
+              ? [
+                  {
+                    id: 'action:open-settings',
+                    title: 'Abrir configurações',
+                    shortcutId: 'open-settings' as const,
+                    keywords: ['settings', 'preferencias'],
+                  },
+                ]
+              : []),
+          ],
+          sessions: Object.values(sessions)
+            .flat()
+            .map((session) => {
+              const project = projectMap.get(session.projectId);
+              const account = effectiveAccountOf(session, project);
+              const provider = account?.provider ?? 'claude';
+              return {
+                id: session.id,
+                title: session.title,
+                projectName: project ? folderName(project.path) : 'Projeto',
+                providerLabel: PROVIDER_NAME[provider],
+                branch: session.worktree?.branch ?? null,
+                active: activeSession?.id === session.id && inWorkspace,
+                archived: session.archivedAt !== null,
+              };
+            }),
+          projects: projects.map((project) => ({
+            id: project.id,
+            name: folderName(project.path),
+            path: project.path,
+            accountLabel: project.accountLabel,
+          })),
+          models:
+            activeSession && activeCatalog
+              ? activeCatalog.models.map((model) => ({
+                  id: model.id,
+                  label: model.label,
+                  active: activeModelConfig.model === model.id,
+                }))
+              : [],
+          modes:
+            activeSession && activeProvider && activeMode
+              ? PROVIDER_MODES[activeProvider].options.map((option) => ({
+                  id: option.id,
+                  label: option.label,
+                  active: activeMode === option.id,
+                }))
+              : [],
+        });
+      })()
+    : [];
+
+  const handleCommandPaletteSelect = (item: CommandPaletteItem) => {
+    setCommandPaletteOpen(false);
+    switch (item.category) {
+      case 'Sessões': {
+        const target = sessionById.get(item.id.slice('session:'.length));
+        if (target) void openChatTab(target);
+        return;
+      }
+      case 'Projetos': {
+        const target = projects.find((project) => project.id === item.id.slice('project:'.length));
+        if (target) void newSession({ project: target, parent: null });
+        return;
+      }
+      case 'Modelos': {
+        if (!activeSession) return;
+        const modelId = item.id.slice('model:'.length);
+        void updateSessionModelConfig({ sessionId: activeSession.id, patch: { model: modelId } });
+        return;
+      }
+      case 'Modos': {
+        if (!activeSession || !activeProvider) return;
+        const modeId = item.id.slice('mode:'.length);
+        const matched = PROVIDER_MODES[activeProvider].options.find((opt) => opt.id === modeId);
+        if (matched) {
+          void updateSessionModelConfig({
+            sessionId: activeSession.id,
+            patch: { mode: matched.id },
+          });
+        }
+        return;
+      }
+      case 'Ações':
+        switch (item.id) {
+          case 'action:new-session':
+            setView('new-session');
+            return;
+          case 'action:toggle-sidebar':
+            void updateSettings({ appearance: { sidebarCollapsed: !sidebarCollapsed } });
+            return;
+          case 'action:toggle-inspector':
+            void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } });
+            return;
+          case 'action:open-git-diff':
+            if (activeSession) void inspectWorktree(activeSession);
+            return;
+          case 'action:run-verification':
+            if (activeSession) void runVerification(activeSession.id);
+            return;
+          case 'action:view-workspace':
+            setView('workspace');
+            return;
+          case 'action:view-agents':
+            setView('agents');
+            return;
+          case 'action:view-compare':
+            setView('compare');
+            return;
+          case 'action:view-accounts':
+            setView('accounts');
+            return;
+          case 'action:open-settings':
+            if (settings !== null) setSettingsOpen(true);
+            return;
+        }
+    }
+  };
 
   return (
     <div className="app">
@@ -1187,6 +1396,7 @@ export function App() {
               }
             : null
         }
+        onOpenCommandPalette={() => runShortcut({ id: 'open-command-palette', tabIndex: null })}
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
         tabs={chatTabs}
         activeTabId={tabs.active}
@@ -1771,6 +1981,14 @@ export function App() {
           onList={listExternalSessions}
           onImport={(requests) => importSessions({ project: importProject, requests })}
           onClose={() => setImportProject(null)}
+        />
+      )}
+      {commandPaletteOpen && (
+        <CommandPaletteModal
+          items={commandPaletteItems}
+          isMac={IS_MAC}
+          onSelect={handleCommandPaletteSelect}
+          onClose={() => setCommandPaletteOpen(false)}
         />
       )}
       {settingsOpen && settings && (
