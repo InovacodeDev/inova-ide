@@ -68,3 +68,70 @@ export async function updateJsonFile(input: {
   await backupFile({ file: input.file, backupRoot: input.backupRoot });
   await writeAtomic(input.file, `${JSON.stringify(input.update(root), null, 2)}\n`);
 }
+
+const BARE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+
+export function tomlTableHeader(segments: readonly string[]): string {
+  return segments
+    .map((segment) => (BARE_SEGMENT.test(segment) ? segment : JSON.stringify(segment)))
+    .join('.');
+}
+
+interface Section {
+  header: number;
+  end: number;
+}
+
+function findSection(lines: readonly string[], header: string): Section | null {
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length && !(lines[end] ?? '').trimStart().startsWith('[')) end += 1;
+  return { header: start, end };
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function assertKnownTableForm(lines: readonly string[], table: string): void {
+  const firstSegment = table.split('.')[0] ?? table;
+  const inline = new RegExp(`^\\s*(${escapeRegExp(firstSegment)}|${escapeRegExp(table)})\\s*=`);
+  for (const line of lines) {
+    if (line.trimStart().startsWith('[')) return;
+    if (inline.test(line)) {
+      throw new CapabilityFileError(table, 'table defined inline; cannot edit safely');
+    }
+  }
+}
+
+function appendBlock(toml: string, block: string): string {
+  if (toml === '') return block;
+  const separator = toml.endsWith('\n') ? '\n' : '\n\n';
+  return `${toml}${separator}${block}`;
+}
+
+export function setTomlTableKey(input: {
+  toml: string;
+  table: string;
+  key: string;
+  value: boolean;
+}): string {
+  const lines = input.toml.split('\n');
+  const section = findSection(lines, `[${input.table}]`);
+  const assignment = `${input.key} = ${input.value}`;
+  if (!section) {
+    assertKnownTableForm(lines, input.table);
+    return appendBlock(input.toml, `[${input.table}]\n${assignment}\n`);
+  }
+  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(input.key)}\\s*=`);
+  for (let index = section.header + 1; index < section.end; index += 1) {
+    const match = keyPattern.exec(lines[index] ?? '');
+    if (match) {
+      lines[index] = `${match[1] ?? ''}${assignment}`;
+      return lines.join('\n');
+    }
+  }
+  lines.splice(section.header + 1, 0, assignment);
+  return lines.join('\n');
+}

@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { backupFile, CapabilityFileError, updateJsonFile } from './file-edit.js';
+import {
+  backupFile,
+  CapabilityFileError,
+  setTomlTableKey,
+  tomlTableHeader,
+  updateJsonFile,
+} from './file-edit.js';
 
 let dir: string;
 
@@ -64,5 +70,53 @@ describe('updateJsonFile', () => {
     const [name] = await readdir(backupRoot);
     expect(await readFile(join(backupRoot, name ?? ''), 'utf8')).toBe('{"a":1}');
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ a: 2 });
+  });
+});
+
+describe('tomlTableHeader', () => {
+  it('[RF-2] quotes only segments that are not bare', () => {
+    expect(tomlTableHeader(['mcp_servers', 'my.server'])).toBe('mcp_servers."my.server"');
+    expect(tomlTableHeader(['plugins', 'github@openai-curated-remote'])).toBe(
+      'plugins."github@openai-curated-remote"',
+    );
+    expect(tomlTableHeader(['a-b_1', 'c'])).toBe('a-b_1.c');
+  });
+});
+
+describe('setTomlTableKey', () => {
+  const other = '# keep\n[other]\nx = 1 # trailing\n';
+
+  it('replaces an existing enabled value', () => {
+    const toml = `${other}\n[t]\nenabled = true\nname = "n"\n`;
+    expect(setTomlTableKey({ toml, table: 't', key: 'enabled', value: false })).toBe(
+      `${other}\n[t]\nenabled = false\nname = "n"\n`,
+    );
+  });
+
+  it('inserts enabled right after the header', () => {
+    const toml = `[t]\nname = "n"\n${other}`;
+    expect(setTomlTableKey({ toml, table: 't', key: 'enabled', value: false })).toBe(
+      `[t]\nenabled = false\nname = "n"\n${other}`,
+    );
+  });
+
+  it('appends the table when absent', () => {
+    expect(setTomlTableKey({ toml: other, table: 't', key: 'enabled', value: false })).toBe(
+      `${other}\n[t]\nenabled = false\n`,
+    );
+  });
+
+  it('does not touch the same key in another table', () => {
+    const toml = '[a]\nenabled = true\n[t]\nenabled = true\n';
+    expect(setTomlTableKey({ toml, table: 't', key: 'enabled', value: false })).toBe(
+      '[a]\nenabled = true\n[t]\nenabled = false\n',
+    );
+  });
+
+  it('throws when the target table is defined inline', () => {
+    const toml = 'mcp_servers = { x = { command = "a" } }\n';
+    expect(() =>
+      setTomlTableKey({ toml, table: 'mcp_servers.x', key: 'enabled', value: false }),
+    ).toThrow(CapabilityFileError);
   });
 });
