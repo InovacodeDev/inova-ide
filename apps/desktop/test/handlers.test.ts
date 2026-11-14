@@ -22,6 +22,7 @@ import type { LoginEvent, Result } from '../src/shared/api.js';
 
 const INVALID = { ok: false, message: 'Entrada inválida.' };
 const tmpDirs: string[] = [];
+const createdHandlers: ReturnType<typeof createHandlers>[] = [];
 
 async function tmp(): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'inova-handlers-')));
@@ -30,6 +31,7 @@ async function tmp(): Promise<string> {
 }
 
 afterEach(async () => {
+  await Promise.all(createdHandlers.splice(0).map((handlers) => handlers.flushPendingWrites()));
   await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -116,6 +118,7 @@ async function setup(
     pickFolder: async () => '/picked',
     pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
   });
+  createdHandlers.push(handlers);
   return {
     root,
     bin,

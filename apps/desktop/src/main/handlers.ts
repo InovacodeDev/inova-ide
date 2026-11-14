@@ -1013,9 +1013,20 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  async function flushPendingWrites(): Promise<void> {
+    for (;;) {
+      const inbox = inboxChain;
+      const store = storeQueue;
+      const transcripts = [...transcriptChains.values()];
+      await Promise.all([inbox, store, ...transcripts]);
+      if (inbox === inboxChain && store === storeQueue && transcriptChains.size === 0) return;
+    }
+  }
+
   return {
     handleChatEvent,
     runAutoArchive,
+    flushPendingWrites,
     listAccounts: (): Promise<Result<AccountView[]>> =>
       guarded(async () => {
         const store = await loadStore(deps.root);
