@@ -82,6 +82,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.markInboxRead, (input) => handlers.markInboxRead(input));
   handle(CHANNELS.clearReadInbox, () => handlers.clearReadInbox());
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
+  handle(CHANNELS.getContextBreakdown, (input) => handlers.getContextBreakdown(input));
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
   handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
   handle(CHANNELS.listCommands, (input) => handlers.listCommands(input));

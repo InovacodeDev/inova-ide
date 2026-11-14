@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
-import type { ChatEvent, UsageSnapshot } from '@inova/core/chat-types';
+import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
+import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
@@ -178,6 +179,10 @@ const TITLE_CHARS = 60;
 const FILE_CACHE_TTL_MS = 5_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
+const CONTEXT_BREAKDOWN_TIMEOUT_MS = 30_000;
+const CONTEXT_BREAKDOWN_CLAUDE_ONLY = 'Detalhamento do contexto disponível só para sessões Claude.';
+const CONTEXT_BREAKDOWN_EMPTY = 'Envie uma mensagem para ver o detalhamento do contexto.';
+const CONTEXT_BREAKDOWN_FAILED = 'Não foi possível ler o detalhamento do contexto.';
 const NOTIFICATION_TOGGLES = {
   'waiting-input': 'waitingInput',
   failed: 'failed',
@@ -1964,6 +1969,41 @@ export function createHandlers(deps: HandlerDeps) {
           if (error instanceof UsageError) throw error;
           return fail('Não foi possível ler o consumo.');
         }
+      }),
+    getContextBreakdown: (input: unknown): Promise<Result<ContextBreakdown>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        const store = await loadStore(deps.root);
+        const session = requireSession(store, sessionId);
+        const project = store.projects.find((item) => item.id === session.projectId);
+        const account = project
+          ? resolveSessionAccount({ session, project, accounts: store.accounts })
+          : undefined;
+        if (!project || !account) return fail('Sessão sem conta vinculada.');
+        if (account.provider !== 'claude') return fail(CONTEXT_BREAKDOWN_CLAUDE_ONLY);
+        if (session.providerSessionId === null) return fail(CONTEXT_BREAKDOWN_EMPTY);
+        const baseEnv = await deps.baseEnv();
+        const adapter = providers[account.provider];
+        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        if (file === undefined) return fail(`${adapter.binary} não encontrado.`);
+        await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
+        const spec = buildLaunch({
+          account,
+          cwd: effectiveCwd(session, project),
+          args: claudeContextArgs(session.providerSessionId),
+          baseEnv,
+        });
+        const result = await deps.runner.run({
+          command: file,
+          args: spec.args,
+          env: spec.env,
+          cwd: spec.cwd,
+          timeoutMs: CONTEXT_BREAKDOWN_TIMEOUT_MS,
+        });
+        const breakdown =
+          'notFound' in result || result.exitCode !== 0
+            ? null
+            : parseClaudeContextOutput(result.stdout);
+        return breakdown === null ? fail(CONTEXT_BREAKDOWN_FAILED) : ok(breakdown);
       }),
     listModels: (input: unknown): Promise<Result<ProviderModels>> =>
       validated(input, parseUsageRequest, async ({ accountLabel }) => {

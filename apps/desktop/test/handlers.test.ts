@@ -702,6 +702,70 @@ test('getUsage reports errors in Portuguese without leaking the token', async ()
   });
 });
 
+const CONTEXT_REPORT = [
+  '## Context Usage',
+  '**Model:** claude-opus-5-5',
+  '**Tokens:** 20k / 200k (10%)',
+  '### Estimated usage by category',
+  '| Category | Tokens | Percentage |',
+  '|----------|--------|------------|',
+  '| Messages | 12k | 6.0% |',
+].join('\n');
+
+test('getContextBreakdown runs /context on a throwaway fork of the claude session', async () => {
+  const { root, bin, run, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  await updateSession({ root, sessionId: session.id, patch: { providerSessionId: 'prov-1' } });
+  run.mockResolvedValueOnce({
+    exitCode: 0,
+    stdout: JSON.stringify({ is_error: false, result: CONTEXT_REPORT }),
+  });
+  const breakdown = unwrap(await handlers.getContextBreakdown({ sessionId: session.id }));
+  expect(breakdown).toMatchObject({
+    model: 'claude-opus-5-5',
+    usedTokens: 20_000,
+    windowTokens: 200_000,
+    categories: [{ name: 'Messages', tokens: 12_000, percent: 6 }],
+  });
+  expect(run).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      command: join(bin, 'claude'),
+      cwd: project.path,
+      args: expect.arrayContaining(['--resume', 'prov-1', '--no-session-persistence', '/context']),
+    }),
+  );
+});
+
+test('getContextBreakdown explains when there is nothing to read', async () => {
+  const { root, run, handlers } = await setup();
+  const { session } = await seedSession(root);
+  expect(await handlers.getContextBreakdown({ sessionId: session.id })).toEqual({
+    ok: false,
+    message: 'Envie uma mensagem para ver o detalhamento do contexto.',
+  });
+  await updateSession({ root, sessionId: session.id, patch: { providerSessionId: 'prov-1' } });
+  run.mockResolvedValueOnce({ exitCode: 1, stdout: '' });
+  expect(await handlers.getContextBreakdown({ sessionId: session.id })).toEqual({
+    ok: false,
+    message: 'Não foi possível ler o detalhamento do contexto.',
+  });
+  expect(await handlers.getContextBreakdown({ sessionId: '' })).toEqual(INVALID);
+});
+
+test('getContextBreakdown is claude only', async () => {
+  const { root, run, handlers } = await setup();
+  await addAccount({ root, provider: 'codex', label: 'trabalho' });
+  const project = await bindProject({ root, path: await tmp(), accountLabel: 'trabalho' });
+  const session = await createSession({ root, projectId: project.id });
+  await updateSession({ root, sessionId: session.id, patch: { providerSessionId: 'prov-1' } });
+  const callsBefore = run.mock.calls.length;
+  expect(await handlers.getContextBreakdown({ sessionId: session.id })).toEqual({
+    ok: false,
+    message: 'Detalhamento do contexto disponível só para sessões Claude.',
+  });
+  expect(run.mock.calls.length).toBe(callsBefore);
+});
+
 async function exhaustAccount(input: { resetsAt: string | null }) {
   const ctx = await setup();
   const { account, session } = await seedSession(ctx.root);
