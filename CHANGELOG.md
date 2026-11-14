@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.6.2] - 2026-11-14
+
 ### Adicionado
 
 - Chat rico com cartões especializados por ferramenta (`edit`, `shell`, `lookup`, `todo` e genérico), bloco recolhível de raciocínio, estado vazio com chips de início rápido e barra de status viva com cronômetro.
