@@ -1383,15 +1383,16 @@ test('session queue pauses after an error done and resumes on request', async ()
   expect(pausedSnapshots.at(-1)).toEqual([]);
 });
 
-test('session queue pauses after a cancelled turn and ignores empty queues', async () => {
+test('stopping the running turn sends the next queued item', async () => {
   const { handlers, send, chatInUse, session, accountId } = await startQueuedSession();
   unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
   handlers.cancelTurn(session.id);
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
   await flush(handlers, session.id);
-  expect(send).toHaveBeenCalledTimes(1);
-  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(0);
 });
 
 test('session queue does not pause when an error done leaves the queue empty', async () => {

@@ -23,6 +23,7 @@ import type {
 import type { AccountView, AttachmentKind, ProjectCommandView } from '../shared/api';
 import { AttachMenu } from './AttachMenu';
 import type { ChatItem, ChatState } from './chat-reducer';
+import { composerPrimaryAction } from './composer-action';
 import type { ComposerFormat } from './composer-format';
 import { RichComposer, type RichComposerHandle } from './RichComposer';
 import { ComposerPopup, type ComposerPopupModel } from './ComposerPopup';
@@ -714,6 +715,12 @@ export function ChatView({
   const editorRef = useRef<RichComposerHandle>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
+  const hasContent = draft.trim() !== '' || attachedFiles.length > 0;
+  const primaryAction = composerPrimaryAction({
+    running,
+    hasContent,
+    canEnqueue: onEnqueuePrompt !== undefined,
+  });
   const userTurnIndices = useMemo(() => {
     let counter = -1;
     return items.map((item) => {
@@ -1362,25 +1369,28 @@ export function ChatView({
               </>
             ) : null}
             {readOnly ? null : <DictationControl dictation={dictation} />}
-            {running ? (
+            {primaryAction === 'stop' ? (
               <button
                 type="button"
                 className="chat-send chat-send-stop"
                 aria-label="Parar"
-                data-tooltip="Parar resposta"
+                data-tooltip={
+                  queuedTurns.length > 0
+                    ? 'Parar resposta e enviar o próximo da fila'
+                    : 'Parar resposta'
+                }
                 onClick={onCancel}
               >
                 <StopFilledIcon size={12} />
               </button>
-            ) : null}
-            {running && !onEnqueuePrompt ? null : (
+            ) : (
               <button
                 type="button"
                 className="chat-send"
-                aria-label={running ? 'Adicionar à fila' : 'Enviar mensagem'}
-                data-tooltip={running ? 'Adicionar à fila' : 'Enviar mensagem'}
+                aria-label={primaryAction === 'enqueue' ? 'Adicionar à fila' : 'Enviar mensagem'}
+                data-tooltip={primaryAction === 'enqueue' ? 'Adicionar à fila' : 'Enviar mensagem'}
                 data-shortcut-text="Enter"
-                disabled={readOnly || (draft.trim() === '' && attachedFiles.length === 0)}
+                disabled={readOnly || !hasContent}
                 onClick={submit}
               >
                 <SendIcon size={16} />

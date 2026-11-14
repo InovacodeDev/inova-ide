@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Alterado
+
+- Campo de mensagem com o agente trabalhando: mostra só o botão de parar. Ao digitar ou ditar algo, ele vira o botão de enviar, que adiciona a mensagem à fila. Depois de enfileirar, volta a ser o botão de parar.
+- Parar a resposta atual envia o próximo item da fila, em vez de pausar a fila.
+
 ### Corrigido
 
 - Gemini (Antigravity): o login de cada conta fica só no diretório da conta. O app não usa mais o Keychain do macOS, e o diálogo "Keychain Not Found" não aparece mais a cada renovação do token.
