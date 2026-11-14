@@ -30,8 +30,11 @@ export function ModelEffortPicker({
   const containerRef = useRef<HTMLDivElement>(null);
   const isOpen = open && !disabled;
 
+  const handledOpenRequestRef = useRef(openRequest);
   useEffect(() => {
-    if (openRequest > 0) setOpen(true);
+    if (openRequest === handledOpenRequestRef.current) return;
+    handledOpenRequestRef.current = openRequest;
+    setOpen(true);
   }, [openRequest]);
 
   useEffect(() => {

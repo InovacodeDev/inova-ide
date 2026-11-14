@@ -85,7 +85,6 @@ import './chat.css';
 export interface ChatViewHandle {
   focusComposer: () => boolean;
   toggleDictation: () => boolean;
-  setComposerText: (text: string) => void;
 }
 
 export interface ChatViewProps {
@@ -125,6 +124,8 @@ export interface ChatViewProps {
   onCancelQueuedTurn?: (turnId: string) => void;
   onSwitchAccountAndRetry?: (input: { accountId: string; prompt: string }) => void;
   onDismissBusyConflict?: () => void;
+  composerSeed?: string | null;
+  onComposerSeedApplied?: () => void;
   onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
 }
@@ -665,6 +666,8 @@ export function ChatView({
   onCancelQueuedTurn,
   onSwitchAccountAndRetry,
   onDismissBusyConflict,
+  composerSeed = null,
+  onComposerSeedApplied,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -735,12 +738,15 @@ export function ChatView({
         toggleDictation();
         return true;
       },
-      setComposerText: (text) => {
-        editorRef.current?.setMarkdown(text);
-      },
     }),
     [readOnly, toggleDictation],
   );
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (composerSeed === null || !visible || editor === null) return;
+    editor.setMarkdown(composerSeed);
+    onComposerSeedApplied?.();
+  }, [composerSeed, visible, onComposerSeedApplied]);
   const last = items[items.length - 1];
   const thinking = running && !(last?.type === 'assistant' && last.streaming);
 
@@ -867,6 +873,7 @@ export function ChatView({
   };
 
   const runNativeAction = (action: SlashCommandAction) => {
+    if (running) return;
     if (action === 'clear') setConfirmingClear(true);
     else if (action === 'model-picker') setPickerOpenRequest((current) => current + 1);
   };
@@ -878,7 +885,10 @@ export function ChatView({
     if (action === 'passthrough') {
       insertCommandTag(suggestion.command);
     } else {
+      if (running) return;
       editor.clear();
+      setDraft('');
+      setAttachedFiles([]);
       runNativeAction(action);
     }
     commitTrigger(null);

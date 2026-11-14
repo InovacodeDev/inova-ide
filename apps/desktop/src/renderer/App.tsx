@@ -114,7 +114,9 @@ export function App() {
   const [pendingRewind, setPendingRewind] = useState<{
     sessionId: string;
     turnIndex: number;
+    resend?: { extraDirs: string[] };
   } | null>(null);
+  const [pendingComposerText, setPendingComposerText] = useState<Record<string, string>>({});
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
@@ -432,7 +434,11 @@ export function App() {
     await openChatTab(first, input.project);
   };
 
-  const sendMessage = async (sessionId: string, prompt: string, extraDirs: string[] = []) => {
+  const sendMessage = async (
+    sessionId: string,
+    prompt: string,
+    extraDirs: string[] = [],
+  ): Promise<boolean> => {
     dispatchChat({ sessionId, action: { type: 'started' } });
     const result = await guard(() => window.inova.sendMessage({ sessionId, prompt, extraDirs }));
     if (!result || !result.ok) {
@@ -455,7 +461,7 @@ export function App() {
           await call(() => Promise.resolve(result));
         }
       }
-      return;
+      return false;
     }
     setBusyConflicts((current) => {
       if (!(sessionId in current)) return current;
@@ -463,6 +469,7 @@ export function App() {
       delete next[sessionId];
       return next;
     });
+    return true;
   };
 
   const clearBusyConflict = (sessionId: string) => {
@@ -533,11 +540,14 @@ export function App() {
     await openChatTab(created);
   };
 
+  const seedComposer = (sessionId: string, text: string) =>
+    setPendingComposerText((current) => ({ ...current, [sessionId]: text }));
+
   const confirmRewindTurn = async (input: { sessionId: string; turnIndex: number }) => {
     const result = await call(() => window.inova.rewindSession(input));
     if (!result) return;
     await loadChat(input.sessionId, 'replace');
-    activeChatRef.current?.setComposerText(result.value.text);
+    seedComposer(input.sessionId, result.value.text);
   };
 
   const clearConversation = async (sessionId: string) => {
@@ -555,7 +565,8 @@ export function App() {
     );
     if (!result) return;
     await loadChat(sessionId, 'replace');
-    await sendMessage(sessionId, result.value.text, extraDirs);
+    const sent = await sendMessage(sessionId, result.value.text, extraDirs);
+    if (!sent) seedComposer(sessionId, result.value.text);
   };
 
   const recordFeedback = async (input: {
@@ -1296,7 +1307,19 @@ export function App() {
                     setPendingRewind({ sessionId: tab.sessionId, turnIndex })
                   }
                   onRegenerate={(extraDirs) =>
-                    void regenerateLastTurn({ sessionId: tab.sessionId, extraDirs })
+                    setPendingRewind({
+                      sessionId: tab.sessionId,
+                      turnIndex: tabState.items.filter((item) => item.type === 'user').length - 1,
+                      resend: { extraDirs },
+                    })
+                  }
+                  composerSeed={pendingComposerText[tab.sessionId] ?? null}
+                  onComposerSeedApplied={() =>
+                    setPendingComposerText((current) =>
+                      Object.fromEntries(
+                        Object.entries(current).filter(([id]) => id !== tab.sessionId),
+                      ),
+                    )
                   }
                   onClearSession={() => void clearConversation(tab.sessionId)}
                   onFeedback={({ turnIndex, value }) =>
@@ -1386,15 +1409,22 @@ export function App() {
       )}
       {pendingRewind && (
         <ConfirmModal
-          title="Retroceder até esta mensagem?"
-          description="Os turnos seguintes e os arquivos editados por eles serão desfeitos."
-          confirmLabel="Retroceder"
+          title={pendingRewind.resend ? 'Regerar a resposta?' : 'Retroceder até esta mensagem?'}
+          description="Os turnos seguintes serão desfeitos e o repositório volta ao estado anterior a este turno."
+          confirmLabel={pendingRewind.resend ? 'Regerar' : 'Retroceder'}
           danger
           onCancel={() => setPendingRewind(null)}
           onConfirm={() => {
             const target = pendingRewind;
             setPendingRewind(null);
-            void confirmRewindTurn(target);
+            if (target.resend) {
+              void regenerateLastTurn({
+                sessionId: target.sessionId,
+                extraDirs: target.resend.extraDirs,
+              });
+            } else {
+              void confirmRewindTurn({ sessionId: target.sessionId, turnIndex: target.turnIndex });
+            }
           }}
         />
       )}
