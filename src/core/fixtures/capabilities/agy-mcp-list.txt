@@ -1,0 +1,3 @@
+NAME    TYPE   STATUS    COMMAND/URL
+rea     stdio  enabled   echo hi
+docs    http   disabled  https://example.com/mcp
