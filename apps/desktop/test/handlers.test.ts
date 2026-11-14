@@ -1,5 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -1439,6 +1448,26 @@ test('rewindSession rejects an unknown turn and invalid input without side effec
   expect(await handlers.rewindSession({ sessionId: session.id, turnIndex: -1 })).toEqual(INVALID);
   expect(await readFile(join(repoDir, 'index.ts'), 'utf8')).toBe('export const v = 99;\n');
   expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+});
+
+test('rewindSession leaves state intact when checkpoint restore throws', async () => {
+  const { root, handlers } = await setup();
+  const { repoDir, session } = await seedRewindSession(root, handlers);
+  const lockedDir = join(repoDir, 'locked');
+  await mkdir(lockedDir);
+  await writeFile(join(lockedDir, 'stray.txt'), 'x');
+  await chmod(lockedDir, 0o500);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  try {
+    await expect(handlers.rewindSession({ sessionId: session.id, turnIndex: 1 })).rejects.toThrow();
+  } finally {
+    await chmod(lockedDir, 0o700);
+  }
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual(before);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
 test('rewindSession keeps transcript and session intact when the checkpoint restore fails', async () => {
