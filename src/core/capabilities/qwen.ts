@@ -1,6 +1,8 @@
+import type { Dirent } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { skillsIn } from './codex.js';
-import { readIfExists } from './file-edit.js';
+import { isMissingFile, readIfExists } from './file-edit.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -12,6 +14,8 @@ import type {
 
 const INVALID_SETTINGS_MESSAGE = 'O settings.json do Qwen é inválido.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Qwen';
+const EXTENSION_LIST_FAILED_MESSAGE = 'Não foi possível listar as extensões do Qwen';
+const INVALID_EXTENSION_MESSAGE = 'Uma extensão do Qwen tem qwen-extension.json inválido.';
 
 type Settings = Record<string, unknown>;
 
@@ -87,12 +91,50 @@ async function skillCategory(
   }
 }
 
+async function extensionNames(dir: string): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return [];
+    throw error;
+  }
+  const names = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const raw = await readIfExists(join(dir, entry.name, 'qwen-extension.json'));
+        const manifest: unknown = raw === null ? null : JSON.parse(raw);
+        return isRecord(manifest) && typeof manifest['name'] === 'string' ? manifest['name'] : null;
+      }),
+  );
+  return names.flatMap((name) => (name === null ? [] : [name]));
+}
+
+async function extensionCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
+  try {
+    const names = await extensionNames(join(ctx.account.homeDir, '.qwen', 'extensions'));
+    const items = names.map((id) => item({ kind: 'plugin', id, enabled: true, description: null }));
+    return { kind: 'plugin', items, error: null };
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) {
+      return { kind: 'plugin', items: [], error: INVALID_EXTENSION_MESSAGE };
+    }
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: 'plugin', items: [], error: `${EXTENSION_LIST_FAILED_MESSAGE} (${code}).` };
+  }
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const settings = await readSettings(ctx);
+  const [settings, extensions] = await Promise.all([readSettings(ctx), extensionCategory(ctx)]);
   if (settings === null) {
     const kinds = ['skill', 'mcp'] as const;
     return {
-      categories: kinds.map((kind) => ({ kind, items: [], error: INVALID_SETTINGS_MESSAGE })),
+      categories: [
+        ...kinds.map((kind) => ({ kind, items: [], error: INVALID_SETTINGS_MESSAGE })),
+        extensions,
+      ],
       cost: null,
     };
   }
@@ -100,6 +142,7 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
     categories: [
       await skillCategory(ctx, settings),
       { kind: 'mcp', items: mcpItems(settings), error: null },
+      extensions,
     ],
     cost: null,
   };

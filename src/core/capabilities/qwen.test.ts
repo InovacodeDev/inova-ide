@@ -67,6 +67,31 @@ describe('qwenCapabilities.list', () => {
     });
   });
 
+  it('lists extensions by the name in qwen-extension.json, even with invalid settings', async () => {
+    await withAccountDir(async (ctx) => {
+      const root = join(ctx.account.homeDir, '.qwen', 'extensions');
+      await mkdir(join(root, 'dir-a'), { recursive: true });
+      await writeFile(join(root, 'dir-a', 'qwen-extension.json'), '{"name":"ext-a"}');
+      await mkdir(join(root, 'no-manifest'), { recursive: true });
+      const category = await categoryOf(ctx, 'plugin');
+      expect(category?.error).toBeNull();
+      expect(category?.items.map((item) => [item.id, item.applyMode])).toEqual([
+        ['ext-a', 'account-file'],
+      ]);
+    }, '{ nope');
+  });
+
+  it('reports an invalid extension manifest as a plugin error', async () => {
+    await withAccountDir(async (ctx) => {
+      const dir = join(ctx.account.homeDir, '.qwen', 'extensions', 'bad');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'qwen-extension.json'), '{ nope');
+      expect((await categoryOf(ctx, 'plugin'))?.error).toBe(
+        'Uma extensão do Qwen tem qwen-extension.json inválido.',
+      );
+    });
+  });
+
   it('lists nothing without error when settings.json is missing', async () => {
     await withAccountDir(async (ctx) => {
       expect(await categoryOf(ctx, 'mcp')).toEqual({ kind: 'mcp', items: [], error: null });
