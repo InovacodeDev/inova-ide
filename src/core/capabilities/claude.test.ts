@@ -45,6 +45,30 @@ describe('claudeCapabilities.list', () => {
     ]);
     expect(tokensOf('mcp')).toEqual([['graft', 800]]);
   });
+
+  it('classifies skills by source', async () => {
+    const { categories } = await claudeCapabilities.list(ctx);
+    const skills = categories.find((entry) => entry.kind === 'skill')?.items ?? [];
+    const byId = new Map(skills.map((item) => [item.id, item]));
+    expect(byId.get('dataviz')).toMatchObject({
+      source: 'bundled',
+      applyMode: 'launch',
+      tokens: 480,
+    });
+    expect(byId.get('docs')).toMatchObject({ source: 'user', applyMode: 'launch', group: null });
+    expect(byId.get('superpowers:brainstorming')).toMatchObject({
+      source: 'plugin',
+      applyMode: 'unsupported',
+      unsupportedReason: 'Desligue o plugin superpowers',
+      group: 'superpowers',
+      description: null,
+    });
+  });
+
+  it('reads the cost summary from the category table', async () => {
+    const { cost } = await claudeCapabilities.list(ctx);
+    expect(cost).toEqual({ loadedTokens: 612, instructionTokens: 2100, deferredTokens: 78400 });
+  });
 });
 
 describe('normalizeMcpName', () => {

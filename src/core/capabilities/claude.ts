@@ -4,6 +4,7 @@ import type { CommandRunner } from '../providers.js';
 import type {
   CapabilityAdapter,
   CapabilityContext,
+  CapabilityCostSummary,
   CapabilityItem,
   CapabilityListing,
   CapabilityRef,
@@ -14,6 +15,8 @@ const CONNECTOR_PREFIX = 'claude.ai ';
 const ALL_CONNECTORS_ID = '*';
 // REGEX: "<name>: <command or url> - <status>" from `claude mcp list`; the name ends at the first ": "
 const MCP_LINE_PATTERN = /^(.+?): .+ - .+$/;
+// REGEX: skill Source column "Plugin (<plugin>)" captures the plugin name
+const PLUGIN_SOURCE_PATTERN = /^Plugin \((.+)\)$/;
 
 export function normalizeMcpName(name: string): string {
   return name.replaceAll(/[^A-Za-z0-9_-]/g, '_');
@@ -74,6 +77,54 @@ function serverItems(input: {
   return { mcp, connectors };
 }
 
+function skillItems(
+  breakdown: ContextBreakdown,
+  disabled: readonly CapabilityRef[],
+): CapabilityItem[] {
+  const section = breakdown.sections.find((entry) => entry.title === 'Skills');
+  return (section?.rows ?? []).flatMap((row): CapabilityItem[] => {
+    const [id, source = ''] = row.cells;
+    if (id === undefined) return [];
+    const plugin = PLUGIN_SOURCE_PATTERN.exec(source)?.[1];
+    const base = { kind: 'skill', id, name: id, description: null, tokens: row.tokens } as const;
+    if (plugin !== undefined) {
+      return [
+        {
+          ...base,
+          source: 'plugin',
+          enabled: true,
+          applyMode: 'unsupported',
+          unsupportedReason: `Desligue o plugin ${plugin}`,
+          group: plugin,
+        },
+      ];
+    }
+    return [
+      {
+        ...base,
+        source: source === 'Built-in' ? 'bundled' : 'user',
+        enabled: !isDisabled(disabled, { kind: 'skill', id }),
+        applyMode: 'launch',
+        unsupportedReason: null,
+        group: null,
+      },
+    ];
+  });
+}
+
+function categoryTokens(breakdown: ContextBreakdown, name: string): number | null {
+  return breakdown.categories.find((entry) => entry.name === name)?.tokens ?? null;
+}
+
+function costSummary(breakdown: ContextBreakdown | null): CapabilityCostSummary | null {
+  if (breakdown === null) return null;
+  return {
+    loadedTokens: categoryTokens(breakdown, 'MCP tools'),
+    instructionTokens: categoryTokens(breakdown, 'MCP server instructions'),
+    deferredTokens: categoryTokens(breakdown, 'MCP tools (deferred)'),
+  };
+}
+
 function runClaude(
   ctx: CapabilityContext,
   command: { args: string[]; cwd?: string },
@@ -99,17 +150,23 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
     'exitCode' in context && context.exitCode === 0
       ? parseClaudeContextOutput(context.stdout)
       : null;
+  const disabled = ctx.account.disabledCapabilities ?? [];
   const servers = serverItems({
     names: 'exitCode' in mcp ? parseMcpNames(mcp.stdout) : [],
     tokens: breakdown === null ? null : serverTokens(breakdown),
-    disabled: ctx.account.disabledCapabilities ?? [],
+    disabled,
   });
   return {
     categories: [
+      {
+        kind: 'skill',
+        items: breakdown === null ? [] : skillItems(breakdown, disabled),
+        error: null,
+      },
       { kind: 'mcp', items: servers.mcp, error: null },
       { kind: 'connector', items: servers.connectors, error: null },
     ],
-    cost: null,
+    cost: costSummary(breakdown),
   };
 }
 
