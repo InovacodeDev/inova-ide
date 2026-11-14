@@ -1,6 +1,6 @@
 import { addAccount, removeAccount } from './core/accounts.js';
 import { buildLaunch, buildLogin } from './core/launch.js';
-import { isProviderId, providers } from './core/providers.js';
+import { beginForcedReauth, isProviderId, providers } from './core/providers.js';
 import { loadStore } from './core/store.js';
 import { launch, need, requireAccount, root } from './cli-context.js';
 import type { Context } from './cli-context.js';
@@ -23,7 +23,12 @@ export async function accountLogin(ctx: Context, args: string[]): Promise<number
     ctx.io.out('No Antigravity (agy), conclua o login no navegador e saia com Ctrl+C.');
   }
   await providers[account.provider].prepareLaunch(account.homeDir, ctx.env['HOME']);
-  return launch(ctx, buildLogin({ account, baseEnv: ctx.env }));
+  const finishLogin = await beginForcedReauth(account);
+  try {
+    return await launch(ctx, buildLogin({ account, baseEnv: ctx.env }));
+  } finally {
+    await finishLogin();
+  }
 }
 
 export async function accountList(ctx: Context): Promise<number> {

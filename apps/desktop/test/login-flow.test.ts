@@ -60,6 +60,109 @@ test('extractAuthUrl handles claude single-line URLs and wrapped agy URLs', () =
   expect(extractAuthUrl('no url present')).toBeNull();
 });
 
+test('extractAuthUrl prefers the full OSC 8 hyperlink target over wrapped screen text', () => {
+  const fullUrl =
+    'https://accounts.google.com/o/oauth2/auth?client_id=abc&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&state=xyz';
+  const raw = [
+    ' https://accounts.google.com/o/oauth2/auth?client_id=abc&redi\r\n',
+    ' rect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&state=xyz\r\n',
+    `\u001b]8;;${fullUrl}\u0007→ Click here to authenticate\u001b]8;;\u0007\r\n`,
+  ].join('');
+  expect(extractAuthUrl(raw)).toBe(fullUrl);
+});
+
+test('gemini flow answers the secondary device attributes query and detects the code prompt', async () => {
+  const { sessions, write } = createMockSessions();
+  const events: LoginEvent[] = [];
+  const manager = createLoginFlowManager({
+    sessions,
+    checkStatus: async () => 'logged-out',
+    emit: (event) => events.push(event),
+  });
+
+  const started = await manager.start({
+    account: makeAccount('gemini'),
+    spec: { command: 'agy', cwd: '/tmp/acc-1', env: {}, args: [] },
+    file: '/usr/local/bin/agy',
+    baseEnv: {},
+  });
+
+  manager.handlePtyData(started.sessionId, '\x1b[>c');
+  expect(write).toHaveBeenCalledWith(started.sessionId, '\x1b[>0;10;1c');
+
+  manager.handlePtyData(
+    started.sessionId,
+    'Open the URL below in your browser:\r\nhttps://accounts.google.com/o/oauth2/auth?s=1\r\n\r\nAfter authenticating, copy the code displayed in the browser and paste it below:\r\n',
+  );
+  expect(events.at(-1)).toMatchObject({
+    stage: 'waiting-auth',
+    authUrl: 'https://accounts.google.com/o/oauth2/auth?s=1',
+    codePrompt: true,
+  });
+});
+
+test('beginLogin runs before the initial status check and its finisher runs once when the flow ends', async () => {
+  const { sessions } = createMockSessions();
+  const order: string[] = [];
+  const finish = vi.fn(async () => {
+    order.push('finish');
+  });
+  const manager = createLoginFlowManager({
+    sessions,
+    checkStatus: async () => {
+      order.push('status');
+      return 'logged-out';
+    },
+    emit: () => undefined,
+    beginLogin: async () => {
+      order.push('begin');
+      return finish;
+    },
+  });
+
+  const started = await manager.start({
+    account: makeAccount('gemini'),
+    spec: { command: 'agy', cwd: '/tmp/acc-1', env: {}, args: [] },
+    file: '/usr/local/bin/agy',
+    baseEnv: {},
+  });
+  expect(order).toEqual(['begin', 'status']);
+
+  await manager.handlePtyExit(started.sessionId, 1);
+  expect(order).toEqual(['begin', 'status', 'status', 'finish']);
+  manager.cancel(started.sessionId);
+  expect(finish).toHaveBeenCalledTimes(1);
+});
+
+test('starting a new login waits for the canceled flow of the same account to finish first', async () => {
+  const { sessions } = createMockSessions();
+  const order: string[] = [];
+  let beginCount = 0;
+  const manager = createLoginFlowManager({
+    sessions,
+    checkStatus: async () => 'logged-out',
+    emit: () => undefined,
+    beginLogin: async () => {
+      const id = ++beginCount;
+      order.push(`begin-${id}`);
+      return async () => {
+        await Promise.resolve();
+        order.push(`finish-${id}`);
+      };
+    },
+  });
+  const input = {
+    account: makeAccount('gemini'),
+    spec: { command: 'agy', cwd: '/tmp/acc-1', env: {}, args: [] },
+    file: '/usr/local/bin/agy',
+    baseEnv: {},
+  };
+
+  await manager.start(input);
+  await manager.start(input);
+  expect(order).toEqual(['begin-1', 'finish-1', 'begin-2']);
+});
+
 test('gemini flow answers terminal queries, auto-selects Google OAuth, polls to unlock, and closes pty', async () => {
   vi.useFakeTimers();
   const { sessions, write, close } = createMockSessions();

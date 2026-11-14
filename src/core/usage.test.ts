@@ -28,6 +28,7 @@ type FetchInit = Parameters<UsageDeps['fetch']>[1];
 interface Recorder {
   deps: UsageDeps;
   commands: { command: string; args: string[] }[];
+  envs: NodeJS.ProcessEnv[];
   requests: { url: string; init: FetchInit }[];
 }
 
@@ -46,6 +47,7 @@ function recorder(options: {
   response?: { ok: boolean; status: number; body: unknown };
 }): Recorder {
   const commands: Recorder['commands'] = [];
+  const envs: Recorder['envs'] = [];
   const requests: Recorder['requests'] = [];
   const response = options.response ?? { ok: true, status: 200, body: {} };
   const deps: UsageDeps = {
@@ -54,6 +56,7 @@ function recorder(options: {
     runner: {
       run: (cmd) => {
         commands.push({ command: cmd.command, args: cmd.args });
+        envs.push(cmd.env);
         return Promise.resolve(options.runResult ?? { notFound: true });
       },
     },
@@ -66,7 +69,7 @@ function recorder(options: {
       });
     },
   };
-  return { deps, commands, requests };
+  return { deps, commands, envs, requests };
 }
 
 async function captureError(promise: Promise<unknown>): Promise<UsageError> {
@@ -437,10 +440,7 @@ describe('readUsage gemini', () => {
   async function markGeminiLoggedIn(): Promise<void> {
     const dir = join(homeDir, '.gemini', 'antigravity-cli');
     await mkdir(dir, { recursive: true });
-    await writeFile(
-      join(dir, 'jetski_state.pbtxt'),
-      'agent_onboarding_completed:  AGENT_ONBOARDING_STATE_COMPLETED\n',
-    );
+    await writeFile(join(dir, 'antigravity-oauth-token'), '{"token":{}}');
   }
 
   it('throws no-credentials without invoking agy when logged out', async () => {
@@ -489,6 +489,8 @@ describe('readUsage gemini', () => {
     expect(rec.commands).toEqual([
       { command: 'agy', args: ['-p', '/usage', '--output-format', 'json'] },
     ]);
+    expect(rec.envs[0]?.['HOME']).toBe(homeDir);
+    expect(rec.envs[0]?.['SSH_CONNECTION']).toBe('127.0.0.1 0 127.0.0.1 0');
     expect(snapshot).toEqual({
       provider: 'gemini',
       windows: [

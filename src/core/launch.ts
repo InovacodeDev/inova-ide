@@ -16,9 +16,9 @@ export interface TurnModelOptions {
   extraDirs?: readonly string[] | undefined;
 }
 
-function isolatedEnv(account: Account, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function isolatedEnv(account: Account, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const adapter = providers[account.provider];
-  const env = { ...baseEnv };
+  const env = { ...baseEnv, ...adapter.forcedEnv };
   for (const name of adapter.strippedEnvVars) delete env[name];
   env[adapter.homeEnvVar] = account.homeDir;
   return env;

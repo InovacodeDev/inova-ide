@@ -159,7 +159,7 @@ describe('buildChatTurn', () => {
     },
   );
 
-  it('isolates gemini with HOME and strips Google keys', () => {
+  it('isolates gemini with HOME, file-only token storage, and strips Google keys', () => {
     const spec = buildChatTurn({
       account: geminiAccount,
       cwd: '/proj',
@@ -176,7 +176,11 @@ describe('buildChatTurn', () => {
       },
     });
     expect(spec.command).toBe('agy');
-    expect(spec.env).toEqual({ HOME: '/h/gemini', PATH: '/bin' });
+    expect(spec.env).toEqual({
+      HOME: '/h/gemini',
+      PATH: '/bin',
+      SSH_CONNECTION: '127.0.0.1 0 127.0.0.1 0',
+    });
   });
 
   it('grants extra directories to claude before the prompt separator', () => {

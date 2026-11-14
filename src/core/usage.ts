@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageSnapshot, UsageWindow } from './chat-types.js';
+import { isolatedEnv } from './launch.js';
 import { providers, readGeminiAuthState } from './providers.js';
 import type { CommandRunner } from './providers.js';
 import type { Account } from './types.js';
@@ -397,13 +398,6 @@ async function readCodexUsage(homeDir: string): Promise<UsageWindow[]> {
   return [];
 }
 
-function geminiUsageEnv(homeDir: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const key of providers.gemini.strippedEnvVars) delete env[key];
-  env[providers.gemini.homeEnvVar] = homeDir;
-  return env;
-}
-
 function agyBucketWindow(
   kind: UsageWindow['kind'],
   bucket: Record<string, unknown>,
@@ -459,12 +453,12 @@ async function readGeminiUsage(
 ): Promise<{ windows: UsageWindow[]; source: UsageSnapshot['source'] }> {
   const auth = await readGeminiAuthState(ctx.account.homeDir);
   if (auth !== 'logged-in') {
-    throw new UsageError('no-credentials', 'No Antigravity CLI onboarding found for this account');
+    throw new UsageError('no-credentials', 'No Antigravity CLI login token found for this account');
   }
   const result = await ctx.deps.runner.run({
     command: providers.gemini.binary,
     args: ['-p', '/usage', '--output-format', 'json'],
-    env: geminiUsageEnv(ctx.account.homeDir),
+    env: isolatedEnv(ctx.account, process.env),
   });
   if ('notFound' in result) return { windows: [], source: 'unavailable' };
   if (result.exitCode !== 0) {

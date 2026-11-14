@@ -50,7 +50,7 @@ import {
   unbindProject,
   updateProjectConfig,
 } from '@inova/core/projects';
-import { providers, readAccountEmail } from '@inova/core/providers';
+import { beginForcedReauth, providers, readAccountEmail } from '@inova/core/providers';
 import type { CommandRunner } from '@inova/core/providers';
 import {
   IMPORT_PROVIDERS,
@@ -852,6 +852,7 @@ export function createHandlers(deps: HandlerDeps) {
     onAuthenticated: (accountId) => {
       modelsCache.delete(accountId);
     },
+    beginLogin: beginForcedReauth,
     checkStatus: async ({ account, baseEnv }) => {
       const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
       try {

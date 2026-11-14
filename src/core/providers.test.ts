@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { isProviderId, providers, readAccountEmail } from './providers.js';
+import { beginForcedReauth, isProviderId, providers, readAccountEmail } from './providers.js';
 import type { CommandRunner } from './providers.js';
 
 let homeDir: string;
@@ -70,36 +70,80 @@ describe('providers', () => {
     }
   });
 
-  it('gemini status detects onboarding via jetski_state.pbtxt, onboarding.json or oauth token', async () => {
+  it('gemini status is logged-in only when the account oauth token file has content', async () => {
     const { runner, envs } = fakeRunner({ exitCode: 0, stdout: '' });
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
     expect(envs[0]?.['HOME']).toBe(homeDir);
     const stateDir = join(homeDir, '.gemini', 'antigravity-cli');
     const cacheDir = join(stateDir, 'cache');
     await mkdir(cacheDir, { recursive: true });
-    await writeFile(join(stateDir, 'jetski_state.pbtxt'), 'last_seen: 1\n');
-    await writeFile(
-      join(cacheDir, 'onboarding.json'),
-      JSON.stringify({ onboardingComplete: false }),
-    );
-    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
-
-    await writeFile(
-      join(cacheDir, 'onboarding.json'),
-      JSON.stringify({ onboardingComplete: true }),
-    );
-    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
-
-    await rm(join(cacheDir, 'onboarding.json'));
-    await writeFile(join(stateDir, 'antigravity-oauth-token'), 'tok-123');
-    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
-
-    await rm(join(stateDir, 'antigravity-oauth-token'));
     await writeFile(
       join(stateDir, 'jetski_state.pbtxt'),
       'agent_onboarding_completed:  AGENT_ONBOARDING_STATE_COMPLETED\n',
     );
+    await writeFile(
+      join(cacheDir, 'onboarding.json'),
+      JSON.stringify({ onboardingComplete: true }),
+    );
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
+
+    await writeFile(join(stateDir, 'antigravity-oauth-token'), '  \n');
+    expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-out');
+
+    await writeFile(join(stateDir, 'antigravity-oauth-token'), 'tok-123');
     expect(await providers.gemini.checkStatus({ homeDir, env: {}, runner })).toBe('logged-in');
+  });
+
+  describe('beginForcedReauth', () => {
+    const tokenPath = (): string =>
+      join(homeDir, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+
+    async function writeToken(content: string): Promise<void> {
+      await mkdir(join(homeDir, '.gemini', 'antigravity-cli'), { recursive: true });
+      await writeFile(tokenPath(), content);
+    }
+
+    async function readTokenOrNull(): Promise<string | null> {
+      try {
+        return await readFile(tokenPath(), 'utf8');
+      } catch {
+        return null;
+      }
+    }
+
+    it('moves the gemini token aside and restores it when no new token is written', async () => {
+      await writeToken('old-token');
+      const finish = await beginForcedReauth({ provider: 'gemini', homeDir });
+      expect(await readTokenOrNull()).toBeNull();
+      await finish();
+      expect(await readTokenOrNull()).toBe('old-token');
+    });
+
+    it('keeps the new gemini token and drops the old one after a successful login', async () => {
+      await writeToken('old-token');
+      const finish = await beginForcedReauth({ provider: 'gemini', homeDir });
+      await writeToken('new-token');
+      await finish();
+      expect(await readTokenOrNull()).toBe('new-token');
+      await finish();
+      expect(await readTokenOrNull()).toBe('new-token');
+    });
+
+    it('restores a token left aside by an interrupted reauth', async () => {
+      await writeToken('old-token');
+      await beginForcedReauth({ provider: 'gemini', homeDir });
+      const finish = await beginForcedReauth({ provider: 'gemini', homeDir });
+      await finish();
+      expect(await readTokenOrNull()).toBe('old-token');
+    });
+
+    it('does not touch credentials of other providers', async () => {
+      await writeToken('old-token');
+      const finish = await beginForcedReauth({ provider: 'claude', homeDir });
+      expect(await readTokenOrNull()).toBe('old-token');
+      await finish();
+      expect(await readTokenOrNull()).toBe('old-token');
+    });
   });
 
   it('gemini status is unknown when state read fails with a non-ENOENT error', async () => {
