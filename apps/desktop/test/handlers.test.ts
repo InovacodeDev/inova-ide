@@ -717,6 +717,7 @@ async function exhaustAccount(input: { resetsAt: string | null }) {
     durationMs: 1,
   });
   await ctx.handlers.listInbox();
+  await ctx.handlers.loadTranscript({ sessionId: session.id });
   ctx.send.mockClear();
   return { ...ctx, session };
 }
@@ -758,6 +759,7 @@ test('sendMessage proceeds when the reset passed and fresh usage is below the li
   unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'outra' }));
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(send).toHaveBeenCalledTimes(2);
+  await handlers.loadTranscript({ sessionId: session.id });
 });
 
 test('sendMessage still blocks when the reset passed but fresh usage is at the limit', async () => {
@@ -786,6 +788,7 @@ test('getUsage clears the exhaustion when no window is at the limit', async () =
   unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'de novo' }));
   expect(fetch).not.toHaveBeenCalled();
   expect(send).toHaveBeenCalledTimes(1);
+  await handlers.loadTranscript({ sessionId: session.id });
 });
 
 test('getUsage falls back to the cached stream snapshot for claude', async () => {
