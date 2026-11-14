@@ -17,15 +17,19 @@ export interface UsageDeps {
   now: () => Date;
 }
 
-export type UsageErrorCode = 'no-credentials' | 'http' | 'bad-response';
+export type UsageErrorCode = 'no-credentials' | 'http' | 'bad-response' | 'unauthorized';
+
+const HTTP_UNAUTHORIZED = 401;
 
 export class UsageError extends Error {
   readonly code: UsageErrorCode;
+  readonly status: number | null;
 
-  constructor(code: UsageErrorCode, message: string) {
+  constructor(code: UsageErrorCode, message: string, status: number | null = null) {
     super(message);
     this.name = 'UsageError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -67,16 +71,22 @@ function parseJson(raw: string): unknown {
   }
 }
 
-function accessTokenFrom(raw: string): string | null {
+interface ClaudeAccessToken {
+  token: string;
+  expiresAt: number | null;
+}
+
+function accessTokenFrom(raw: string): ClaudeAccessToken | null {
   const parsed = parseJson(raw);
   if (!isRecord(parsed)) return null;
   const oauth = parsed['claudeAiOauth'];
   if (!isRecord(oauth)) return null;
   const token = oauth['accessToken'];
-  return typeof token === 'string' && token.length > 0 ? token : null;
+  if (typeof token !== 'string' || token.length === 0) return null;
+  return { token, expiresAt: finiteNumber(oauth['expiresAt']) };
 }
 
-async function tokenFromFile(homeDir: string): Promise<string | null> {
+async function tokenFromFile(homeDir: string): Promise<ClaudeAccessToken | null> {
   try {
     return accessTokenFrom(await readFile(join(homeDir, '.credentials.json'), 'utf8'));
   } catch (error: unknown) {
@@ -90,7 +100,7 @@ function claudeKeychainService(homeDir: string): string {
   return `Claude Code-credentials-${hash}`;
 }
 
-async function tokenFromKeychain(ctx: UsageContext): Promise<string | null> {
+async function tokenFromKeychain(ctx: UsageContext): Promise<ClaudeAccessToken | null> {
   const result = await ctx.deps.runner.run({
     command: 'security',
     args: ['find-generic-password', '-s', claudeKeychainService(ctx.account.homeDir), '-w'],
@@ -100,7 +110,7 @@ async function tokenFromKeychain(ctx: UsageContext): Promise<string | null> {
   return accessTokenFrom(result.stdout.trim());
 }
 
-async function claudeAccessToken(ctx: UsageContext): Promise<string> {
+async function claudeAccessToken(ctx: UsageContext): Promise<ClaudeAccessToken> {
   const fromFile = await tokenFromFile(ctx.account.homeDir);
   if (fromFile !== null) return fromFile;
   const fromKeychain = ctx.deps.platform === 'darwin' ? await tokenFromKeychain(ctx) : null;
@@ -135,6 +145,7 @@ async function fetchUsageJson(
       throw new UsageError(
         'http',
         `${request.provider} usage request failed with status ${response.status}`,
+        response.status,
       );
     }
     return await response.json().catch(() => undefined);
@@ -208,8 +219,25 @@ function claudeExtraMonthlyWindow(extra: unknown): UsageWindow | null {
   };
 }
 
+async function fetchClaudeBodyDetectingRevocation(ctx: UsageContext): Promise<unknown> {
+  const access = await claudeAccessToken(ctx);
+  try {
+    return await fetchClaudeBody(ctx, access.token);
+  } catch (error: unknown) {
+    const stillValid = access.expiresAt !== null && access.expiresAt > ctx.deps.now().getTime();
+    if (error instanceof UsageError && error.status === HTTP_UNAUTHORIZED && stillValid) {
+      throw new UsageError(
+        'unauthorized',
+        'Claude rejected an unexpired OAuth token',
+        HTTP_UNAUTHORIZED,
+      );
+    }
+    throw error;
+  }
+}
+
 async function readClaudeUsage(ctx: UsageContext): Promise<UsageWindow[]> {
-  const body = await fetchClaudeBody(ctx, await claudeAccessToken(ctx));
+  const body = await fetchClaudeBodyDetectingRevocation(ctx);
   if (!isRecord(body))
     throw new UsageError('bad-response', 'Claude usage response is not an object');
   return [

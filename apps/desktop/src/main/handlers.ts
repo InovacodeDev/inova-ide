@@ -27,6 +27,7 @@ import {
 } from '@inova/core/git-worktree';
 import {
   buildHandoffContext,
+  isAuthRevokedMessage,
   isRateLimitMessage,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
@@ -272,7 +273,10 @@ export function createHandlers(deps: HandlerDeps) {
   const fileListInflight = new Map<string, Promise<ProjectFileList>>();
   const fileListGen = new Map<string, number>();
   const sessionProjects = new Map<string, string>();
-  const turnOwners = new Map<string, { accountId: string; provider: ProviderId }>();
+  const turnOwners = new Map<
+    string,
+    { accountId: string; accountLabel: string; provider: ProviderId }
+  >();
   const provisionalSessions = new Map<string, { providerSessionId: string; confirmed: boolean }>();
   const sessionTurnIds = new Map<string, string>();
   const cancelledTurns = new Set<string>();
@@ -283,6 +287,7 @@ export function createHandlers(deps: HandlerDeps) {
   const inboxMap = new Map<string, InboxItem>();
   const lastErrorBySession = new Map<string, string>();
   const exhaustedAccounts = new Map<string, string | null>();
+  const expiredAccounts = new Set<string>();
   let uiFocus: { activeSessionId: string | null; windowFocused: boolean } = {
     activeSessionId: null,
     windowFocused: true,
@@ -718,6 +723,19 @@ export function createHandlers(deps: HandlerDeps) {
     return promise;
   }
 
+  function failedTurnSummary(input: {
+    owner: { accountLabel: string } | undefined;
+    lastError: string | undefined;
+    rateLimited: boolean;
+  }): string {
+    const { owner, lastError, rateLimited } = input;
+    if (rateLimited) return 'Limite da conta atingido. Troque de conta ou execute handoff.';
+    if (owner && lastError !== undefined && isAuthRevokedMessage(lastError)) {
+      return `Sessão da conta ${owner.accountLabel} expirou. Renove o login em Contas.`;
+    }
+    return lastError ?? 'Turno encerrado com erro.';
+  }
+
   function handleChatEvent(sessionId: string, event: ChatEvent): void {
     deps.emit(sessionId, event);
     if (event.kind !== 'text-delta') enqueueAppend(sessionId, event);
@@ -741,6 +759,7 @@ export function createHandlers(deps: HandlerDeps) {
     }
     if (event.kind === 'error') {
       lastErrorBySession.set(sessionId, event.message);
+      if (owner && isAuthRevokedMessage(event.message)) expiredAccounts.add(owner.accountId);
       if (owner && isRateLimitMessage(event.message)) {
         const windows = streamUsage.get(owner.accountId)?.windows ?? [];
         exhaustedAccounts.set(
@@ -787,11 +806,10 @@ export function createHandlers(deps: HandlerDeps) {
         enqueueInboxUpdate({
           sessionId,
           kind: rateLimited ? 'waiting-input' : 'failed',
-          summary: rateLimited
-            ? 'Limite da conta atingido. Troque de conta ou execute handoff.'
-            : (lastError ?? 'Turno encerrado com erro.'),
+          summary: failedTurnSummary({ owner, lastError, rateLimited }),
         });
       } else if (!event.isError && !wasCancelled) {
+        if (owner) expiredAccounts.delete(owner.accountId);
         const atLimit = streamUsage
           .get(owner?.accountId ?? '')
           ?.windows.some((window) => window.usedPercent >= 100);
@@ -826,7 +844,13 @@ export function createHandlers(deps: HandlerDeps) {
       }),
       readAccountEmail(account),
     ]);
-    return { id: account.id, label: account.label, email, provider: account.provider, status };
+    return {
+      id: account.id,
+      label: account.label,
+      email,
+      provider: account.provider,
+      status: status === 'logged-in' && expiredAccounts.has(account.id) ? 'expired' : status,
+    };
   }
 
   async function savedAccountView(account: Account): Promise<AccountView> {
@@ -851,6 +875,7 @@ export function createHandlers(deps: HandlerDeps) {
     emit: (event) => deps.emitLogin?.(event),
     onAuthenticated: (accountId) => {
       modelsCache.delete(accountId);
+      expiredAccounts.delete(accountId);
     },
     beginLogin: beginForcedReauth,
     checkStatus: async ({ account, baseEnv }) => {
@@ -966,7 +991,11 @@ export function createHandlers(deps: HandlerDeps) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
     }
     sessionProjects.set(sessionId, session.projectId);
-    turnOwners.set(sessionId, { accountId: account.id, provider: account.provider });
+    turnOwners.set(sessionId, {
+      accountId: account.id,
+      accountLabel: account.label,
+      provider: account.provider,
+    });
     if (checkpoint !== null) {
       handleChatEvent(sessionId, {
         kind: 'checkpoint',
@@ -1912,6 +1941,7 @@ export function createHandlers(deps: HandlerDeps) {
         try {
           const snapshot = await readUsage({ account, deps: deps.usageDeps });
           if (snapshot.source === 'api') {
+            expiredAccounts.delete(account.id);
             streamUsage.set(account.id, snapshot);
             if (!snapshot.windows.some((window) => window.usedPercent >= 100)) {
               exhaustedAccounts.delete(account.id);
@@ -1920,6 +1950,10 @@ export function createHandlers(deps: HandlerDeps) {
           return ok(snapshot);
         } catch (error: unknown) {
           if (!(error instanceof Error)) throw error;
+          if (error instanceof UsageError && error.code === 'unauthorized') {
+            expiredAccounts.add(account.id);
+            throw error;
+          }
           const cached = streamUsage.get(account.id);
           if (account.provider === 'claude' && cached) return ok(cached);
           if (error instanceof UsageError) throw error;

@@ -11,6 +11,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Gemini (Antigravity): o login de cada conta fica só no diretório da conta. O app não usa mais o Keychain do macOS, e o diálogo "Keychain Not Found" não aparece mais a cada renovação do token.
 - Gemini: "Renovar login" sempre abre a página do Google e pede o código. Se você cancelar, o login anterior volta.
 - Gemini: a tela de login não trava mais na versão nova do `agy`, e o link completo de autenticação aparece no modal.
+- Conta com login revogado (por exemplo, depois de `/logout` no Claude Code) aparece como "sessão expirada" em Contas e no rodapé, com o botão "Renovar login". O aviso do turno com erro diz qual conta precisa de login novo.
 
 ## [0.5.3] - 2026-11-14
 

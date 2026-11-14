@@ -205,11 +205,35 @@ describe('readUsage claude response', () => {
     ]);
   });
 
-  it('reports http errors with the status but never the token', async () => {
+  it('reports unauthorized when the API rejects a token that is still within its validity', async () => {
+    await writeFile(
+      join(homeDir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: TOKEN, expiresAt: NOW.getTime() + 3_600_000 },
+      }),
+    );
+    const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
+    const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
+    expect(error.code).toBe('unauthorized');
+    expect(JSON.stringify(error)).not.toContain(TOKEN);
+  });
+
+  it('keeps a plain http error for 401 when the access token already expired locally', async () => {
+    await writeFile(
+      join(homeDir, '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: NOW.getTime() - 1 } }),
+    );
     const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
     const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
     expect(error.code).toBe('http');
     expect(error.message).toContain('401');
+  });
+
+  it('reports http errors with the status but never the token', async () => {
+    const rec = recorder({ platform: 'linux', response: { ok: false, status: 500, body: {} } });
+    const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
+    expect(error.code).toBe('http');
+    expect(error.message).toContain('500');
     expect(error.message).not.toContain(TOKEN);
     expect(JSON.stringify(error)).not.toContain(TOKEN);
   });
