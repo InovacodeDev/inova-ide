@@ -220,6 +220,15 @@ function eventOf(record: Json): ChatEvent | undefined {
         ? { kind: 'verification', turnId, status, checks: parsedChecks }
         : undefined;
     }
+    case 'feedback': {
+      const { turnIndex, value } = record;
+      return typeof turnIndex === 'number' &&
+        Number.isInteger(turnIndex) &&
+        turnIndex >= 0 &&
+        (value === 'up' || value === 'down' || value === null)
+        ? { kind: 'feedback', turnIndex, value }
+        : undefined;
+    }
     case 'error':
       return strings(record, ['message'])
         ? { kind: 'error', message: String(record['message']) }

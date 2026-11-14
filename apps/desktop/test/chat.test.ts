@@ -195,6 +195,8 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
       outputTokens: 2,
       totalTokens: 3,
     },
+    { kind: 'feedback', turnIndex: 2, value: 'down' },
+    { kind: 'feedback', turnIndex: 0, value: null },
     { kind: 'error', message: 'm' },
     { kind: 'done', isError: false, costUsd: null, durationMs: 3 },
   ];
@@ -206,6 +208,8 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
     '{"kind":"text"}',
     '{"kind":"done","isError":"x"}',
     '{"kind":"usage-limits","windows":[{"kind":"x"}]}',
+    '{"kind":"feedback","turnIndex":0,"value":"meh"}',
+    '{"kind":"feedback","turnIndex":-1,"value":"up"}',
     '{"kind":"unknown"}',
   ]) {
     expect(parseTranscriptLine(line)).toBeUndefined();

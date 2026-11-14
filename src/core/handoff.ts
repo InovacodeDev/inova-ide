@@ -140,8 +140,12 @@ export function truncateTranscriptAtTurn(
   if (userEvent?.kind !== 'user') return null;
   const prevEvent = userPos > 0 ? events[userPos - 1] : undefined;
   const hasCheckpoint = prevEvent?.kind === 'checkpoint';
+  const cut = hasCheckpoint ? userPos - 1 : userPos;
+  const earlierFeedback = events
+    .slice(cut)
+    .filter((event) => event.kind === 'feedback' && event.turnIndex < turnIndex);
   return {
-    kept: events.slice(0, hasCheckpoint ? userPos - 1 : userPos),
+    kept: [...events.slice(0, cut), ...earlierFeedback],
     removedUserText: userEvent.text,
     checkpointRef: hasCheckpoint ? prevEvent.ref : null,
   };

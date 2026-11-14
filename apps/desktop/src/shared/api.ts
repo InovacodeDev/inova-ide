@@ -230,6 +230,11 @@ export interface InovaApi {
     copyWorktreeFiles?: boolean;
   }): Promise<Result<{ session: SessionView; strategy: 'native-claude' | 'summary-handoff' }>>;
   rewindSession(input: { sessionId: string; turnIndex: number }): Promise<Result<{ text: string }>>;
+  recordFeedback(input: {
+    sessionId: string;
+    turnIndex: number;
+    value: 'up' | 'down' | null;
+  }): Promise<Result<null>>;
   listExternalSessions(input: { projectId: string }): Promise<Result<ExternalSessionView[]>>;
   importSessions(input: {
     projectId: string;
@@ -333,6 +338,7 @@ export const CHANNELS = {
   handoffSession: 'inova:handoffSession',
   forkSession: 'inova:forkSession',
   rewindSession: 'inova:rewindSession',
+  recordFeedback: 'inova:recordFeedback',
   listExternalSessions: 'inova:listExternalSessions',
   importSessions: 'inova:importSessions',
   listInbox: 'inova:listInbox',

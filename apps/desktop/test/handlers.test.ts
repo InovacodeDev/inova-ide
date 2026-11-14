@@ -1361,6 +1361,40 @@ test('rewindSession fails without touching files or transcript while a turn is r
   expect(stored?.providerSessionId).toBe('cli-sess-1');
 });
 
+test('recordFeedback appends a feedback event to the transcript and validates input', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+  const before = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'up' }));
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: null }));
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([
+    ...before,
+    { kind: 'feedback', turnIndex: 0, value: 'up' },
+    { kind: 'feedback', turnIndex: 0, value: null },
+  ]);
+  expect(
+    await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'meh' }),
+  ).toEqual(INVALID);
+  expect((await handlers.recordFeedback({ sessionId: 'nope', turnIndex: 0, value: 'up' })).ok).toBe(
+    false,
+  );
+});
+
+test('rewindSession keeps feedback of earlier turns recorded after the cut point', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 0, value: 'up' }));
+  unwrap(await handlers.recordFeedback({ sessionId: session.id, turnIndex: 1, value: 'down' }));
+
+  unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 1 }));
+
+  const after = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  const feedback = after.filter((event) => event.kind === 'feedback');
+  expect(feedback).toEqual([{ kind: 'feedback', turnIndex: 0, value: 'up' }]);
+});
+
 test('rewindSession rejects an unknown turn and invalid input without side effects', async () => {
   const { root, handlers } = await setup();
   const { repoDir, session } = await seedRewindSession(root, handlers);

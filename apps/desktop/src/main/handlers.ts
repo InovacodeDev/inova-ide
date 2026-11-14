@@ -132,6 +132,7 @@ import {
   parseRemoval,
   parseResolveComparison,
   parseRestoreCheckpoint,
+  parseRecordFeedback,
   parseRewindSession,
   parseSessionDelete,
   parseSettingsPatch,
@@ -1600,6 +1601,15 @@ export function createHandlers(deps: HandlerDeps) {
             if (checkpointRef !== null) invalidateProjectFiles(sessionId);
           }
           return ok({ text: removedUserText });
+        }),
+      ),
+    recordFeedback: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseRecordFeedback, ({ sessionId, turnIndex, value }) =>
+        serialized(async () => {
+          requireSession(await loadStore(deps.root), sessionId);
+          enqueueAppend(sessionId, { kind: 'feedback', turnIndex, value });
+          await flushTranscript(sessionId);
+          return ok(null);
         }),
       ),
     listExternalSessions: (input: unknown): Promise<Result<ExternalSessionView[]>> =>

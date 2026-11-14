@@ -146,6 +146,24 @@ describe('handoff', () => {
       expect(result?.checkpointRef).toBeNull();
     });
 
+    test('keeps feedback of earlier turns recorded after the cut point', () => {
+      const feedback = (turnIndex: number): ChatEvent => ({
+        kind: 'feedback',
+        turnIndex,
+        value: 'up',
+      });
+      const events: ChatEvent[] = [
+        { kind: 'user', text: 'Turno 0', at: 't0' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+        { kind: 'user', text: 'Turno 1', at: 't1' },
+        feedback(0),
+        feedback(1),
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+      ];
+      const result = truncateTranscriptAtTurn(events, 1);
+      expect(result?.kept).toEqual([...events.slice(0, 2), feedback(0)]);
+    });
+
     test('returns null when the turn does not exist', () => {
       expect(truncateTranscriptAtTurn(withCheckpoints, 5)).toBeNull();
     });

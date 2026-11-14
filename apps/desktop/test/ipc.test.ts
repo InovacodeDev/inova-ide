@@ -54,6 +54,7 @@ function setup() {
       'handoffSession',
       'forkSession',
       'rewindSession',
+      'recordFeedback',
       'listExternalSessions',
       'importSessions',
       'listInbox',
@@ -213,6 +214,7 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:handoffSession', trusted, { sessionId: 's', targetAccountId: 'a2' });
   await invoke('inova:forkSession', trusted, { sessionId: 's', turnIndex: 0 });
   await invoke('inova:rewindSession', trusted, { sessionId: 's', turnIndex: 0 });
+  await invoke('inova:recordFeedback', trusted, { sessionId: 's', turnIndex: 0, value: 'up' });
   await invoke('inova:listInbox', trusted);
   await invoke('inova:markInboxRead', trusted, { sessionId: 's' });
   await invoke('inova:clearReadInbox', trusted);

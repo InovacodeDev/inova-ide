@@ -51,11 +51,15 @@ import {
   ListTodoIcon,
   PencilIcon,
   PlayIcon,
+  RefreshIcon,
   RotateCcwIcon,
   SendIcon,
   StopFilledIcon,
   TerminalIcon,
+  ThumbDownIcon,
+  ThumbUpIcon,
 } from './icons';
+import { copyToClipboard } from './clipboard';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { ModePicker } from './ModePicker';
@@ -63,10 +67,12 @@ import { ProviderBadge } from './ProviderBadge';
 import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
 import {
+  agentTurnFooters,
   groupChatItems,
   summarizeWork,
   toolKind,
   toolSummary,
+  type AgentTurnFooter,
   type ChatEntry,
 } from './turn-groups';
 import { useDictation, type Dictation } from './useDictation';
@@ -106,6 +112,9 @@ export interface ChatViewProps {
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onForkTurn?: (turnIndex: number) => void;
   onRewindTurn?: (turnIndex: number) => void;
+  onRegenerate?: () => void;
+  onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
+  onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
   onEnqueuePrompt?: (prompt: string) => void;
   onCancelQueuedTurn?: (turnId: string) => void;
@@ -263,7 +272,85 @@ interface MessageProps {
   onFixVerification?: (prompt: string) => void;
   onForkTurn?: (turnIndex: number) => void;
   onRewindTurn?: (turnIndex: number) => void;
+  onCopyText: (text: string) => void;
+  agentMeta?: ReactNode;
   onOpenHandoff?: () => void;
+}
+
+interface AgentMetaProps {
+  footer: AgentTurnFooter;
+  model: string | null;
+  feedback: 'up' | 'down' | null;
+  busy: boolean;
+  onCopyText: (text: string) => void;
+  onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
+  onRegenerate?: () => void;
+}
+
+function AgentMeta({
+  footer,
+  model,
+  feedback,
+  busy,
+  onCopyText,
+  onFeedback,
+  onRegenerate,
+}: AgentMetaProps) {
+  const time = footer.at ? formatMessageTime(footer.at) : '';
+  const vote = (value: 'up' | 'down') =>
+    onFeedback?.({ turnIndex: footer.turnIndex, value: feedback === value ? null : value });
+  return (
+    <div className="chat-meta chat-meta-agent">
+      {time ? <span className="chat-meta-time">{time}</span> : null}
+      {time ? <span className="chat-meta-sep">·</span> : null}
+      <button
+        type="button"
+        className="chat-meta-btn"
+        aria-label="Copiar resposta"
+        data-tooltip="Copiar resposta"
+        onClick={() => onCopyText(footer.text)}
+      >
+        <CopyIcon size={12} />
+      </button>
+      {onFeedback ? (
+        <>
+          <button
+            type="button"
+            className={`chat-meta-btn${feedback === 'up' ? ' chat-meta-btn-active' : ''}`}
+            aria-label="Gostei"
+            aria-pressed={feedback === 'up'}
+            data-tooltip="Gostei"
+            onClick={() => vote('up')}
+          >
+            <ThumbUpIcon size={12} />
+          </button>
+          <button
+            type="button"
+            className={`chat-meta-btn${feedback === 'down' ? ' chat-meta-btn-active' : ''}`}
+            aria-label="Não gostei"
+            aria-pressed={feedback === 'down'}
+            data-tooltip="Não gostei"
+            onClick={() => vote('down')}
+          >
+            <ThumbDownIcon size={12} />
+          </button>
+        </>
+      ) : null}
+      {onRegenerate && footer.isLastTurn ? (
+        <button
+          type="button"
+          className="chat-meta-btn"
+          aria-label="Regenerar"
+          disabled={busy}
+          data-tooltip="Regenerar: refaz este turno com a mesma mensagem"
+          onClick={onRegenerate}
+        >
+          <RefreshIcon size={12} />
+        </button>
+      ) : null}
+      {model ? <span className="chat-meta-model">{model}</span> : null}
+    </div>
+  );
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
@@ -285,6 +372,8 @@ function Message({
   onFixVerification,
   onForkTurn,
   onRewindTurn,
+  onCopyText,
+  agentMeta,
   onOpenHandoff,
 }: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
@@ -317,7 +406,7 @@ function Message({
               className="chat-meta-btn"
               aria-label="Copiar mensagem"
               data-tooltip="Copiar mensagem"
-              onClick={() => void navigator.clipboard.writeText(item.text)}
+              onClick={() => onCopyText(item.text)}
             >
               <CopyIcon size={12} />
             </button>
@@ -356,6 +445,7 @@ function Message({
             <Markdown text={item.text} streaming={item.streaming} />
             {item.streaming ? <span className="chat-caret" aria-hidden="true" /> : null}
           </div>
+          {agentMeta}
         </div>
       );
     case 'tool':
@@ -547,6 +637,9 @@ export function ChatView({
   onRestoreCheckpoint,
   onForkTurn,
   onRewindTurn,
+  onRegenerate,
+  onFeedback,
+  onWarn,
   onOpenHandoff,
   onEnqueuePrompt,
   onCancelQueuedTurn,
@@ -600,6 +693,10 @@ export function ChatView({
     () => groupChatItems(items, running, collapseFinishedTurns),
     [items, running, collapseFinishedTurns],
   );
+  const footers = useMemo(() => agentTurnFooters({ items, running }), [items, running]);
+  const copyText = (text: string) => {
+    void copyToClipboard({ text, onError: (message) => onWarn?.(message) });
+  };
 
   const toggleDictation = dictation.toggle;
   useImperativeHandle(
@@ -844,23 +941,40 @@ export function ChatView({
     setPendingDrop(null);
   };
 
-  const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => (
-    <Message
-      key={item.id}
-      item={item}
-      turnIndex={userTurnIndices[index] ?? 0}
-      provider={provider}
-      busy={running || readOnly}
-      onRestoreCheckpoint={onRestoreCheckpoint}
-      onForkTurn={onForkTurn}
-      onRewindTurn={onRewindTurn}
-      onOpenHandoff={onOpenHandoff}
-      onFixVerification={(fixPrompt) => {
-        if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
-      }}
-      showAgentLabel={showAgentLabel}
-    />
-  );
+  const renderEntry = ({ item, index }: ChatEntry, showAgentLabel = false) => {
+    const footer = footers.get(index);
+    return (
+      <Message
+        key={item.id}
+        item={item}
+        onCopyText={copyText}
+        agentMeta={
+          footer ? (
+            <AgentMeta
+              footer={footer}
+              model={state.context?.model ?? null}
+              feedback={state.feedback?.[footer.turnIndex] ?? null}
+              busy={running || readOnly}
+              onCopyText={copyText}
+              onFeedback={readOnly ? undefined : onFeedback}
+              onRegenerate={readOnly ? undefined : onRegenerate}
+            />
+          ) : undefined
+        }
+        turnIndex={userTurnIndices[index] ?? 0}
+        provider={provider}
+        busy={running || readOnly}
+        onRestoreCheckpoint={onRestoreCheckpoint}
+        onForkTurn={onForkTurn}
+        onRewindTurn={onRewindTurn}
+        onOpenHandoff={onOpenHandoff}
+        onFixVerification={(fixPrompt) => {
+          if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
+        }}
+        showAgentLabel={showAgentLabel}
+      />
+    );
+  };
 
   const submit = () => {
     const editor = editorRef.current;

@@ -1450,6 +1450,19 @@
   font-size: 11px;
 }
 
+.chat-meta-agent {
+  justify-content: flex-start;
+}
+
+.chat-meta-model {
+  margin-left: 6px;
+}
+
+.chat-meta-btn-active {
+  color: var(--text);
+  opacity: 1;
+}
+
 .chat-meta-sep {
   opacity: 0.6;
 }

@@ -216,10 +216,10 @@ export function App() {
   }, []);
 
   const loadChat = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, mode: 'load' | 'replace' = 'load') => {
       const result = await call(() => window.inova.loadTranscript({ sessionId }));
       if (result) {
-        dispatchChat({ sessionId, action: { type: 'load', events: result.value } });
+        dispatchChat({ sessionId, action: { type: mode, events: result.value } });
       }
     },
     [call],
@@ -536,8 +536,35 @@ export function App() {
   const confirmRewindTurn = async (input: { sessionId: string; turnIndex: number }) => {
     const result = await call(() => window.inova.rewindSession(input));
     if (!result) return;
-    await loadChat(input.sessionId);
+    await loadChat(input.sessionId, 'replace');
     activeChatRef.current?.setComposerText(result.value.text);
+  };
+
+  const regenerateLastTurn = async (sessionId: string) => {
+    const userTurns = (chats[sessionId]?.items ?? []).filter((item) => item.type === 'user');
+    if (userTurns.length === 0) return;
+    const result = await call(() =>
+      window.inova.rewindSession({ sessionId, turnIndex: userTurns.length - 1 }),
+    );
+    if (!result) return;
+    await loadChat(sessionId, 'replace');
+    await sendMessage(sessionId, result.value.text);
+  };
+
+  const recordFeedback = async (input: {
+    sessionId: string;
+    turnIndex: number;
+    value: 'up' | 'down' | null;
+  }) => {
+    const result = await call(() => window.inova.recordFeedback(input));
+    if (!result) return;
+    dispatchChat({
+      sessionId: input.sessionId,
+      action: {
+        type: 'event',
+        event: { kind: 'feedback', turnIndex: input.turnIndex, value: input.value },
+      },
+    });
   };
 
   useEffect(() => {
@@ -1261,6 +1288,11 @@ export function App() {
                   onRewindTurn={(turnIndex) =>
                     setPendingRewind({ sessionId: tab.sessionId, turnIndex })
                   }
+                  onRegenerate={() => void regenerateLastTurn(tab.sessionId)}
+                  onFeedback={({ turnIndex, value }) =>
+                    void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
+                  }
+                  onWarn={warn}
                   onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
                   onEnqueuePrompt={(prompt) => void enqueuePrompt(tab.sessionId, prompt)}
                   onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}

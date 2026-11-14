@@ -179,6 +179,43 @@ describe('chatReducer', () => {
     expect(chatReducer(running, loadAction)).toBe(running);
   });
 
+  test('feedback keeps the last value per turn and null removes the key', () => {
+    const base: ChatEvent[] = [
+      { kind: 'user', text: 'a', at: 'now' },
+      { kind: 'feedback', turnIndex: 0, value: 'up' },
+      { kind: 'feedback', turnIndex: 1, value: 'down' },
+      { kind: 'feedback', turnIndex: 0, value: 'down' },
+    ];
+    expect(run(base).feedback).toEqual({ 0: 'down', 1: 'down' });
+    const cleared = run([...base, { kind: 'feedback', turnIndex: 1, value: null }]);
+    expect(cleared.feedback).toEqual({ 0: 'down' });
+    expect(cleared.items).toHaveLength(1);
+  });
+
+  test('load rebuilds the feedback map from the transcript', () => {
+    const state = chatReducer(initialChatState, {
+      type: 'load',
+      events: [
+        { kind: 'user', text: 'a', at: 'now' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: null },
+        { kind: 'feedback', turnIndex: 0, value: 'up' },
+      ],
+    });
+    expect(state.feedback).toEqual({ 0: 'up' });
+  });
+
+  test('replace swaps the items for the reloaded transcript but not while running', () => {
+    const live = run([
+      { kind: 'user', text: 'velho', at: 'now' },
+      { kind: 'feedback', turnIndex: 0, value: 'up' },
+    ]);
+    const replaced = chatReducer(live, { type: 'replace', events: loadAction.events });
+    expect(replaced.items).toHaveLength(2);
+    expect(replaced.feedback).toBeUndefined();
+    const running = chatReducer(initialChatState, { type: 'started' });
+    expect(chatReducer(running, { type: 'replace', events: loadAction.events })).toBe(running);
+  });
+
   test('load is ignored when the state already has items', () => {
     const live = run([{ kind: 'user', text: 'novo', at: 'now' }]);
     expect(chatReducer(live, loadAction)).toBe(live);

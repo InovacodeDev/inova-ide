@@ -108,6 +108,42 @@ function groupTurn(entries: ChatEntry[], expanded: boolean): ChatBlock[] {
   });
 }
 
+export interface AgentTurnFooter {
+  turnIndex: number;
+  text: string;
+  at: string | null;
+  isLastTurn: boolean;
+}
+
+export function agentTurnFooters(input: {
+  items: readonly ChatItem[];
+  running: boolean;
+}): Map<number, AgentTurnFooter> {
+  const { items, running } = input;
+  const turnStarts = items.flatMap((item, index) => (item.type === 'user' ? [index] : []));
+  const footers = new Map<number, AgentTurnFooter>();
+  turnStarts.forEach((start, turnIndex) => {
+    const isLastTurn = turnIndex === turnStarts.length - 1;
+    if (isLastTurn && running) return;
+    const end = isLastTurn ? items.length : (turnStarts[turnIndex + 1] ?? items.length);
+    const user = items[start];
+    const answers = items
+      .slice(start + 1, end)
+      .flatMap((item, offset) =>
+        item.type === 'assistant' ? [{ item, index: start + 1 + offset }] : [],
+      );
+    const final = answers[answers.length - 1];
+    if (!final || final.item.streaming) return;
+    footers.set(final.index, {
+      turnIndex,
+      text: answers.map((answer) => answer.item.text).join('\n\n'),
+      at: user?.type === 'user' ? user.at : null,
+      isLastTurn,
+    });
+  });
+  return footers;
+}
+
 export function groupChatItems(
   items: readonly ChatItem[],
   running: boolean,

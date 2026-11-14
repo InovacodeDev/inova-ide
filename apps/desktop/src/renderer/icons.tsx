@@ -49,6 +49,8 @@ import { ShieldCheck } from 'pulsoicon-react/icons/shield-check';
 import { SlidersHorizontal } from 'pulsoicon-react/icons/sliders-horizontal';
 import { Square } from 'pulsoicon-react/icons/square';
 import { Terminal } from 'pulsoicon-react/icons/terminal';
+import { ThumbsDown } from 'pulsoicon-react/icons/thumbs-down';
+import { ThumbsUp } from 'pulsoicon-react/icons/thumbs-up';
 import { Trash } from 'pulsoicon-react/icons/trash';
 import { TriangleAlert } from 'pulsoicon-react/icons/triangle-alert';
 import { X } from 'pulsoicon-react/icons/x';
@@ -156,6 +158,14 @@ export function ArchiveIcon({ size = 16 }: IconProps) {
 
 export function TrashIcon({ size = 16 }: IconProps) {
   return <Trash size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ThumbUpIcon({ size = 16 }: IconProps) {
+  return <ThumbsUp size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ThumbDownIcon({ size = 16 }: IconProps) {
+  return <ThumbsDown size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function RefreshIcon({ size = 16 }: IconProps) {
