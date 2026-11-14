@@ -13,7 +13,7 @@ const settings: Settings = {
     qwen: { model: null, effort: 'medium' },
     opencode: { model: null, effort: 'medium' },
   },
-  appearance: { theme: 'dark', sidebarCollapsed: false },
+  appearance: { theme: 'dark', sidebarCollapsed: false, detailsCollapsed: false },
   voice: { language: 'auto', modelId: 'small-q5_1' },
   sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
   notifications: {

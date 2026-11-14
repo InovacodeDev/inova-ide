@@ -6,6 +6,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Botão "Reiniciar para atualizar" no topo, ao lado da engrenagem, quando há versão nova. Ele instala a atualização pelo Homebrew e reinicia o app na versão nova. Se houver sessão executando, o app pede confirmação antes.
+- O app verifica se há versão nova a cada 15 minutos, em vez de a cada 6 horas.
+- Painel de contexto da sessão pode ser minimizado. A escolha fica salva.
+
+### Alterado
+
+- Painel de contexto flutua sobre a conversa e não ocupa mais espaço fixo à direita. O botão de fechar a sessão fica na borda direita.
+- Configurações → Modelos: cada provedor mostra Modelo, Esforço e Modo em linhas separadas, com uma descrição curta em cada uma.
+- Botões de ícone (como o X de fechar) não têm mais borda.
+
 ## [0.5.5] - 2026-11-14
 
 ### Corrigido

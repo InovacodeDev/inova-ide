@@ -50,7 +50,7 @@ describe('settings', () => {
     expect((await getSettings(root)).appearance.theme).toBe('light');
   });
 
-  it('defaults sidebarCollapsed to false when the stored appearance lacks it', async () => {
+  it('defaults sidebarCollapsed and detailsCollapsed to false when the stored appearance lacks them', async () => {
     await writeFile(
       join(root, 'store.json'),
       JSON.stringify({
@@ -63,7 +63,21 @@ describe('settings', () => {
     expect((await getSettings(root)).appearance).toEqual({
       theme: 'light',
       sidebarCollapsed: false,
+      detailsCollapsed: false,
     });
+  });
+
+  it('updateSettings preserves a saved detailsCollapsed of true', async () => {
+    await updateSettings({ root, patch: { appearance: { detailsCollapsed: true } } });
+    expect((await getSettings(root)).appearance.detailsCollapsed).toBe(true);
+    await updateSettings({ root, patch: { appearance: { theme: 'light' } } });
+    expect((await getSettings(root)).appearance.detailsCollapsed).toBe(true);
+  });
+
+  it('updateSettings rejects a non-boolean detailsCollapsed', async () => {
+    await expect(
+      updateSettings({ root, patch: { appearance: { detailsCollapsed: 1 } as never } }),
+    ).rejects.toThrow(SettingsError);
   });
 
   it('updateSettings preserves a saved sidebarCollapsed of true', async () => {

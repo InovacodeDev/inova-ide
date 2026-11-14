@@ -134,7 +134,8 @@ export function App() {
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
   const { warning, dismiss, guard, call, warn } = useWarning();
-  const updates = useUpdates();
+  const updates = useUpdates(call);
+  const [confirmUpdateRestart, setConfirmUpdateRestart] = useState(false);
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
@@ -142,6 +143,7 @@ export function App() {
   const activeChatRef = useRef<ChatViewHandle>(null);
   useTheme(settings?.appearance.theme);
   const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
+  const detailsCollapsed = settings?.appearance.detailsCollapsed ?? false;
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
@@ -1035,13 +1037,8 @@ export function App() {
     ? (sessionById.get(activeSession.parentId)?.title ?? null)
     : null;
   const activeProject = activeTab ? projectOf(activeTab.sessionId) : undefined;
-  const mainClassName = [
-    'main',
-    inWorkspace && activeSession && activeProject ? 'has-details' : '',
-    sidebarCollapsed ? 'rail-offset' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const runningCount = Object.values(chats).filter((chat) => chat.running).length;
+  const mainClassName = sidebarCollapsed ? 'main rail-offset' : 'main';
   const projectSettingsTarget = projects.find((item) => item.id === projectSettingsId);
   const activeAccount = effectiveAccountOf(activeSession, activeProject);
   const chatTabs = tabs.tabs.filter((tab) => tab.kind === 'chat');
@@ -1121,7 +1118,19 @@ export function App() {
         </div>
       )}
       <Header
-        runningCount={Object.values(chats).filter((chat) => chat.running).length}
+        runningCount={runningCount}
+        update={
+          updates.updateAvailable && updates.info?.latest
+            ? {
+                latest: updates.info.latest,
+                installing: updates.installing,
+                onInstall: () => {
+                  if (runningCount > 0) setConfirmUpdateRestart(true);
+                  else void updates.install();
+                },
+              }
+            : null
+        }
         onOpenSettings={() => runShortcut({ id: 'open-settings', tabIndex: null })}
       />
       <div className="app-body">
@@ -1287,155 +1296,163 @@ export function App() {
             ) : (
               <p className="hint">Nenhuma sessão aberta. Escolha uma sessão ou crie uma nova.</p>
             )}
-            {tabs.tabs.map((tab) => {
-              const tabSession = sessionById.get(tab.sessionId);
-              const tabProject = projectOf(tab.sessionId);
-              const tabAccount = effectiveAccountOf(tabSession, tabProject);
-              const tabProvider = tabAccount?.provider ?? tab.provider;
-              const tabAccountLabel = tabAccount?.label ?? tabProject?.accountLabel;
-              const tabCatalog =
-                (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
-                PROVIDER_MODELS[tabProvider ?? 'claude'];
-              const tabModelConfig = settings
-                ? resolveModelConfig({
-                    provider: tabProvider ?? 'claude',
-                    model: tabSession?.model ?? null,
-                    effort: tabSession?.effort ?? null,
-                    settings,
-                  })
-                : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
-              const tabState = chats[tab.sessionId] ?? initialChatState;
-              const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
-              const tabWaitingForAccount =
-                tabQueuedTurns.length > 0 &&
-                isAccountBusyElsewhere({
-                  sessionId: tab.sessionId,
-                  accountId: tabAccount?.id,
-                  runningAccounts: new Map(
-                    Object.entries(chats)
-                      .filter(([, chat]) => chat.running)
-                      .map(([sessionId]) => [
-                        sessionId,
-                        effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))?.id,
-                      ]),
-                  ),
-                });
-              const alternativeAccounts = accounts.filter(
-                (candidate) => candidate.id !== tabAccount?.id,
-              );
-              return (
-                <ChatView
-                  key={tab.sessionId}
-                  ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
-                  sessionId={tab.sessionId}
-                  projectId={tabProject?.id ?? null}
-                  state={tabState}
-                  visible={inWorkspace && tab.sessionId === tabs.active}
-                  provider={tabProvider}
-                  accountDisplay={accountDisplayOf(tabAccount, tabProject)}
-                  model={tabModelConfig.model}
-                  effort={tabModelConfig.effort}
-                  mode={tabSession?.mode ?? null}
-                  defaultModes={defaultModes}
-                  inWorktree={Boolean(tabSession?.worktree)}
-                  workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
-                  voiceHints={[
-                    ...(tabProject ? [folderName(tabProject.path)] : []),
-                    ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
-                  ]}
-                  dictationLanguage={settings?.voice.language}
-                  collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
-                  catalog={tabCatalog}
-                  readOnly={archivedIds.has(tab.sessionId)}
-                  queuedTurns={tabQueuedTurns}
-                  queuePaused={pausedQueueIds.includes(tab.sessionId)}
-                  queueWaitingForAccount={tabWaitingForAccount}
-                  busyConflict={busyConflicts[tab.sessionId] ?? null}
-                  alternativeAccounts={alternativeAccounts}
-                  onChangeModelConfig={(patch) =>
-                    void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
-                  }
-                  onChangeMode={(mode) =>
-                    void updateSessionModelConfig({ sessionId: tab.sessionId, patch: { mode } })
-                  }
-                  onSetDefaultMode={(mode) => {
-                    if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
-                  }}
-                  onRestoreCheckpoint={(cp) =>
-                    setPendingRestore({
-                      sessionId: tab.sessionId,
-                      ref: cp.ref,
-                      skippedLargeFiles: cp.skippedLargeFiles,
+            <div className="session-stage">
+              {tabs.tabs.map((tab) => {
+                const tabSession = sessionById.get(tab.sessionId);
+                const tabProject = projectOf(tab.sessionId);
+                const tabAccount = effectiveAccountOf(tabSession, tabProject);
+                const tabProvider = tabAccount?.provider ?? tab.provider;
+                const tabAccountLabel = tabAccount?.label ?? tabProject?.accountLabel;
+                const tabCatalog =
+                  (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
+                  PROVIDER_MODELS[tabProvider ?? 'claude'];
+                const tabModelConfig = settings
+                  ? resolveModelConfig({
+                      provider: tabProvider ?? 'claude',
+                      model: tabSession?.model ?? null,
+                      effort: tabSession?.effort ?? null,
+                      settings,
                     })
+                  : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
+                const tabState = chats[tab.sessionId] ?? initialChatState;
+                const tabQueuedTurns = turnQueue.filter((item) => item.sessionId === tab.sessionId);
+                const tabWaitingForAccount =
+                  tabQueuedTurns.length > 0 &&
+                  isAccountBusyElsewhere({
+                    sessionId: tab.sessionId,
+                    accountId: tabAccount?.id,
+                    runningAccounts: new Map(
+                      Object.entries(chats)
+                        .filter(([, chat]) => chat.running)
+                        .map(([sessionId]) => [
+                          sessionId,
+                          effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))?.id,
+                        ]),
+                    ),
+                  });
+                const alternativeAccounts = accounts.filter(
+                  (candidate) => candidate.id !== tabAccount?.id,
+                );
+                return (
+                  <ChatView
+                    key={tab.sessionId}
+                    ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
+                    sessionId={tab.sessionId}
+                    projectId={tabProject?.id ?? null}
+                    state={tabState}
+                    visible={inWorkspace && tab.sessionId === tabs.active}
+                    provider={tabProvider}
+                    accountDisplay={accountDisplayOf(tabAccount, tabProject)}
+                    model={tabModelConfig.model}
+                    effort={tabModelConfig.effort}
+                    mode={tabSession?.mode ?? null}
+                    defaultModes={defaultModes}
+                    inWorktree={Boolean(tabSession?.worktree)}
+                    workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
+                    voiceHints={[
+                      ...(tabProject ? [folderName(tabProject.path)] : []),
+                      ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
+                    ]}
+                    dictationLanguage={settings?.voice.language}
+                    collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
+                    catalog={tabCatalog}
+                    readOnly={archivedIds.has(tab.sessionId)}
+                    queuedTurns={tabQueuedTurns}
+                    queuePaused={pausedQueueIds.includes(tab.sessionId)}
+                    queueWaitingForAccount={tabWaitingForAccount}
+                    busyConflict={busyConflicts[tab.sessionId] ?? null}
+                    alternativeAccounts={alternativeAccounts}
+                    onChangeModelConfig={(patch) =>
+                      void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
+                    }
+                    onChangeMode={(mode) =>
+                      void updateSessionModelConfig({ sessionId: tab.sessionId, patch: { mode } })
+                    }
+                    onSetDefaultMode={(mode) => {
+                      if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
+                    }}
+                    onRestoreCheckpoint={(cp) =>
+                      setPendingRestore({
+                        sessionId: tab.sessionId,
+                        ref: cp.ref,
+                        skippedLargeFiles: cp.skippedLargeFiles,
+                      })
+                    }
+                    onForkTurn={
+                      tabSession
+                        ? (turnIndex) => {
+                            const totalUserTurns = tabState.items.filter(
+                              (item) => item.type === 'user',
+                            ).length;
+                            setPendingFork({
+                              session: tabSession,
+                              turnIndex,
+                              isLatestTurn: turnIndex >= totalUserTurns - 1,
+                            });
+                          }
+                        : undefined
+                    }
+                    onRewindTurn={(turnIndex) =>
+                      setPendingRewind({ sessionId: tab.sessionId, turnIndex })
+                    }
+                    onRegenerate={(extraDirs) =>
+                      setPendingRewind({
+                        sessionId: tab.sessionId,
+                        turnIndex: tabState.items.filter((item) => item.type === 'user').length - 1,
+                        resend: { extraDirs },
+                      })
+                    }
+                    composerSeed={pendingComposerText[tab.sessionId] ?? null}
+                    onComposerSeedApplied={() =>
+                      setPendingComposerText((current) =>
+                        Object.fromEntries(
+                          Object.entries(current).filter(([id]) => id !== tab.sessionId),
+                        ),
+                      )
+                    }
+                    onClearSession={() => void clearConversation(tab.sessionId)}
+                    onFeedback={({ turnIndex, value }) =>
+                      void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
+                    }
+                    onWarn={warn}
+                    onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
+                    onEnqueuePrompt={(input) =>
+                      void enqueuePrompt({
+                        sessionId: tab.sessionId,
+                        extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
+                        ...input,
+                      })
+                    }
+                    onResumeQueue={() => void resumeQueue(tab.sessionId)}
+                    onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
+                    onSwitchAccountAndRetry={({ accountId, prompt }) =>
+                      void switchAccountAndRetry({
+                        sessionId: tab.sessionId,
+                        accountId,
+                        prompt,
+                      })
+                    }
+                    onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
+                    onSend={(prompt, extraDirs) =>
+                      void sendMessage(tab.sessionId, prompt, extraDirs)
+                    }
+                    onCancel={() => window.inova.cancelTurn(tab.sessionId)}
+                  />
+                );
+              })}
+              {activeSession && activeProject && (
+                <SessionDetails
+                  subagents={chats[activeSession.id]?.subagents}
+                  context={chats[activeSession.id]?.context}
+                  collapsed={detailsCollapsed}
+                  onToggleCollapsed={() =>
+                    void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } })
                   }
-                  onForkTurn={
-                    tabSession
-                      ? (turnIndex) => {
-                          const totalUserTurns = tabState.items.filter(
-                            (item) => item.type === 'user',
-                          ).length;
-                          setPendingFork({
-                            session: tabSession,
-                            turnIndex,
-                            isLatestTurn: turnIndex >= totalUserTurns - 1,
-                          });
-                        }
-                      : undefined
-                  }
-                  onRewindTurn={(turnIndex) =>
-                    setPendingRewind({ sessionId: tab.sessionId, turnIndex })
-                  }
-                  onRegenerate={(extraDirs) =>
-                    setPendingRewind({
-                      sessionId: tab.sessionId,
-                      turnIndex: tabState.items.filter((item) => item.type === 'user').length - 1,
-                      resend: { extraDirs },
-                    })
-                  }
-                  composerSeed={pendingComposerText[tab.sessionId] ?? null}
-                  onComposerSeedApplied={() =>
-                    setPendingComposerText((current) =>
-                      Object.fromEntries(
-                        Object.entries(current).filter(([id]) => id !== tab.sessionId),
-                      ),
-                    )
-                  }
-                  onClearSession={() => void clearConversation(tab.sessionId)}
-                  onFeedback={({ turnIndex, value }) =>
-                    void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
-                  }
-                  onWarn={warn}
-                  onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
-                  onEnqueuePrompt={(input) =>
-                    void enqueuePrompt({
-                      sessionId: tab.sessionId,
-                      extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
-                      ...input,
-                    })
-                  }
-                  onResumeQueue={() => void resumeQueue(tab.sessionId)}
-                  onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
-                  onSwitchAccountAndRetry={({ accountId, prompt }) =>
-                    void switchAccountAndRetry({
-                      sessionId: tab.sessionId,
-                      accountId,
-                      prompt,
-                    })
-                  }
-                  onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
-                  onSend={(prompt, extraDirs) => void sendMessage(tab.sessionId, prompt, extraDirs)}
-                  onCancel={() => window.inova.cancelTurn(tab.sessionId)}
                 />
-              );
-            })}
+              )}
+            </div>
           </div>
         </main>
-        {inWorkspace && activeSession && activeProject && (
-          <SessionDetails
-            subagents={chats[activeSession.id]?.subagents}
-            context={chats[activeSession.id]?.context}
-          />
-        )}
       </div>
       <Footer
         accounts={accounts}
@@ -1476,6 +1493,18 @@ export function App() {
           onSubmitCode={async (input) => {
             const res = await call(() => window.inova.submitLoginCode(input));
             return res !== undefined;
+          }}
+        />
+      )}
+      {confirmUpdateRestart && (
+        <ConfirmModal
+          title="Reiniciar para atualizar?"
+          description={`${runningCount === 1 ? 'Há 1 sessão executando' : `Há ${runningCount} sessões executando`}. Reiniciar interrompe o turno em andamento.`}
+          confirmLabel="Atualizar e reiniciar"
+          onCancel={() => setConfirmUpdateRestart(false)}
+          onConfirm={() => {
+            setConfirmUpdateRestart(false);
+            void updates.install();
           }}
         />
       )}

@@ -17,7 +17,7 @@ import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { killProcessGroup } from './process-group.js';
-import { createUpdateService } from './updates.js';
+import { INSTALL_TIMEOUT_MS, createUpdateInstaller, createUpdateService } from './updates.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { findBinary, loginShellPath } from './shell-env.js';
@@ -237,6 +237,37 @@ void app.whenReady().then(async () => {
         });
       },
     });
+    const installer = createUpdateInstaller({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      current: app.getVersion(),
+      execPath: process.execPath,
+      findBrew: async () =>
+        (await findBinary('brew', (await baseEnv())['PATH'] ?? '')) ??
+        (await findBinary('brew', '/opt/homebrew/bin:/usr/local/bin')),
+      run: async (file, args) => {
+        await execFileAsync(file, args, { env: await baseEnv(), timeout: INSTALL_TIMEOUT_MS });
+      },
+      readBundleVersion: async (bundle) => {
+        const { stdout } = await execFileAsync(
+          '/usr/bin/plutil',
+          [
+            '-extract',
+            'CFBundleShortVersionString',
+            'raw',
+            '-o',
+            '-',
+            `${bundle}/Contents/Info.plist`,
+          ],
+          { timeout: SHELL_TIMEOUT_MS },
+        );
+        return stdout.trim();
+      },
+      relaunch: () => {
+        app.relaunch();
+        app.quit();
+      },
+    });
     const created = createHandlers({
       root: dataRoot(process.env),
       runner: nodeRunner,
@@ -255,6 +286,7 @@ void app.whenReady().then(async () => {
       emitQueuePaused: (sessionIds) => sendToWindow(CHANNELS.queuePausedEvent, sessionIds),
       notify: notifier,
       updates,
+      installUpdate: installer.install,
       openExternal: (url) => shell.openExternal(url),
       ...(notificationSettingsUrl === undefined
         ? {}

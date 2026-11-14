@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
-import { createUpdateService } from '../src/main/updates';
+import { appBundlePath, createUpdateInstaller, createUpdateService } from '../src/main/updates';
+import type { UpdateInstallerDeps } from '../src/main/updates';
 import {
   compareVersions,
   fetchUpdateInfo,
@@ -136,5 +137,85 @@ describe('createUpdateService', () => {
     await broken.check();
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+});
+
+function installerDeps(overrides: Partial<UpdateInstallerDeps> = {}): UpdateInstallerDeps {
+  return {
+    platform: 'darwin',
+    isPackaged: true,
+    current: '0.5.5',
+    execPath: '/Applications/InovaIDE.app/Contents/MacOS/InovaIDE',
+    findBrew: async () => '/opt/homebrew/bin/brew',
+    run: vi.fn(async () => undefined),
+    readBundleVersion: vi.fn(async () => '0.5.6'),
+    relaunch: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe('appBundlePath', () => {
+  test('extracts the .app bundle from the executable path', () => {
+    expect(appBundlePath('/Applications/InovaIDE.app/Contents/MacOS/InovaIDE')).toBe(
+      '/Applications/InovaIDE.app',
+    );
+    expect(appBundlePath('/usr/local/bin/electron')).toBeNull();
+  });
+});
+
+describe('createUpdateInstaller', () => {
+  test('upgrades the cask, clears quarantine and relaunches', async () => {
+    const deps = installerDeps();
+    expect(await createUpdateInstaller(deps).install()).toEqual({ ok: true, value: null });
+    expect(vi.mocked(deps.run).mock.calls).toEqual([
+      ['/opt/homebrew/bin/brew', ['update']],
+      ['/opt/homebrew/bin/brew', ['upgrade', '--cask', 'inova-ide']],
+      ['/usr/bin/xattr', ['-dr', 'com.apple.quarantine', '/Applications/InovaIDE.app']],
+    ]);
+    expect(deps.relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  test('refuses outside a packaged macOS app', async () => {
+    for (const overrides of [
+      { platform: 'linux' as const },
+      { isPackaged: false },
+      { execPath: '/usr/local/bin/electron' },
+    ]) {
+      const deps = installerDeps(overrides);
+      expect((await createUpdateInstaller(deps).install()).ok).toBe(false);
+      expect(deps.run).not.toHaveBeenCalled();
+      expect(deps.relaunch).not.toHaveBeenCalled();
+    }
+  });
+
+  test('fails without relaunching when Homebrew is missing or the upgrade fails', async () => {
+    const missing = installerDeps({ findBrew: async () => undefined });
+    expect((await createUpdateInstaller(missing).install()).ok).toBe(false);
+    expect(missing.relaunch).not.toHaveBeenCalled();
+
+    const broken = installerDeps({
+      run: vi.fn(async () => {
+        throw new Error('brew exited with 1');
+      }),
+    });
+    const result = await createUpdateInstaller(broken).install();
+    expect(result.ok).toBe(false);
+    expect(broken.relaunch).not.toHaveBeenCalled();
+  });
+
+  test('does not relaunch when Homebrew still installs the current version', async () => {
+    const stale = installerDeps({ readBundleVersion: vi.fn(async () => '0.5.5') });
+    const result = await createUpdateInstaller(stale).install();
+    expect(result.ok).toBe(false);
+    expect(stale.readBundleVersion).toHaveBeenCalledWith('/Applications/InovaIDE.app');
+    expect(stale.relaunch).not.toHaveBeenCalled();
+  });
+
+  test('shares one install while it is in flight', async () => {
+    const deps = installerDeps();
+    const installer = createUpdateInstaller(deps);
+    await Promise.all([installer.install(), installer.install()]);
+    expect(deps.run).toHaveBeenCalledTimes(3);
+    expect(deps.relaunch).toHaveBeenCalledTimes(1);
   });
 });

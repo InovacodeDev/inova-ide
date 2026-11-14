@@ -92,6 +92,7 @@ export interface Settings {
   appearance: {
     theme: ThemePreference;
     sidebarCollapsed: boolean;
+    detailsCollapsed: boolean;
   };
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';

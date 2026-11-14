@@ -177,6 +177,7 @@ export interface InovaApi {
   openDataFolder(): Promise<Result<null>>;
   getAppInfo(): Promise<Result<{ version: string }>>;
   checkForUpdate(): Promise<Result<UpdateInfo>>;
+  installUpdate(): Promise<Result<null>>;
   openExternalUrl(input: { url: string }): Promise<Result<null>>;
   onUpdateAvailable(cb: (info: UpdateInfo) => void): () => void;
   deleteSession(input: { sessionId: string; force?: boolean }): Promise<Result<null>>;
@@ -330,6 +331,7 @@ export const CHANNELS = {
   openDataFolder: 'inova:openDataFolder',
   getAppInfo: 'inova:getAppInfo',
   checkForUpdate: 'inova:checkForUpdate',
+  installUpdate: 'inova:installUpdate',
   openExternalUrl: 'inova:openExternalUrl',
   updateAvailable: 'inova:update:available',
   deleteSession: 'inova:deleteSession',

@@ -53,7 +53,7 @@
   padding: 18px 22px 24px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 28px;
 }
 
 .settings-panel[hidden] {
@@ -150,21 +150,6 @@
 
 .setting-row-control .select-root {
   width: 220px;
-}
-
-.setting-row-control:has(.settings-model-defaults) {
-  flex: 1 1 100%;
-}
-
-.settings-model-defaults {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  width: 100%;
-}
-
-.settings-model-defaults .select-root {
-  width: 100%;
 }
 
 .switch {

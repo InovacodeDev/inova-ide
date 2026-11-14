@@ -52,6 +52,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.openDataFolder, () => handlers.openDataFolder());
   handle(CHANNELS.getAppInfo, () => handlers.getAppInfo());
   handle(CHANNELS.checkForUpdate, () => handlers.checkForUpdate());
+  handle(CHANNELS.installUpdate, () => handlers.installUpdate());
   handle(CHANNELS.openExternalUrl, (input) => handlers.openExternalUrl(input));
   handle(CHANNELS.deleteSession, (input) => handlers.deleteSession(input));
   handle(CHANNELS.getWorktreeStatus, (input) => handlers.getWorktreeStatus(input));
