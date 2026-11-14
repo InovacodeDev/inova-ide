@@ -106,7 +106,7 @@ export function App() {
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
   const [pausedQueueIds, setPausedQueueIds] = useState<string[]>([]);
   const [busyConflicts, setBusyConflicts] = useState<
-    Record<string, { prompt: string; exhausted: boolean; message?: string }>
+    Record<string, { prompt: string; exhausted: boolean; message?: string; extraDirs?: string[] }>
   >({});
   const [pendingFork, setPendingFork] = useState<{
     session: Session;
@@ -462,7 +462,11 @@ export function App() {
         if (result.message.startsWith('CONTA_OCUPADA:')) {
           setBusyConflicts((current) => ({
             ...current,
-            [sessionId]: { prompt, exhausted: false },
+            [sessionId]: {
+              prompt,
+              exhausted: false,
+              ...(extraDirs.length > 0 ? { extraDirs } : {}),
+            },
           }));
         } else if (result.message.startsWith('CONTA_ESGOTADA:')) {
           const message = result.message.slice('CONTA_ESGOTADA:'.length).trim();
@@ -519,7 +523,18 @@ export function App() {
   };
 
   const resumeQueue = async (sessionId: string) => {
-    await call(() => window.inova.resumeSessionQueue({ sessionId }));
+    const result = await guard(() => window.inova.resumeSessionQueue({ sessionId }));
+    if (!result || result.ok) return;
+    if (result.message.startsWith('CONTA_ESGOTADA:')) {
+      const message = result.message.slice('CONTA_ESGOTADA:'.length).trim();
+      const prompt = turnQueue.find((item) => item.sessionId === sessionId)?.prompt ?? '';
+      setBusyConflicts((current) => ({
+        ...current,
+        [sessionId]: { prompt, exhausted: true, message },
+      }));
+      return;
+    }
+    await call(() => Promise.resolve(result));
   };
 
   const cancelQueuedTurn = async (turnId: string) => {
@@ -1383,7 +1398,11 @@ export function App() {
                   onWarn={warn}
                   onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
                   onEnqueuePrompt={(input) =>
-                    void enqueuePrompt({ sessionId: tab.sessionId, ...input })
+                    void enqueuePrompt({
+                      sessionId: tab.sessionId,
+                      extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
+                      ...input,
+                    })
                   }
                   onResumeQueue={() => void resumeQueue(tab.sessionId)}
                   onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}

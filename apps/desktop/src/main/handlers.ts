@@ -489,7 +489,13 @@ export function createHandlers(deps: HandlerDeps) {
   }
 
   async function drainAccountQueue(accountId: string): Promise<void> {
-    if (deps.chat.accountsInUse().has(accountId) || isAccountExhausted(accountId)) return;
+    if (deps.chat.accountsInUse().has(accountId)) return;
+    if (isAccountExhausted(accountId)) {
+      for (const queued of turnQueue.list(accountId)) {
+        setQueuePaused({ sessionId: queued.sessionId, paused: true });
+      }
+      return;
+    }
     const preferred = preferredQueueSession.get(accountId);
     preferredQueueSession.delete(accountId);
     const next =
@@ -770,6 +776,8 @@ export function createHandlers(deps: HandlerDeps) {
       const hasQueued = turnQueue.forSession(sessionId).length > 0;
       if (event.isError || wasCancelled) {
         if (hasQueued) setQueuePaused({ sessionId, paused: true });
+      } else if (owner && hasQueued && isAccountExhausted(owner.accountId)) {
+        setQueuePaused({ sessionId, paused: true });
       } else {
         setQueuePaused({ sessionId, paused: false });
         if (owner && hasQueued) preferredQueueSession.set(owner.accountId, sessionId);
@@ -784,7 +792,10 @@ export function createHandlers(deps: HandlerDeps) {
             : (lastError ?? 'Turno encerrado com erro.'),
         });
       } else if (!event.isError && !wasCancelled) {
-        if (owner) exhaustedAccounts.delete(owner.accountId);
+        const atLimit = streamUsage
+          .get(owner?.accountId ?? '')
+          ?.windows.some((window) => window.usedPercent >= 100);
+        if (owner && !atLimit) exhaustedAccounts.delete(owner.accountId);
         if (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused) {
           enqueueInboxUpdate({
             sessionId,
@@ -1441,7 +1452,7 @@ export function createHandlers(deps: HandlerDeps) {
           extraDirs,
         });
         emitQueueSnapshot();
-        if (!deps.chat.accountsInUse().has(account.id) && !isAccountExhausted(account.id)) {
+        if (!deps.chat.accountsInUse().has(account.id)) {
           void drainAccountQueue(account.id).catch((error: unknown) => {
             console.error(`inova: failed to drain turn queue for ${account.id}`, error);
           });

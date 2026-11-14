@@ -51,6 +51,7 @@ async function setup(
   const inUse = new Set<string>();
   const running = new Set<string>();
   const chatInUse = new Set<string>();
+  const clock = { iso: '2026-01-01T00:00:00.000Z' };
   const idleListeners: ((accountId: string) => void)[] = [];
   const pausedSnapshots: string[][] = [];
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
@@ -106,7 +107,7 @@ async function setup(
       platform: 'linux',
       runner: { run },
       fetch,
-      now: () => new Date('2026-01-01T00:00:00.000Z'),
+      now: () => new Date(clock.iso),
     },
     emit: (sessionId, event) => emitted.push({ sessionId, event }),
     emitLogin: (event) => loginEvents.push(event),
@@ -125,6 +126,7 @@ async function setup(
     inUse,
     running,
     chatInUse,
+    clock,
     idleListeners,
     pausedSnapshots,
     emitted,
@@ -758,7 +760,7 @@ test('sendMessage proceeds when the reset passed and fresh usage is below the li
   expect(send).toHaveBeenCalledTimes(1);
   unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'outra' }));
   expect(fetch).toHaveBeenCalledTimes(1);
-  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   await handlers.loadTranscript({ sessionId: session.id });
 });
 
@@ -1231,7 +1233,7 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
   });
   await new Promise((r) => setTimeout(r, 80));
 
-  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(send.mock.calls[1]?.[0].sessionId).toBe(s2.id);
 
   const inbox = unwrap(await handlers.listInbox());
@@ -1244,7 +1246,10 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
 
 const OK_DONE = { kind: 'done', isError: false, costUsd: null, durationMs: 1 } as const;
 const ERROR_DONE = { kind: 'done', isError: true, costUsd: null, durationMs: 1 } as const;
-const settle = () => new Promise((resolve) => setTimeout(resolve, 80));
+const flush = async (handlers: ReturnType<typeof createHandlers>, sessionId: string) => {
+  await handlers.listInbox();
+  await handlers.loadTranscript({ sessionId });
+};
 
 async function startQueuedSession() {
   const ctx = await setup();
@@ -1263,15 +1268,15 @@ test('session queue sends one item after each successful final output', async ()
 
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, OK_DONE);
-  await settle();
-  expect(send).toHaveBeenCalledTimes(2);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
 
   chatInUse.add(accountId);
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, OK_DONE);
-  await settle();
-  expect(send).toHaveBeenCalledTimes(3);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
   expect(unwrap(await handlers.listTurnQueue())).toHaveLength(0);
 });
 
@@ -1282,14 +1287,14 @@ test('session queue pauses after an error done and resumes on request', async ()
 
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   expect(send).toHaveBeenCalledTimes(1);
   expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
   expect(pausedSnapshots.at(-1)).toEqual([session.id]);
 
   unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
-  await settle();
-  expect(send).toHaveBeenCalledTimes(2);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
   expect(pausedSnapshots.at(-1)).toEqual([]);
 });
@@ -1300,7 +1305,7 @@ test('session queue pauses after a cancelled turn and ignores empty queues', asy
   handlers.cancelTurn(session.id);
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   expect(send).toHaveBeenCalledTimes(1);
   expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
 });
@@ -1309,7 +1314,7 @@ test('session queue does not pause when an error done leaves the queue empty', a
   const { handlers, chatInUse, session, accountId } = await startQueuedSession();
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
 });
 
@@ -1321,15 +1326,15 @@ test('account idle does not drain a paused session but drains others', async () 
 
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   chatInUse.delete(accountId);
   for (const listener of idleListeners) listener(accountId);
-  await settle();
+  await flush(handlers, session.id);
   expect(send).toHaveBeenCalledTimes(1);
 
   unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Livre' }));
-  await settle();
-  expect(send).toHaveBeenCalledTimes(2);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(send.mock.calls[1]?.[0].sessionId).toBe(other.id);
   expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([
     session.id,
@@ -1346,7 +1351,7 @@ test('resumeSessionQueue fails and keeps the pause while the account is still ex
   });
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
 
   const result = await handlers.resumeSessionQueue({ sessionId: session.id });
@@ -1357,13 +1362,51 @@ test('resumeSessionQueue fails and keeps the pause while the account is still ex
   expect(send).toHaveBeenCalledTimes(1);
 });
 
+test('an ok done on an exhausted account pauses the queue and resume drains after the reset', async () => {
+  const { handlers, send, chatInUse, clock, session, accountId, pausedSnapshots, fetch } =
+    await startQueuedSession();
+  fetch.mockResolvedValue(apiUsage(10, '2026-01-01T09:00:00.000Z'));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: '2026-01-01T05:00:00.000Z' }],
+  });
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(pausedSnapshots.at(-1)).toEqual([session.id]);
+  expect(unwrap(await handlers.listTurnQueue())).toHaveLength(1);
+  expect(send).toHaveBeenCalledTimes(1);
+
+  clock.iso = '2026-01-01T06:00:00.000Z';
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('draining an exhausted account pauses every session with queued items', async () => {
+  const { handlers, chatInUse, idleListeners, session, project, accountId } =
+    await startQueuedSession();
+  const other = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(await handlers.enqueueTurn({ sessionId: other.id, prompt: 'Outra' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: null }],
+  });
+  chatInUse.delete(accountId);
+  for (const listener of idleListeners) listener(accountId);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([other.id]);
+  await flush(handlers, session.id);
+});
+
 test('cancelling the last queued turn clears the session pause', async () => {
   const { handlers, chatInUse, session, accountId, pausedSnapshots } = await startQueuedSession();
   const first = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'A' }));
   const second = unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'B' }));
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   unwrap(await handlers.cancelQueuedTurn({ turnId: first.turnId }));
   expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
   unwrap(await handlers.cancelQueuedTurn({ turnId: second.turnId }));
@@ -1379,13 +1422,13 @@ test('production order: done while account in use, then idle, runs the finished 
   unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Da mesma sessão' }));
 
   handlers.handleChatEvent(session.id, OK_DONE);
-  await settle();
+  await flush(handlers, session.id);
   expect(send).toHaveBeenCalledTimes(1);
 
   chatInUse.delete(accountId);
   for (const listener of idleListeners) listener(accountId);
-  await settle();
-  expect(send).toHaveBeenCalledTimes(2);
+  await flush(handlers, session.id);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   expect(send.mock.calls[1]?.[0].sessionId).toBe(session.id);
   expect(unwrap(await handlers.listTurnQueue()).map((item) => item.sessionId)).toEqual([other.id]);
 });
@@ -1395,7 +1438,7 @@ test('deleting a session clears its queue pause', async () => {
   unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, ERROR_DONE);
-  await settle();
+  await flush(handlers, session.id);
   unwrap(await handlers.deleteSession({ sessionId: session.id, force: true }));
   expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
 });
@@ -1411,7 +1454,7 @@ test('queued turn passes its extra directories to the claude args', async () => 
   );
   chatInUse.delete(accountId);
   handlers.handleChatEvent(session.id, OK_DONE);
-  await settle();
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   const args = send.mock.calls[1]?.[0]?.spec.args ?? [];
   expect(args[args.indexOf('--add-dir') + 1]).toBe('/Users/me/Downloads');
 });
@@ -1796,7 +1839,7 @@ test('startComparison runs two isolated sessions in parallel, computes diffs, an
   expect(started.left.comparisonGroupId).toBe(started.groupId);
   expect(started.left.comparisonRole).toBe('left');
   expect(started.right.comparisonRole).toBe('right');
-  expect(send).toHaveBeenCalledTimes(2);
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
   const cwds = send.mock.calls.map((call) => call[0].spec.cwd);
   expect(cwds).toContain(started.left.worktree?.path);
   expect(cwds).toContain(started.right.worktree?.path);
