@@ -71,6 +71,9 @@
 
 .tab-bar-close {
   flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
 }
 
 .session-header {
@@ -201,17 +204,17 @@
   display: flex;
   flex-direction: column;
   position: absolute;
-  top: 16px;
+  top: 12px;
   right: 16px;
   z-index: 5;
   gap: 24px;
   width: 280px;
-  max-height: calc(100% - 32px);
-  padding: 20px 16px;
+  max-height: calc(100% - 24px);
+  padding: 12px 12px 16px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   color: var(--text);
   font-size: 13px;
   overflow-y: auto;
@@ -225,6 +228,35 @@
 
 .session-details-section .section-label {
   margin: 0;
+}
+
+.session-details-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-details-collapse {
+  width: 28px;
+  height: 28px;
+}
+
+.session-details-expand {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 5;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.session-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .session-header-worktree {

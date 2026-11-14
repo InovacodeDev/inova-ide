@@ -148,10 +148,6 @@ a:hover {
   padding-left: 76px;
 }
 
-.main.has-details {
-  padding-right: 312px;
-}
-
 .main-content {
   flex: 1;
   min-height: 0;

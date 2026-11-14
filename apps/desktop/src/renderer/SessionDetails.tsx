@@ -1,11 +1,14 @@
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
 import type { ContextInfo } from './chat-reducer';
+import { PanelRightCloseIcon, PanelRightOpenIcon } from './icons';
 import { contextLabel, formatTokens } from './token-format';
 import './session.css';
 
 interface SessionDetailsProps {
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
@@ -14,13 +17,43 @@ const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
   error: 'erro',
 };
 
-export function SessionDetails({ subagents = [], context }: SessionDetailsProps) {
+export function SessionDetails({
+  subagents = [],
+  context,
+  collapsed,
+  onToggleCollapsed,
+}: SessionDetailsProps) {
   const contextSummary = contextLabel(context);
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        className="icon-btn session-details-expand"
+        aria-label="Mostrar detalhes da sessão"
+        data-tooltip="Mostrar detalhes da sessão"
+        onClick={onToggleCollapsed}
+      >
+        <PanelRightOpenIcon size={16} />
+      </button>
+    );
+  }
 
   return (
     <aside className="session-details" aria-label="Detalhes da sessão">
       <section className="session-details-section">
-        <h2 className="section-label">Contexto</h2>
+        <div className="session-details-head">
+          <h2 className="section-label">Contexto</h2>
+          <button
+            type="button"
+            className="icon-btn session-details-collapse"
+            aria-label="Minimizar detalhes da sessão"
+            data-tooltip="Minimizar detalhes da sessão"
+            onClick={onToggleCollapsed}
+          >
+            <PanelRightCloseIcon size={15} />
+          </button>
+        </div>
         <div className="session-details-context">
           <span className="mono">{contextSummary.text}</span>
           {contextSummary.percent !== null ? (

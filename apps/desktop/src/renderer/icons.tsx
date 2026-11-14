@@ -38,6 +38,8 @@ import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
 import { PanelLeftClose } from 'pulsoicon-react/icons/panel-left-close';
 import { PanelLeftOpen } from 'pulsoicon-react/icons/panel-left-open';
+import { PanelRightClose } from 'pulsoicon-react/icons/panel-right-close';
+import { PanelRightOpen } from 'pulsoicon-react/icons/panel-right-open';
 import { Play } from 'pulsoicon-react/icons/play';
 import { Plus } from 'pulsoicon-react/icons/plus';
 import { RefreshCw } from 'pulsoicon-react/icons/refresh-cw';
@@ -246,6 +248,14 @@ export function SidebarCollapseIcon({ size = 16 }: IconProps) {
 
 export function SidebarExpandIcon({ size = 16 }: IconProps) {
   return <PanelLeftOpen size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function PanelRightCloseIcon({ size = 16 }: IconProps) {
+  return <PanelRightClose size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function PanelRightOpenIcon({ size = 16 }: IconProps) {
+  return <PanelRightOpen size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function DownloadIcon({ size = 16 }: IconProps) {
