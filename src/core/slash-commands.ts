@@ -1,12 +1,18 @@
 import type { ProviderId } from './types.js';
 
-export type SlashCommandAction = 'passthrough' | 'clear' | 'model-picker';
+export type SlashCommandAction = 'passthrough' | 'clear' | 'model-picker' | 'pin';
 
 export interface NativeSlashCommand {
   name: string;
   description: string;
   action: SlashCommandAction;
 }
+
+const PIN_COMMAND: NativeSlashCommand = {
+  name: 'pin',
+  description: 'Fixa uma nota na memória da sessão',
+  action: 'pin',
+};
 
 const NATIVE_SLASH_COMMANDS: Record<ProviderId, readonly NativeSlashCommand[]> = {
   claude: [
@@ -16,6 +22,7 @@ const NATIVE_SLASH_COMMANDS: Record<ProviderId, readonly NativeSlashCommand[]> =
       description: 'Resume a conversa para liberar contexto',
       action: 'passthrough',
     },
+    PIN_COMMAND,
     {
       name: 'init',
       description: 'Cria o arquivo de instruções do projeto',
@@ -33,21 +40,25 @@ const NATIVE_SLASH_COMMANDS: Record<ProviderId, readonly NativeSlashCommand[]> =
   ],
   codex: [
     { name: 'new', description: 'Inicia uma conversa nova', action: 'clear' },
+    PIN_COMMAND,
     { name: 'model', description: 'Troca o modelo', action: 'model-picker' },
   ],
-  gemini: [{ name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
-  deepseek: [{ name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
+  gemini: [PIN_COMMAND, { name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
+  deepseek: [PIN_COMMAND, { name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
   kimi: [
     { name: 'clear', description: 'Limpa a conversa e a memória do agente', action: 'clear' },
+    PIN_COMMAND,
     { name: 'goal', description: 'Define um objetivo autônomo', action: 'passthrough' },
     { name: 'model', description: 'Troca o modelo', action: 'model-picker' },
   ],
   grok: [
     { name: 'clear', description: 'Limpa a conversa e a memória do agente', action: 'clear' },
+    PIN_COMMAND,
     { name: 'model', description: 'Troca o modelo', action: 'model-picker' },
   ],
   qwen: [
     { name: 'clear', description: 'Limpa a conversa e a memória do agente', action: 'clear' },
+    PIN_COMMAND,
     { name: 'diff', description: 'Resumo do diff atual', action: 'passthrough' },
     {
       name: 'btw',
@@ -59,6 +70,7 @@ const NATIVE_SLASH_COMMANDS: Record<ProviderId, readonly NativeSlashCommand[]> =
   ],
   opencode: [
     { name: 'new', description: 'Inicia uma conversa nova', action: 'clear' },
+    PIN_COMMAND,
     { name: 'models', description: 'Troca o modelo', action: 'model-picker' },
   ],
 };

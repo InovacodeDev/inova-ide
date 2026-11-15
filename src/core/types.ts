@@ -27,6 +27,7 @@ export interface Project {
   autoWorktree?: boolean;
   autoVerify?: boolean;
   verificationChecks?: VerificationCheck[];
+  pinnedMemory?: string | null;
 }
 
 export interface SessionWorktree {
@@ -44,6 +45,8 @@ export interface Session {
   providerSessionId: string | null;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
+  pinnedMemory?: string | null;
+  pinnedMemoryHash?: string | null;
   detachedFromParent?: boolean;
   comparisonGroupId?: string | null;
   comparisonRole?: 'left' | 'right' | null;
@@ -88,6 +91,16 @@ export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-tur
 
 export type ThemePreference = 'system' | 'dark' | 'light';
 
+export type RateLimitFailoverPolicy = 'off' | 'same-provider' | 'any-provider';
+
+export type MaxConsecutiveToolErrors = 0 | 3 | 5 | 10;
+
+export type MaxConsecutiveVerificationFailures = 0 | 2 | 3 | 5;
+
+export type MaxSessionCostUsd = 0 | 1 | 5 | 10 | 25;
+
+export type MaxContextPercent = 0 | 80 | 90 | 95;
+
 export interface Settings {
   appearance: {
     theme: ThemePreference;
@@ -101,6 +114,11 @@ export interface Settings {
   sessions: {
     autoArchiveDays: 0 | 1 | 3 | 7 | 30;
     collapseFinishedTurns: boolean;
+    rateLimitFailover: RateLimitFailoverPolicy;
+    maxConsecutiveToolErrors: MaxConsecutiveToolErrors;
+    maxConsecutiveVerificationFailures: MaxConsecutiveVerificationFailures;
+    maxSessionCostUsd: MaxSessionCostUsd;
+    maxContextPercent: MaxContextPercent;
   };
   notifications: {
     waitingInput: boolean;

@@ -61,12 +61,13 @@ function isWorktree(value: unknown): boolean {
 
 function isProject(value: unknown): boolean {
   if (!isRecord(value) || !hasStrings(value, ['id', 'path', 'accountId'])) return false;
-  const { autoWorktree, autoVerify, verificationChecks } = value;
+  const { autoWorktree, autoVerify, verificationChecks, pinnedMemory } = value;
   return (
     (autoWorktree === undefined || typeof autoWorktree === 'boolean') &&
     (autoVerify === undefined || typeof autoVerify === 'boolean') &&
     (verificationChecks === undefined ||
-      (Array.isArray(verificationChecks) && verificationChecks.every(isVerificationCheck)))
+      (Array.isArray(verificationChecks) && verificationChecks.every(isVerificationCheck))) &&
+    (pinnedMemory === undefined || isStringOrNull(pinnedMemory))
   );
 }
 
@@ -83,6 +84,8 @@ function isSession(value: unknown): boolean {
     providerSessionId,
     accountIdOverride,
     handoffContext,
+    pinnedMemory,
+    pinnedMemoryHash,
     comparisonGroupId,
     comparisonRole,
     model,
@@ -98,6 +101,8 @@ function isSession(value: unknown): boolean {
     isStringOrNull(providerSessionId) &&
     (accountIdOverride === undefined || isSafeIdOrNull(accountIdOverride)) &&
     (handoffContext === undefined || isStringOrNull(handoffContext)) &&
+    (pinnedMemory === undefined || isStringOrNull(pinnedMemory)) &&
+    (pinnedMemoryHash === undefined || isStringOrNull(pinnedMemoryHash)) &&
     (comparisonGroupId === undefined || isSafeIdOrNull(comparisonGroupId)) &&
     (comparisonRole === undefined ||
       comparisonRole === null ||

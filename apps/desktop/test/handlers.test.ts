@@ -12,7 +12,7 @@ import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
-import type { Store } from '@inova/core/types';
+import type { Session, Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
@@ -57,6 +57,7 @@ async function setup(
   const idleListeners: ((accountId: string) => void)[] = [];
   const pausedSnapshots: string[][] = [];
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
+  const failoverEvents: { session: Session; rollbackLastTurn: boolean }[] = [];
   const loginEvents: LoginEvent[] = [];
   const send = vi.fn<ChatRunner['send']>();
   const cancel = vi.fn<ChatRunner['cancel']>();
@@ -114,6 +115,7 @@ async function setup(
     emit: (sessionId, event) => emitted.push({ sessionId, event }),
     emitLogin: (event) => loginEvents.push(event),
     emitQueuePaused: (sessionIds) => pausedSnapshots.push(sessionIds),
+    emitFailover: (event) => failoverEvents.push(event),
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
     pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
@@ -133,6 +135,7 @@ async function setup(
     idleListeners,
     pausedSnapshots,
     emitted,
+    failoverEvents,
     loginEvents,
     send,
     cancel,
@@ -2183,7 +2186,15 @@ test('settings default, update through the handler, reject invalid patches, and 
   const updated = unwrap(
     await handlers.updateSettings({ sessions: { autoArchiveDays: 7 }, voice: { language: 'pt' } }),
   );
-  expect(updated.sessions).toEqual({ autoArchiveDays: 7, collapseFinishedTurns: true });
+  expect(updated.sessions).toEqual({
+    autoArchiveDays: 7,
+    collapseFinishedTurns: true,
+    rateLimitFailover: 'off',
+    maxConsecutiveToolErrors: 5,
+    maxConsecutiveVerificationFailures: 3,
+    maxSessionCostUsd: 0,
+    maxContextPercent: 90,
+  });
   expect(updated.voice.language).toBe('pt');
   expect(unwrap(await handlers.getSettings())).toEqual(updated);
   expect((await loadStore(root)).settings).toEqual(updated);
@@ -2417,4 +2428,512 @@ test('clearSession detaches a child session and refuses while running', async ()
 
   const stored = (await loadStore(root)).sessions?.find((item) => item.id === child.id);
   expect(stored?.detachedFromParent).toBe(true);
+});
+
+test('circuit breaker cancels turn on repeated tool error loop, pauses queue, and marks inbox', async () => {
+  const { handlers, cancel, send, chatInUse, emitted, session, accountId } =
+    await startQueuedSession();
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+
+  for (let index = 0; index < 3; index += 1) {
+    const toolId = `tool-${index}`;
+    handlers.handleChatEvent(session.id, {
+      kind: 'tool-use',
+      toolId,
+      name: 'Bash',
+      input: 'cat missing.txt',
+    });
+    handlers.handleChatEvent(session.id, {
+      kind: 'tool-result',
+      toolId,
+      output: 'ENOENT: missing',
+      isError: true,
+    });
+  }
+
+  expect(cancel).toHaveBeenCalledWith(session.id);
+  expect(
+    emitted.some(
+      (item) =>
+        item.sessionId === session.id &&
+        item.event.kind === 'error' &&
+        item.event.message.startsWith('CIRCUIT_BREAKER:'),
+    ),
+  ).toBe(true);
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, ERROR_DONE);
+  await flush(handlers, session.id);
+
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.find((item) => item.sessionId === session.id)).toMatchObject({
+    kind: 'waiting-input',
+  });
+});
+
+test('circuit breaker trips on consecutive verification failures and pauses queued turns', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers, send, chatInUse, emitted } = await setup();
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+  const account = await addAccount({ root, provider: 'claude', label: 'pessoal' });
+  const project = await bindProject({ root, path: repoDir, accountLabel: 'pessoal' });
+  const session = unwrap(await handlers.createSession({ projectId: project.id }));
+  unwrap(
+    await handlers.updateProjectVerification({
+      projectId: project.id,
+      autoVerify: true,
+      verificationChecks: [{ id: 'fail', label: 'Fail', command: 'exit 1', enabled: true }],
+    }),
+  );
+
+  await writeFile(join(repoDir, 'index.ts'), 'export const v = 2;\n');
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'T1' }));
+  chatInUse.add(account.id);
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Na fila' }));
+  chatInUse.delete(account.id);
+  handlers.handleChatEvent(session.id, OK_DONE);
+
+  await vi.waitFor(() =>
+    expect(
+      emitted.filter(
+        (item) =>
+          item.sessionId === session.id &&
+          item.event.kind === 'verification' &&
+          item.event.status === 'failed',
+      ),
+    ).toHaveLength(1),
+  );
+  await flush(handlers, session.id);
+
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  chatInUse.delete(account.id);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await vi.waitFor(() =>
+    expect(
+      emitted.filter(
+        (item) =>
+          item.sessionId === session.id &&
+          item.event.kind === 'verification' &&
+          item.event.status === 'failed',
+      ),
+    ).toHaveLength(2),
+  );
+  await flush(handlers, session.id);
+
+  for (const [prompt, expectedFailures] of [
+    ['Corrigir 1', 3],
+    ['Corrigir 2', 4],
+  ] as const) {
+    unwrap(await handlers.sendMessage({ sessionId: session.id, prompt }));
+    chatInUse.delete(account.id);
+    handlers.handleChatEvent(session.id, OK_DONE);
+    await vi.waitFor(() =>
+      expect(
+        emitted.filter(
+          (item) =>
+            item.sessionId === session.id &&
+            item.event.kind === 'verification' &&
+            item.event.status === 'failed',
+        ),
+      ).toHaveLength(expectedFailures),
+    );
+    await flush(handlers, session.id);
+  }
+
+  await vi.waitFor(() =>
+    expect(
+      emitted.some(
+        (item) =>
+          item.sessionId === session.id &&
+          item.event.kind === 'error' &&
+          item.event.message.startsWith('CIRCUIT_BREAKER:') &&
+          item.event.message.includes('3 vezes seguidas'),
+      ),
+    ).toBe(true),
+  );
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.find((item) => item.sessionId === session.id)).toMatchObject({
+    kind: 'waiting-input',
+  });
+});
+
+test('circuit breaker pauses queue on session cost limit until resumeSessionQueue', async () => {
+  const { handlers, send, chatInUse, emitted, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.updateSettings({ sessions: { maxSessionCostUsd: 1 } }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: 1.25,
+    durationMs: 10,
+  });
+  await flush(handlers, session.id);
+
+  expect(
+    emitted.some(
+      (item) =>
+        item.sessionId === session.id &&
+        item.event.kind === 'error' &&
+        item.event.message.startsWith('CIRCUIT_BREAKER:') &&
+        item.event.message.includes('$1.25'),
+    ),
+  ).toBe(true);
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.find((item) => item.sessionId === session.id)).toMatchObject({
+    kind: 'waiting-input',
+  });
+
+  unwrap(await handlers.resumeSessionQueue({ sessionId: session.id }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
+});
+
+test('circuit breaker pauses queue when context usage exceeds limit', async () => {
+  const { handlers, send, chatInUse, emitted, session, accountId } = await startQueuedSession();
+  unwrap(await handlers.updateSettings({ sessions: { maxContextPercent: 80 } }));
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'context',
+    usedTokens: 85_000,
+    windowTokens: 100_000,
+    model: null,
+  });
+  expect(
+    emitted.some(
+      (item) =>
+        item.sessionId === session.id &&
+        item.event.kind === 'error' &&
+        item.event.message.startsWith('CIRCUIT_BREAKER:') &&
+        item.event.message.includes('85%'),
+    ),
+  ).toBe(true);
+
+  chatInUse.delete(accountId);
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  expect(unwrap(await handlers.listPausedQueues())).toEqual([session.id]);
+  expect(send).toHaveBeenCalledTimes(1);
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox.find((item) => item.sessionId === session.id)).toMatchObject({
+    kind: 'waiting-input',
+  });
+});
+
+test('rateLimitFailover off (default) leaves rate-limited turn failed without switching accounts', async () => {
+  const { root, send, failoverEvents, handlers } = await setup();
+  const { account, session } = await seedSession(root);
+  await addAccount({ root, provider: 'claude', label: 'trabalho' });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+
+  const inbox = unwrap(await handlers.listInbox());
+  expect(inbox).toHaveLength(1);
+  expect(inbox[0]?.kind).toBe('waiting-input');
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(failoverEvents).toEqual([]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.accountIdOverride ?? account.id).toBe(account.id);
+});
+
+test('rateLimitFailover same-provider rolls back failed turn, fails over with handoff, and drains queued turns', async () => {
+  const { root, send, chatInUse, running, failoverEvents, handlers } = await setup();
+  const { account: pessoal, session } = await seedSession(root);
+  const trabalho = await addAccount({ root, provider: 'claude', label: 'trabalho' });
+  unwrap(await handlers.updateSettings({ sessions: { rateLimitFailover: 'same-provider' } }));
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'passo 1' }));
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b1', text: 'feito 1' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  send.mockClear();
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'passo 2' }));
+  chatInUse.add(pessoal.id);
+  running.add(session.id);
+  unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'passo 3' }));
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b2', text: 'parcial 429' });
+  handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  chatInUse.delete(pessoal.id);
+  running.delete(session.id);
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[0]?.[0].accountId).toBe(pessoal.id);
+  expect(send.mock.calls[1]?.[0].accountId).toBe(trabalho.id);
+  const retriedPrompt = (send.mock.calls[1]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(retriedPrompt).toContain('passo 1');
+  expect(retriedPrompt).toContain('feito 1');
+  expect(retriedPrompt).toContain('passo 2');
+
+  expect(failoverEvents).toHaveLength(1);
+  expect(failoverEvents[0]?.rollbackLastTurn).toBe(true);
+  expect(failoverEvents[0]?.session.accountIdOverride).toBe(trabalho.id);
+  expect(
+    unwrap(await handlers.listInbox()).some(
+      (item) => item.kind === 'waiting-input' || item.kind === 'failed',
+    ),
+  ).toBe(false);
+
+  const transcript = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(transcript.some((event) => event.kind === 'error')).toBe(false);
+  expect(transcript.filter((event) => event.kind === 'user').map((event) => event.text)).toEqual([
+    'passo 1',
+    'passo 2',
+  ]);
+
+  handlers.handleChatEvent(session.id, { kind: 'text', blockId: 'b3', text: 'feito 2' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+  expect(send.mock.calls[2]?.[0].accountId).toBe(trabalho.id);
+  expect((send.mock.calls[2]?.[0].spec.args ?? []).at(-1)).toBe('passo 3');
+});
+
+test('rateLimitFailover stops without looping when every eligible account fails with 429', async () => {
+  const { root, send, failoverEvents, handlers } = await setup();
+  const { session } = await seedSession(root);
+  const trabalho = await addAccount({ root, provider: 'claude', label: 'trabalho' });
+  await addAccount({ root, provider: 'codex', label: 'codex-backup' });
+  unwrap(await handlers.updateSettings({ sessions: { rateLimitFailover: 'same-provider' } }));
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'unica tentativa' }));
+  handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[1]?.[0].accountId).toBe(trabalho.id);
+
+  handlers.handleChatEvent(session.id, { kind: 'error', message: '429 rate_limit_exceeded' });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: true,
+    costUsd: null,
+    durationMs: 1,
+  });
+
+  await vi.waitFor(async () => {
+    const inbox = unwrap(await handlers.listInbox());
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]?.kind).toBe('waiting-input');
+  });
+  expect(failoverEvents).toHaveLength(1);
+  expect(send).toHaveBeenCalledTimes(2);
+  const transcript = unwrap(await handlers.loadTranscript({ sessionId: session.id }));
+  expect(transcript.some((event) => event.kind === 'error')).toBe(true);
+});
+
+test('rateLimitFailover any-provider fails over pre-send in sendMessage and resets incompatible model/effort', async () => {
+  const { root, send, failoverEvents, handlers } = await setup();
+  const { session } = await seedSession(root);
+  const codex = await addAccount({ root, provider: 'codex', label: 'codex-principal' });
+  await updateSession({
+    root,
+    sessionId: session.id,
+    patch: { model: 'claude-sonnet-4-6', effort: 'max' },
+  });
+  unwrap(await handlers.updateSettings({ sessions: { rateLimitFailover: 'any-provider' } }));
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'turno 1' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'usage-limits',
+    windows: [{ kind: 'session', usedPercent: 100, resetsAt: '2026-01-01T05:00:00.000Z' }],
+  });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 1,
+  });
+  send.mockClear();
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'turno 2' }));
+
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.calls[0]?.[0].accountId).toBe(codex.id);
+  expect(send.mock.calls[0]?.[0].provider).toBe('codex');
+  expect(failoverEvents).toHaveLength(1);
+  expect(failoverEvents[0]?.rollbackLastTurn).toBe(false);
+  expect(failoverEvents[0]?.session.accountIdOverride).toBe(codex.id);
+  expect(failoverEvents[0]?.session.model).toBeNull();
+  expect(failoverEvents[0]?.session.effort).toBeNull();
+});
+
+test('pinnedMemory injects on new, skips unchanged resume, reinjects on edit, and survives /compact', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+
+  const updatedProject = unwrap(
+    await handlers.updateProjectVerification({
+      projectId: project.id,
+      pinnedMemory: '  Use pnpm sem comentários  ',
+    }),
+  );
+  expect(updatedProject.pinnedMemory).toBe('Use pnpm sem comentários');
+  expect(unwrap(await handlers.listProjects())[0]?.pinnedMemory).toBe('Use pnpm sem comentários');
+
+  const updatedSession = unwrap(
+    await handlers.updateSession({
+      sessionId: session.id,
+      pinnedMemory: '  Foco em testes unitários  ',
+    }),
+  );
+  expect(updatedSession.pinnedMemory).toBe('Foco em testes unitários');
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'oi' }));
+  const firstArgs = send.mock.calls[0]?.[0].spec.args ?? [];
+  expect(firstArgs).toContain('--session-id');
+  const firstPrompt = firstArgs.at(-1) ?? '';
+  expect(firstPrompt).toContain('Memória fixada');
+  expect(firstPrompt).toContain('### Projeto\nUse pnpm sem comentários');
+  expect(firstPrompt).toContain('### Sessão\nFoco em testes unitários');
+  expect(firstPrompt).toContain('Solicitação do usuário:\noi');
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'continue' }));
+  const secondArgs = send.mock.calls[1]?.[0].spec.args ?? [];
+  expect(secondArgs).toContain('--resume');
+  expect(secondArgs.at(-1)).toBe('continue');
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  unwrap(
+    await handlers.updateSession({
+      sessionId: session.id,
+      pinnedMemory: 'Regra atualizada',
+    }),
+  );
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'aplicar regra' }));
+  const thirdPrompt = (send.mock.calls[2]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(thirdPrompt).toContain('### Projeto\nUse pnpm sem comentários');
+  expect(thirdPrompt).toContain('### Sessão\nRegra atualizada');
+  expect(thirdPrompt).toContain('Solicitação do usuário:\naplicar regra');
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/compact' }));
+  const compactArgs = send.mock.calls[3]?.[0].spec.args ?? [];
+  expect(compactArgs).toContain('--resume');
+  expect(compactArgs.at(-1)).toBe('/compact');
+  const afterCompactStore = await loadStore(root);
+  expect(afterCompactStore.sessions?.find((s) => s.id === session.id)?.pinnedMemoryHash).toBeNull();
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'após compactar' }));
+  const fifthPrompt = (send.mock.calls[4]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(fifthPrompt).toContain('Memória fixada');
+  expect(fifthPrompt).toContain('### Sessão\nRegra atualizada');
+  expect(fifthPrompt).toContain('Solicitação do usuário:\napós compactar');
+});
+
+test('pinnedMemory reinjects after clearSession and rewindSession, and propagates on handoffSession and forkSession', async () => {
+  const { root, send, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+  const codex = await addAccount({ root, provider: 'codex', label: 'codex-alt' });
+
+  unwrap(
+    await handlers.updateProjectVerification({
+      projectId: project.id,
+      pinnedMemory: 'Projeto TS strict',
+    }),
+  );
+  unwrap(
+    await handlers.updateSession({
+      sessionId: session.id,
+      pinnedMemory: 'Nota persistente',
+    }),
+  );
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'turno inicial' }));
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+  expect(
+    (await loadStore(root)).sessions?.find((s) => s.id === session.id)?.pinnedMemoryHash,
+  ).not.toBeNull();
+
+  unwrap(await handlers.clearSession({ sessionId: session.id }));
+  const clearedSession = (await loadStore(root)).sessions?.find((s) => s.id === session.id);
+  expect(clearedSession?.pinnedMemory).toBe('Nota persistente');
+  expect(clearedSession?.pinnedMemoryHash).toBeNull();
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'depois de limpar' }));
+  const postClearPrompt = (send.mock.calls[1]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(postClearPrompt).toContain('### Projeto\nProjeto TS strict');
+  expect(postClearPrompt).toContain('### Sessão\nNota persistente');
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  unwrap(await handlers.rewindSession({ sessionId: session.id, turnIndex: 0 }));
+  expect(
+    (await loadStore(root)).sessions?.find((s) => s.id === session.id)?.pinnedMemoryHash,
+  ).toBeNull();
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'depois do rewind' }));
+  const postRewindPrompt = (send.mock.calls[2]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(postRewindPrompt).toContain('### Sessão\nNota persistente');
+  handlers.handleChatEvent(session.id, OK_DONE);
+  await flush(handlers, session.id);
+
+  const forked = unwrap(await handlers.forkSession({ sessionId: session.id, turnIndex: 0 }));
+  expect(forked.session.pinnedMemory).toBe('Nota persistente');
+
+  const handoff = unwrap(
+    await handlers.handoffSession({ sessionId: session.id, targetAccountId: codex.id }),
+  );
+  expect(handoff.session.pinnedMemory).toBe('Nota persistente');
+
+  unwrap(
+    await handlers.sendMessage({ sessionId: handoff.session.id, prompt: 'continuar no codex' }),
+  );
+  const handoffPrompt = (send.mock.calls[3]?.[0].spec.args ?? []).at(-1) ?? '';
+  expect(handoffPrompt).toContain('### Projeto\nProjeto TS strict');
+  expect(handoffPrompt).toContain('### Sessão\nNota persistente');
+  expect(handoffPrompt).toContain('Contexto de handoff');
+  expect(handoffPrompt).toContain('Solicitação do usuário:\ncontinuar no codex');
 });

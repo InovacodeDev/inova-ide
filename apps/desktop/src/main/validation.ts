@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
+import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
 import { WorktreeError } from '@inova/core/git-worktree';
@@ -58,6 +59,13 @@ function isText(value: unknown): value is string {
 
 function isPath(value: unknown): value is string {
   return isBoundedString(value, MAX_PATH) && isAbsolute(value);
+}
+
+function isPinnedMemoryInput(value: unknown): value is string | null {
+  return (
+    value === null ||
+    (typeof value === 'string' && value.length <= MAX_PINNED_MEMORY_CHARS && !value.includes('\0'))
+  );
 }
 
 export function parseNewAccount(
@@ -192,11 +200,17 @@ export function parseProjectVerification(input: unknown):
       autoWorktree?: boolean;
       autoVerify?: boolean;
       verificationChecks?: VerificationCheck[];
+      pinnedMemory?: string | null;
     }
   | undefined {
   if (!isRecord(input) || !isText(input['projectId'])) return undefined;
-  const { projectId, autoWorktree, autoVerify, verificationChecks } = input;
-  if (autoWorktree === undefined && autoVerify === undefined && verificationChecks === undefined) {
+  const { projectId, autoWorktree, autoVerify, verificationChecks, pinnedMemory } = input;
+  if (
+    autoWorktree === undefined &&
+    autoVerify === undefined &&
+    verificationChecks === undefined &&
+    pinnedMemory === undefined
+  ) {
     return undefined;
   }
   if (autoWorktree !== undefined && typeof autoWorktree !== 'boolean') return undefined;
@@ -209,11 +223,13 @@ export function parseProjectVerification(input: unknown):
   ) {
     return undefined;
   }
+  if (pinnedMemory !== undefined && !isPinnedMemoryInput(pinnedMemory)) return undefined;
   return {
     projectId,
     ...(autoWorktree === undefined ? {} : { autoWorktree }),
     ...(autoVerify === undefined ? {} : { autoVerify }),
     ...(verificationChecks === undefined ? {} : { verificationChecks }),
+    ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
   };
 }
 
@@ -224,17 +240,19 @@ export interface SessionUpdateInput {
   model?: string | null;
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
+  pinnedMemory?: string | null;
 }
 
 export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
-  const { sessionId, title, archived, model, effort, mode } = input;
+  const { sessionId, title, archived, model, effort, mode, pinnedMemory } = input;
   if (
     title === undefined &&
     archived === undefined &&
     model === undefined &&
     effort === undefined &&
-    mode === undefined
+    mode === undefined &&
+    pinnedMemory === undefined
   ) {
     return undefined;
   }
@@ -245,6 +263,7 @@ export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefin
   }
   if (effort !== undefined && effort !== null && !isEffortLevel(effort)) return undefined;
   if (mode !== undefined && mode !== null && !isExecutionMode(mode)) return undefined;
+  if (pinnedMemory !== undefined && !isPinnedMemoryInput(pinnedMemory)) return undefined;
   return {
     sessionId,
     ...(title === undefined ? {} : { title }),
@@ -252,6 +271,7 @@ export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefin
     ...(model === undefined ? {} : { model }),
     ...(effort === undefined ? {} : { effort }),
     ...(mode === undefined ? {} : { mode }),
+    ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
   };
 }
 
@@ -632,6 +652,8 @@ function sessionMessage(error: SessionError): string {
       return 'Modo não suportado por este provedor.';
     case 'invalid-workspace':
       return 'Área de trabalho inválida.';
+    case 'invalid-pinned-memory':
+      return `A memória fixada deve ter no máximo ${MAX_PINNED_MEMORY_CHARS} caracteres.`;
   }
 }
 

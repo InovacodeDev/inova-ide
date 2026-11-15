@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
+import { isCircuitBreakerMessage } from '@inova/core/circuit-breaker';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
 import { nativeSlashCommands, type SlashCommandAction } from '@inova/core/slash-commands';
@@ -39,6 +40,7 @@ import {
   nativeActionForSubmit,
   parseLeadingSlashTag,
   parseMessageFileSegments,
+  parsePinCommand,
   resolveDroppedPath,
   type ComposerTrigger,
   type DroppedPath,
@@ -144,6 +146,7 @@ export interface ChatViewProps {
   onDismissBusyConflict?: () => void;
   composerSeed?: string | null;
   onComposerSeedApplied?: () => void;
+  onPinNote?: (note: string) => void;
   onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
 }
@@ -757,6 +760,9 @@ interface MessageProps {
   onCopyText: (text: string) => void;
   agentMeta?: ReactNode;
   onOpenHandoff?: () => void;
+  latestCheckpoint?: { ref: string; skippedLargeFiles: string[] } | null;
+  queuePaused?: boolean;
+  onResumeQueue?: () => void;
 }
 
 interface AgentMetaProps {
@@ -859,6 +865,9 @@ function Message({
   onCopyText,
   agentMeta,
   onOpenHandoff,
+  latestCheckpoint,
+  queuePaused = false,
+  onResumeQueue,
 }: MessageProps) {
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   const time = item.type === 'user' && item.at ? formatMessageTime(item.at) : '';
@@ -1000,7 +1009,11 @@ function Message({
           />
         </div>
       );
-    case 'error':
+    case 'error': {
+      const showCircuitActions =
+        isCircuitBreakerMessage(item.message) &&
+        ((queuePaused && Boolean(onResumeQueue)) ||
+          (Boolean(latestCheckpoint) && Boolean(onRestoreCheckpoint)));
       return (
         <div className="chat-row">
           <div className="chat-error" role="alert">
@@ -1017,9 +1030,34 @@ function Message({
                 </button>
               </div>
             ) : null}
+            {showCircuitActions ? (
+              <div className="chat-error-actions">
+                {queuePaused && onResumeQueue ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={busy}
+                    onClick={onResumeQueue}
+                  >
+                    Retomar fila
+                  </button>
+                ) : null}
+                {latestCheckpoint && onRestoreCheckpoint ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={busy}
+                    onClick={() => onRestoreCheckpoint(latestCheckpoint)}
+                  >
+                    Restaurar último checkpoint
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       );
+    }
   }
 }
 
@@ -1154,6 +1192,7 @@ export function ChatView({
   onDismissBusyConflict,
   composerSeed = null,
   onComposerSeedApplied,
+  onPinNote,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -1242,6 +1281,15 @@ export function ChatView({
     [items, running, collapseFinishedTurns],
   );
   const footers = useMemo(() => agentTurnFooters({ items, running }), [items, running]);
+  const latestCheckpoint = useMemo(() => {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const candidate = items[i];
+      if (candidate?.type === 'checkpoint') {
+        return { ref: candidate.ref, skippedLargeFiles: candidate.skippedLargeFiles };
+      }
+    }
+    return null;
+  }, [items]);
   const copyText = (text: string) => {
     void copyToClipboard({ text, onError: (message) => onWarn?.(message) });
   };
@@ -1405,7 +1453,7 @@ export function ChatView({
     const editor = editorRef.current;
     if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
     const action = suggestion.kind === 'native' ? suggestion.command.action : 'passthrough';
-    if (action === 'passthrough') {
+    if (action === 'passthrough' || action === 'pin') {
       insertCommandTag(suggestion.command);
     } else {
       if (running) return;
@@ -1560,6 +1608,9 @@ export function ChatView({
         onForkTurn={onForkTurn}
         onRewindTurn={onRewindTurn}
         onOpenHandoff={onOpenHandoff}
+        latestCheckpoint={latestCheckpoint}
+        queuePaused={queuePaused}
+        onResumeQueue={onResumeQueue}
         onFixVerification={(fixPrompt) => {
           if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
         }}
@@ -1577,6 +1628,19 @@ export function ChatView({
       setDraft('');
       commitTrigger(null);
       runNativeAction(nativeAction.action);
+      return;
+    }
+    const pinCommand = parsePinCommand(markdown);
+    if (pinCommand !== null && attachedFiles.length === 0 && !readOnly) {
+      if (pinCommand.note === '') {
+        onWarn?.('Digite o texto após /pin para fixar na memória da sessão.');
+        return;
+      }
+      if (!onPinNote) return;
+      editor?.clear();
+      setDraft('');
+      commitTrigger(null);
+      onPinNote(pinCommand.note);
       return;
     }
     const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });

@@ -105,6 +105,7 @@ export interface ProjectView {
   autoWorktree?: boolean;
   autoVerify?: boolean;
   verificationChecks?: VerificationCheck[];
+  pinnedMemory?: string | null;
 }
 
 export interface VoiceModelInfo {
@@ -167,6 +168,7 @@ export interface InovaApi {
     model?: string | null;
     effort?: EffortLevel | null;
     mode?: ExecutionMode | null;
+    pinnedMemory?: string | null;
   }): Promise<Result<SessionView>>;
   getDefaultModes(): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
   setDefaultMode(input: {
@@ -199,6 +201,7 @@ export interface InovaApi {
     autoWorktree?: boolean;
     autoVerify?: boolean;
     verificationChecks?: VerificationCheck[];
+    pinnedMemory?: string | null;
   }): Promise<Result<ProjectView>>;
   runVerification(input: { sessionId: string }): Promise<Result<null>>;
   getWorkspace(): Promise<Result<WorkspaceView>>;
@@ -310,6 +313,7 @@ export interface InovaApi {
   onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
   onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
   onQueuePausedEvent(cb: (sessionIds: string[]) => void): () => void;
+  onFailoverEvent(cb: (e: { session: Session; rollbackLastTurn: boolean }) => void): () => void;
   startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
   cancelLogin(sessionId: string): void;
@@ -384,6 +388,7 @@ export const CHANNELS = {
   inboxEvent: 'inova:inbox:event',
   queueEvent: 'inova:queue:event',
   queuePausedEvent: 'inova:queue:paused-event',
+  failoverEvent: 'inova:session:failover',
   startLogin: 'inova:startLogin',
   submitLoginCode: 'inova:submitLoginCode',
   cancelLogin: 'inova:cancelLogin',

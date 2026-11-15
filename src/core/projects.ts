@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
+import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore, withStoreLock } from './store.js';
 import type { Project, Store, VerificationCheck } from './types.js';
@@ -79,6 +80,16 @@ export function resolveProject(store: Store, cwd: string): Project | undefined {
   return best;
 }
 
+function normalizeProjectPinnedMemory(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (trimmed.length > MAX_PINNED_MEMORY_CHARS) {
+    throw new Error(`Memória fixada deve ter até ${MAX_PINNED_MEMORY_CHARS} caracteres.`);
+  }
+  return trimmed;
+}
+
 export async function updateProjectConfig(ctx: {
   root: string;
   projectId: string;
@@ -86,6 +97,7 @@ export async function updateProjectConfig(ctx: {
     autoWorktree?: boolean;
     autoVerify?: boolean;
     verificationChecks?: VerificationCheck[];
+    pinnedMemory?: string | null;
   };
 }): Promise<Project> {
   return withStoreLock(ctx.root, async () => {
@@ -98,6 +110,9 @@ export async function updateProjectConfig(ctx: {
     if (ctx.patch.autoVerify !== undefined) project.autoVerify = ctx.patch.autoVerify;
     if (ctx.patch.verificationChecks !== undefined) {
       project.verificationChecks = ctx.patch.verificationChecks;
+    }
+    if (ctx.patch.pinnedMemory !== undefined) {
+      project.pinnedMemory = normalizeProjectPinnedMemory(ctx.patch.pinnedMemory);
     }
     await saveStore(ctx.root, store);
     return project;

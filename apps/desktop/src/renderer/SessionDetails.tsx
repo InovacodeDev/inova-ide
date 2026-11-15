@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
+import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
 import type { ProviderId } from '@inova/core/types';
 import type { ContextInfo } from './chat-reducer';
 import {
@@ -21,7 +22,6 @@ import {
   ChevronRightIcon,
   FolderIcon,
   GitBranchIcon,
-  PanelRightCloseIcon,
   RefreshIcon,
   RotateCcwIcon,
   SwitchIcon,
@@ -33,6 +33,78 @@ import { contextLabel, formatTokens } from './token-format';
 import { useContextBreakdown } from './useContextBreakdown';
 import { useSessionGitStatus } from './useSessionGitStatus';
 import './session.css';
+
+function PinnedMemoryField({
+  title,
+  placeholder,
+  value,
+  disabled = false,
+  onSave,
+}: {
+  title: string;
+  placeholder: string;
+  value: string | null;
+  disabled?: boolean;
+  onSave: (value: string | null) => Promise<void>;
+}) {
+  const initialValue = value ?? '';
+  const [draft, setDraft] = useState(initialValue);
+  const [saving, setSaving] = useState(false);
+  const normalizedDraft = draft.trim();
+  const normalizedSaved = initialValue.trim();
+  const dirty = normalizedDraft !== normalizedSaved;
+  const remaining = MAX_PINNED_MEMORY_CHARS - draft.length;
+
+  const commit = async (next: string | null) => {
+    setSaving(true);
+    try {
+      await onSave(next);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="pinned-memory-card">
+      <div className="pinned-memory-head">
+        <span className="section-label">{title}</span>
+        <span className="pinned-memory-count mono">{remaining}</span>
+      </div>
+      <textarea
+        className="field pinned-memory-textarea"
+        rows={3}
+        maxLength={MAX_PINNED_MEMORY_CHARS}
+        value={draft}
+        disabled={saving || disabled}
+        placeholder={placeholder}
+        onChange={(event) => setDraft(event.target.value)}
+      />
+      <div className="pinned-memory-actions">
+        <button
+          type="button"
+          className="btn btn-sm"
+          disabled={saving || disabled || (normalizedDraft === '' && normalizedSaved === '')}
+          onClick={() => {
+            setDraft('');
+            if (normalizedSaved !== '') {
+              void commit(null);
+            }
+          }}
+        >
+          Limpar
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          disabled={saving || disabled || !dirty}
+          onClick={() => void commit(normalizedDraft === '' ? null : normalizedDraft)}
+        >
+          {saving ? 'Salvando...' : 'Salvar'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function ContextBreakdownPanel({
   sessionId,
@@ -137,7 +209,6 @@ interface SessionDetailsProps {
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
   collapsed: boolean;
-  onToggleCollapsed: () => void;
   kind?: 'session' | 'subsession';
   sectionName?: string | null;
   parentTitle?: string | null;
@@ -152,6 +223,11 @@ interface SessionDetailsProps {
   onApplyWorktree?: () => void;
   onRevertFiles?: (files: string[]) => Promise<boolean>;
   onHandoff?: () => void;
+  projectPinnedMemory?: string | null;
+  sessionPinnedMemory?: string | null;
+  pinnedMemoryDisabled?: boolean;
+  onSaveProjectPinnedMemory?: (value: string | null) => Promise<void>;
+  onSaveSessionPinnedMemory?: (value: string | null) => Promise<void>;
 }
 
 const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
@@ -165,7 +241,6 @@ export function SessionDetails({
   subagents = [],
   context,
   collapsed,
-  onToggleCollapsed,
   kind = 'session',
   sectionName = null,
   parentTitle = null,
@@ -180,6 +255,11 @@ export function SessionDetails({
   onApplyWorktree,
   onRevertFiles,
   onHandoff,
+  projectPinnedMemory = null,
+  sessionPinnedMemory = null,
+  pinnedMemoryDisabled = false,
+  onSaveProjectPinnedMemory,
+  onSaveSessionPinnedMemory,
 }: SessionDetailsProps) {
   const contextSummary = contextLabel(context);
   const [breakdownOpen, setBreakdownOpen] = useState(false);
@@ -231,15 +311,6 @@ export function SessionDetails({
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          className="icon-btn session-details-collapse"
-          aria-label="Minimizar detalhes da sessão"
-          data-tooltip="Minimizar detalhes da sessão"
-          onClick={onToggleCollapsed}
-        >
-          <PanelRightCloseIcon size={15} />
-        </button>
       </div>
       <div className="session-details-body">
         {activeTab === 'context' ? (
@@ -279,6 +350,30 @@ export function SessionDetails({
                 sessionId={sessionId}
                 usedTokens={context?.usedTokens ?? null}
               />
+            ) : null}
+            {onSaveSessionPinnedMemory || onSaveProjectPinnedMemory ? (
+              <div className="pinned-memory-group">
+                {onSaveSessionPinnedMemory ? (
+                  <PinnedMemoryField
+                    key={`session:${sessionId}:${sessionPinnedMemory ?? ''}`}
+                    title="Memória da sessão"
+                    placeholder="Regras ou notas fixadas para esta sessão (ou use /pin no chat)..."
+                    value={sessionPinnedMemory}
+                    disabled={pinnedMemoryDisabled}
+                    onSave={onSaveSessionPinnedMemory}
+                  />
+                ) : null}
+                {onSaveProjectPinnedMemory ? (
+                  <PinnedMemoryField
+                    key={`project:${path ?? ''}:${projectPinnedMemory ?? ''}`}
+                    title="Memória do projeto"
+                    placeholder="Convenções, arquitetura ou restrições aplicadas a todas as sessões deste projeto..."
+                    value={projectPinnedMemory}
+                    disabled={pinnedMemoryDisabled}
+                    onSave={onSaveProjectPinnedMemory}
+                  />
+                ) : null}
+              </div>
             ) : null}
           </section>
         ) : null}

@@ -58,33 +58,151 @@ const ARCHIVE_OPTIONS: { value: Settings['sessions']['autoArchiveDays']; label: 
   { value: 30, label: '30 dias' },
 ];
 
+const FAILOVER_OPTIONS: { value: Settings['sessions']['rateLimitFailover']; label: string }[] = [
+  { value: 'off', label: 'Desativado' },
+  { value: 'same-provider', label: 'Mesmo provedor' },
+  { value: 'any-provider', label: 'Qualquer provedor' },
+];
+
+const TOOL_ERROR_OPTIONS: {
+  value: Settings['sessions']['maxConsecutiveToolErrors'];
+  label: string;
+}[] = [
+  { value: 0, label: 'Desativado' },
+  { value: 3, label: '3 erros' },
+  { value: 5, label: '5 erros' },
+  { value: 10, label: '10 erros' },
+];
+
+const VERIFICATION_FAILURE_OPTIONS: {
+  value: Settings['sessions']['maxConsecutiveVerificationFailures'];
+  label: string;
+}[] = [
+  { value: 0, label: 'Desativado' },
+  { value: 2, label: '2 falhas' },
+  { value: 3, label: '3 falhas' },
+  { value: 5, label: '5 falhas' },
+];
+
+const SESSION_COST_OPTIONS: {
+  value: Settings['sessions']['maxSessionCostUsd'];
+  label: string;
+}[] = [
+  { value: 0, label: 'Sem limite' },
+  { value: 1, label: '$1' },
+  { value: 5, label: '$5' },
+  { value: 10, label: '$10' },
+  { value: 25, label: '$25' },
+];
+
+const CONTEXT_PERCENT_OPTIONS: {
+  value: Settings['sessions']['maxContextPercent'];
+  label: string;
+}[] = [
+  { value: 0, label: 'Desativado' },
+  { value: 80, label: '80%' },
+  { value: 90, label: '90%' },
+  { value: 95, label: '95%' },
+];
+
 export function SessionsSection({ settings, onUpdate }: SettingsSectionProps) {
   return (
-    <SettingGroup>
-      <SettingRow
-        title="Arquivar sessões automaticamente"
-        description="Arquiva sessões sem atividade pelo tempo escolhido. Sessões em execução, abertas em aba ou com item não lido na caixa de entrada não são arquivadas."
+    <>
+      <SettingGroup>
+        <SettingRow
+          title="Arquivar sessões automaticamente"
+          description="Arquiva sessões sem atividade pelo tempo escolhido. Sessões em execução, abertas em aba ou com item não lido na caixa de entrada não são arquivadas."
+        >
+          <Segmented
+            name="auto-archive"
+            label="Arquivar sessões automaticamente"
+            value={settings.sessions.autoArchiveDays}
+            options={ARCHIVE_OPTIONS}
+            onChange={(autoArchiveDays) => onUpdate({ sessions: { autoArchiveDays } })}
+          />
+        </SettingRow>
+        <SettingRow
+          htmlFor="collapse-finished-turns"
+          title="Recolher turnos concluídos"
+          description="Esconde as ferramentas e os passos intermediários de turnos já terminados e mostra só a resposta final."
+        >
+          <Switch
+            id="collapse-finished-turns"
+            checked={settings.sessions.collapseFinishedTurns}
+            onChange={(collapseFinishedTurns) => onUpdate({ sessions: { collapseFinishedTurns } })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Failover automático por limite"
+          description="Quando uma conta atinge o limite de uso, troca automaticamente para outra conta elegível e retoma o turno sem pausar o fluxo."
+        >
+          <Segmented
+            name="rate-limit-failover"
+            label="Failover automático por limite"
+            value={settings.sessions.rateLimitFailover}
+            options={FAILOVER_OPTIONS}
+            onChange={(rateLimitFailover) => onUpdate({ sessions: { rateLimitFailover } })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup
+        title="Circuit Breaker"
+        description="Interrompe loops de erro e pausa a fila automaticamente antes de consumir sua quota."
       >
-        <Segmented
-          name="auto-archive"
-          label="Arquivar sessões automaticamente"
-          value={settings.sessions.autoArchiveDays}
-          options={ARCHIVE_OPTIONS}
-          onChange={(autoArchiveDays) => onUpdate({ sessions: { autoArchiveDays } })}
-        />
-      </SettingRow>
-      <SettingRow
-        htmlFor="collapse-finished-turns"
-        title="Recolher turnos concluídos"
-        description="Esconde as ferramentas e os passos intermediários de turnos já terminados e mostra só a resposta final."
-      >
-        <Switch
-          id="collapse-finished-turns"
-          checked={settings.sessions.collapseFinishedTurns}
-          onChange={(collapseFinishedTurns) => onUpdate({ sessions: { collapseFinishedTurns } })}
-        />
-      </SettingRow>
-    </SettingGroup>
+        <SettingRow
+          title="Erros seguidos de ferramenta"
+          description="Cancela o turno atual se ferramentas falharem repetidamente em sequência."
+        >
+          <Segmented
+            name="max-consecutive-tool-errors"
+            label="Erros seguidos de ferramenta"
+            value={settings.sessions.maxConsecutiveToolErrors}
+            options={TOOL_ERROR_OPTIONS}
+            onChange={(maxConsecutiveToolErrors) =>
+              onUpdate({ sessions: { maxConsecutiveToolErrors } })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          title="Falhas seguidas de verificação"
+          description="Pausa a sessão na primeira falha pós-turno e dispara alerta após falhas consecutivas."
+        >
+          <Segmented
+            name="max-consecutive-verification-failures"
+            label="Falhas seguidas de verificação"
+            value={settings.sessions.maxConsecutiveVerificationFailures}
+            options={VERIFICATION_FAILURE_OPTIONS}
+            onChange={(maxConsecutiveVerificationFailures) =>
+              onUpdate({ sessions: { maxConsecutiveVerificationFailures } })
+            }
+          />
+        </SettingRow>
+        <SettingRow
+          title="Teto de custo por sessão"
+          description="Pausa a fila ao atingir o valor acumulado na sessão."
+        >
+          <Segmented
+            name="max-session-cost-usd"
+            label="Teto de custo por sessão"
+            value={settings.sessions.maxSessionCostUsd}
+            options={SESSION_COST_OPTIONS}
+            onChange={(maxSessionCostUsd) => onUpdate({ sessions: { maxSessionCostUsd } })}
+          />
+        </SettingRow>
+        <SettingRow
+          title="Teto de uso de contexto"
+          description="Pausa a fila automaticamente quando a janela de contexto atingir o percentual."
+        >
+          <Segmented
+            name="max-context-percent"
+            label="Teto de uso de contexto"
+            value={settings.sessions.maxContextPercent}
+            options={CONTEXT_PERCENT_OPTIONS}
+            onChange={(maxContextPercent) => onUpdate({ sessions: { maxContextPercent } })}
+          />
+        </SettingRow>
+      </SettingGroup>
+    </>
   );
 }
 

@@ -86,6 +86,7 @@ const api: InovaApi = {
   onInboxEvent: (callback) => subscribe(CHANNELS.inboxEvent, callback),
   onQueueEvent: (callback) => subscribe(CHANNELS.queueEvent, callback),
   onQueuePausedEvent: (callback) => subscribe(CHANNELS.queuePausedEvent, callback),
+  onFailoverEvent: (callback) => subscribe(CHANNELS.failoverEvent, callback),
   startLogin: (input) => ipcRenderer.invoke(CHANNELS.startLogin, input),
   submitLoginCode: (input) => ipcRenderer.invoke(CHANNELS.submitLoginCode, input),
   cancelLogin: (sessionId) => ipcRenderer.send(CHANNELS.cancelLogin, sessionId),

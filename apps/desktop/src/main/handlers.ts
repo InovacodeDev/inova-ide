@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
-import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
+import type {
+  ChatEvent,
+  ContextBreakdown,
+  UsageSnapshot,
+  UsageWindow,
+} from '@inova/core/chat-types';
+import { createCircuitBreakerTracker } from '@inova/core/circuit-breaker';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
@@ -28,8 +34,11 @@ import {
 } from '@inova/core/git-worktree';
 import {
   buildHandoffContext,
+  formatPinnedMemoryBlock,
+  hashPinnedMemory,
   isAuthRevokedMessage,
   isRateLimitMessage,
+  rankFailoverAccounts,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
@@ -53,7 +62,7 @@ import {
   updateProjectConfig,
 } from '@inova/core/projects';
 import { beginForcedReauth, providers, readAccountEmail } from '@inova/core/providers';
-import type { CommandRunner } from '@inova/core/providers';
+import type { AuthStatus, CommandRunner } from '@inova/core/providers';
 import {
   IMPORT_PROVIDERS,
   defaultCliHome,
@@ -74,7 +83,7 @@ import {
   setDefaultProviderMode,
   updateSession,
 } from '@inova/core/sessions';
-import { getSettings, updateSettings } from '@inova/core/settings';
+import { DEFAULT_SETTINGS, getSettings, updateSettings } from '@inova/core/settings';
 import { loadStore } from '@inova/core/store';
 import type {
   Account,
@@ -84,6 +93,7 @@ import type {
   Project,
   ProviderId,
   QueuedTurn,
+  RateLimitFailoverPolicy,
   Session,
   Settings,
   Store,
@@ -163,6 +173,7 @@ export interface HandlerDeps {
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
   emitQueuePaused?: (sessionIds: string[]) => void;
+  emitFailover?: (event: { session: Session; rollbackLastTurn: boolean }) => void;
   notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
   openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
@@ -177,6 +188,7 @@ export interface HandlerDeps {
 const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão']);
 const TITLE_CHARS = 60;
 const FILE_CACHE_TTL_MS = 5_000;
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
 const CONTEXT_BREAKDOWN_TIMEOUT_MS = 30_000;
@@ -208,6 +220,7 @@ async function projectView(project: Project, account: Account): Promise<ProjectV
     autoWorktree: project.autoWorktree,
     autoVerify: project.autoVerify,
     verificationChecks: project.verificationChecks,
+    pinnedMemory: project.pinnedMemory,
   };
 }
 
@@ -294,6 +307,25 @@ export function createHandlers(deps: HandlerDeps) {
   const lastErrorBySession = new Map<string, string>();
   const exhaustedAccounts = new Map<string, string | null>();
   const expiredAccounts = new Set<string>();
+  const circuitBreaker = createCircuitBreakerTracker();
+  const projectAutoVerify = new Map<string, boolean>();
+  const verifyingSessions = new Set<string>();
+  const activeTurnInputs = new Map<
+    string,
+    { prompt: string; extraDirs?: string[]; handoffContext: string | null }
+  >();
+  const failoverTriedAccounts = new Map<string, Set<string>>();
+  const pendingFailoverSessions = new Set<string>();
+  let cachedFailoverPolicy: RateLimitFailoverPolicy = 'off';
+  let cachedFailoverPolicyLoaded = false;
+  let cachedSessionSettings: Settings['sessions'] = { ...DEFAULT_SETTINGS.sessions };
+  void getSettings(deps.root)
+    .then((loaded) => {
+      cachedSessionSettings = loaded.sessions;
+      cachedFailoverPolicy = loaded.sessions.rateLimitFailover;
+      cachedFailoverPolicyLoaded = true;
+    })
+    .catch(() => undefined);
   let uiFocus: { activeSessionId: string | null; windowFocused: boolean } = {
     activeSessionId: null,
     windowFocused: true,
@@ -474,15 +506,39 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  function syncProjectAutoVerify(project: Project): void {
+    const enabled =
+      project.autoVerify === true &&
+      (project.verificationChecks ?? []).some((check) => check.enabled);
+    projectAutoVerify.set(project.id, enabled);
+  }
+
+  function isAutoVerifyEnabledForSession(sessionId: string): boolean {
+    const projectId = sessionProjects.get(sessionId);
+    return projectId !== undefined && projectAutoVerify.get(projectId) === true;
+  }
+
+  function emitCircuitBreakerError(sessionId: string, message: string): void {
+    const errorEvent: ChatEvent = { kind: 'error', message };
+    deps.emit(sessionId, errorEvent);
+    enqueueAppend(sessionId, errorEvent);
+    lastErrorBySession.set(sessionId, message);
+  }
+
   function removeSessionsRuntimeState(sessionIds: readonly string[]): void {
     const idSet = new Set(sessionIds);
     for (const id of sessionIds) {
       verificationControllers.get(id)?.abort();
       verificationControllers.delete(id);
+      verifyingSessions.delete(id);
+      circuitBreaker.deleteSession(id);
       sessionTurnIds.delete(id);
       cancelledTurns.delete(id);
       lastErrorBySession.delete(id);
       sessionProjects.delete(id);
+      activeTurnInputs.delete(id);
+      failoverTriedAccounts.delete(id);
+      pendingFailoverSessions.delete(id);
       turnQueue.cancelBySession(id);
       setQueuePaused({ sessionId: id, paused: false });
     }
@@ -499,20 +555,349 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  async function resolveFailoverTarget(input: {
+    policy: RateLimitFailoverPolicy;
+    store: Store;
+    currentAccount: Account;
+    triedAccountIds?: ReadonlySet<string>;
+    allowBusy?: boolean;
+    baseEnv?: NodeJS.ProcessEnv;
+  }): Promise<{ account: Account; file: string; baseEnv: NodeJS.ProcessEnv } | null> {
+    if (input.policy === 'off') return null;
+    const allowBusy = input.allowBusy ?? true;
+    const busyIds = deps.chat.accountsInUse();
+    const exhaustedIds = new Set<string>();
+    for (const account of input.store.accounts) {
+      if (isAccountExhausted(account.id)) exhaustedIds.add(account.id);
+    }
+    const usageByAccount = new Map<string, readonly UsageWindow[]>();
+    for (const [accountId, snapshot] of streamUsage) {
+      usageByAccount.set(accountId, snapshot.windows);
+    }
+    const ranked = rankFailoverAccounts({
+      policy: input.policy,
+      currentAccountId: input.currentAccount.id,
+      currentProvider: input.currentAccount.provider,
+      accounts: input.store.accounts,
+      busyAccountIds: busyIds,
+      exhaustedAccountIds: exhaustedIds,
+      expiredAccountIds: expiredAccounts,
+      triedAccountIds: input.triedAccountIds,
+      usageByAccount,
+    });
+    if (ranked.length === 0) return null;
+    const baseEnv = input.baseEnv ?? (await deps.baseEnv());
+    for (const candidate of ranked) {
+      if (!allowBusy && deps.chat.accountsInUse().has(candidate.id)) continue;
+      const entry = exhaustionEntry(candidate.id);
+      if (entry !== null) {
+        if (isFutureReset(entry.resetsAt)) continue;
+        const blocked = await recheckExhaustion({ account: candidate, resetsAt: entry.resetsAt });
+        if (blocked !== null) continue;
+      }
+      const adapter = providers[candidate.provider];
+      const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+      if (file === undefined) continue;
+      let status: AuthStatus = 'unknown';
+      try {
+        const { env } = buildLaunch({
+          account: candidate,
+          cwd: candidate.homeDir,
+          args: [],
+          baseEnv,
+        });
+        status = await adapter.checkStatus({
+          homeDir: candidate.homeDir,
+          env,
+          runner: deps.runner,
+        });
+      } catch (error: unknown) {
+        if (!(error instanceof Error)) throw error;
+      }
+      if (status !== 'logged-in') continue;
+      await adapter.prepareLaunch(candidate.homeDir, baseEnv['HOME']);
+      return { account: candidate, file, baseEnv };
+    }
+    return null;
+  }
+
+  async function switchSessionToFailoverAccount(input: {
+    session: Session;
+    project: Project;
+    fromAccount: Account;
+    toAccount: Account;
+    events: readonly ChatEvent[];
+    fallbackHandoff?: string | null;
+    rollbackLastTurn: boolean;
+  }): Promise<Session> {
+    const { session, project, fromAccount, toAccount, events, fallbackHandoff, rollbackLastTurn } =
+      input;
+    const hasUserTurns = events.some((event) => event.kind === 'user');
+    const handoffContext = hasUserTurns
+      ? buildHandoffContext({
+          events,
+          gitSummary: await gitSummaryFor(effectiveCwd(session, project)),
+          fromProvider: fromAccount.provider,
+          toProvider: toAccount.provider,
+        })
+      : (fallbackHandoff ?? session.handoffContext ?? null);
+    provisionalSessions.delete(session.id);
+    const updated = await updateSession({
+      root: deps.root,
+      sessionId: session.id,
+      patch: {
+        accountIdOverride: toAccount.id,
+        providerSessionId: null,
+        handoffContext,
+      },
+    });
+    if (turnQueue.reassignSessionAccount({ sessionId: session.id, accountId: toAccount.id })) {
+      emitQueueSnapshot();
+    }
+    deps.emitFailover?.({ session: updated, rollbackLastTurn });
+    return updated;
+  }
+
+  function pauseAndNotifyRateLimit(input: {
+    sessionId: string;
+    ownerLabel: string;
+    lastError: string | undefined;
+  }): void {
+    const { sessionId, ownerLabel, lastError } = input;
+    if (turnQueue.forSession(sessionId).length > 0) {
+      setQueuePaused({ sessionId, paused: true });
+    }
+    enqueueInboxUpdate({
+      sessionId,
+      kind: 'waiting-input',
+      summary: failedTurnSummary({
+        owner: { accountLabel: ownerLabel },
+        lastError,
+        rateLimited: true,
+      }),
+    });
+  }
+
+  async function migrateExhaustedAccountQueues(input: {
+    accountId: string;
+    policy: RateLimitFailoverPolicy;
+  }): Promise<string[]> {
+    const { accountId, policy } = input;
+    return serialized(async () => {
+      const candidateSessionIds = [
+        ...new Set(
+          turnQueue
+            .list(accountId)
+            .map((item) => item.sessionId)
+            .filter(
+              (sessionId) =>
+                !pausedQueues.has(sessionId) &&
+                !verifyingSessions.has(sessionId) &&
+                !pendingFailoverSessions.has(sessionId) &&
+                !deps.chat.isRunning(sessionId),
+            ),
+        ),
+      ];
+      if (candidateSessionIds.length === 0) return [];
+      const store = await loadStore(deps.root);
+      const fromAccount = store.accounts.find((item) => item.id === accountId);
+      if (!fromAccount) return [];
+      const targetAccountIds = new Set<string>();
+      for (const sessionId of candidateSessionIds) {
+        const session = sessionsOf(store).find((item) => item.id === sessionId);
+        const project = session
+          ? store.projects.find((item) => item.id === session.projectId)
+          : undefined;
+        if (!session || !project) continue;
+        const target = await resolveFailoverTarget({
+          policy,
+          store,
+          currentAccount: fromAccount,
+          triedAccountIds: failoverTriedAccounts.get(sessionId),
+          allowBusy: true,
+        });
+        if (!target) {
+          pauseAndNotifyRateLimit({
+            sessionId,
+            ownerLabel: fromAccount.label,
+            lastError: undefined,
+          });
+          continue;
+        }
+        const events = await readTranscriptEvents(sessionId);
+        await switchSessionToFailoverAccount({
+          session,
+          project,
+          fromAccount,
+          toAccount: target.account,
+          events,
+          rollbackLastTurn: false,
+        });
+        targetAccountIds.add(target.account.id);
+      }
+      return [...targetAccountIds];
+    });
+  }
+
+  async function attemptMidTurnFailover(input: {
+    sessionId: string;
+    owner: { accountId: string; accountLabel: string; provider: ProviderId };
+    failedInput: { prompt: string; extraDirs?: string[]; handoffContext: string | null };
+    lastError: string;
+  }): Promise<void> {
+    const { sessionId, owner, failedInput, lastError } = input;
+    let targetAccountId: string | null = null;
+    try {
+      targetAccountId = await serialized(async () => {
+        const settings = await getSettings(deps.root);
+        cachedSessionSettings = settings.sessions;
+        cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+        cachedFailoverPolicyLoaded = true;
+        if (settings.sessions.rateLimitFailover === 'off') {
+          pauseAndNotifyRateLimit({ sessionId, ownerLabel: owner.accountLabel, lastError });
+          return null;
+        }
+        const tried = failoverTriedAccounts.get(sessionId) ?? new Set<string>();
+        tried.add(owner.accountId);
+        failoverTriedAccounts.set(sessionId, tried);
+        const store = await loadStore(deps.root);
+        const session = sessionsOf(store).find((item) => item.id === sessionId);
+        const project = session
+          ? store.projects.find((item) => item.id === session.projectId)
+          : undefined;
+        const fromAccount = store.accounts.find((item) => item.id === owner.accountId);
+        if (!session || !project || !fromAccount) {
+          pauseAndNotifyRateLimit({ sessionId, ownerLabel: owner.accountLabel, lastError });
+          return null;
+        }
+        const target = await resolveFailoverTarget({
+          policy: settings.sessions.rateLimitFailover,
+          store,
+          currentAccount: fromAccount,
+          triedAccountIds: tried,
+          allowBusy: true,
+        });
+        if (!target) {
+          pauseAndNotifyRateLimit({ sessionId, ownerLabel: owner.accountLabel, lastError });
+          return null;
+        }
+        const events = await readTranscriptEvents(sessionId);
+        let userCount = 0;
+        for (const item of events) {
+          if (item.kind === 'user') userCount += 1;
+        }
+        const truncated = userCount > 0 ? truncateTranscriptAtTurn(events, userCount - 1) : null;
+        if (truncated !== null) {
+          const cwd = effectiveCwd(session, project);
+          const sharesRunningTree = sessionsOf(store).some((other) => {
+            if (other.id === sessionId || !deps.chat.isRunning(other.id)) return false;
+            const otherProject = store.projects.find((item) => item.id === other.projectId);
+            return otherProject !== undefined && effectiveCwd(other, otherProject) === cwd;
+          });
+          if (
+            !sharesRunningTree &&
+            truncated.checkpointRef !== null &&
+            (await checkpointExists({ repoPath: cwd, ref: truncated.checkpointRef }))
+          ) {
+            try {
+              await restoreCheckpoint({
+                repoPath: cwd,
+                ref: truncated.checkpointRef,
+                preserveFiles: truncated.skippedLargeFiles,
+              });
+            } finally {
+              invalidateProjectFiles(sessionId);
+            }
+          }
+          await writeTranscriptEvents(sessionId, truncated.kept);
+        }
+        const keptEvents = truncated ? truncated.kept : events;
+        turnQueue.requeueFront({
+          turnId: randomUUID(),
+          sessionId,
+          accountId: target.account.id,
+          prompt: failedInput.prompt,
+          enqueuedAt: deps.usageDeps.now().toISOString(),
+          ...(failedInput.extraDirs && failedInput.extraDirs.length > 0
+            ? { extraDirs: failedInput.extraDirs }
+            : {}),
+        });
+        setQueuePaused({ sessionId, paused: false });
+        preferredQueueSession.set(target.account.id, sessionId);
+        emitQueueSnapshot();
+        await switchSessionToFailoverAccount({
+          session,
+          project,
+          fromAccount,
+          toAccount: target.account,
+          events: keptEvents,
+          fallbackHandoff: failedInput.handoffContext,
+          rollbackLastTurn: true,
+        });
+        return target.account.id;
+      });
+    } finally {
+      pendingFailoverSessions.delete(sessionId);
+    }
+    if (targetAccountId !== null) {
+      void drainAccountQueue(targetAccountId).catch((error: unknown) => {
+        console.error(`inova: failed to drain turn queue for ${targetAccountId}`, error);
+      });
+    }
+    if (
+      !deps.chat.accountsInUse().has(owner.accountId) &&
+      turnQueue.list(owner.accountId).length > 0
+    ) {
+      void drainAccountQueue(owner.accountId).catch((error: unknown) => {
+        console.error(`inova: failed to drain turn queue for ${owner.accountId}`, error);
+      });
+    }
+  }
+
   async function drainAccountQueue(accountId: string): Promise<void> {
     if (deps.chat.accountsInUse().has(accountId)) return;
     if (isAccountExhausted(accountId)) {
-      for (const queued of turnQueue.list(accountId)) {
-        setQueuePaused({ sessionId: queued.sessionId, paused: true });
+      if (!cachedFailoverPolicyLoaded || cachedFailoverPolicy !== 'off') {
+        const settings = await getSettings(deps.root);
+        cachedSessionSettings = settings.sessions;
+        cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+        cachedFailoverPolicyLoaded = true;
+      }
+      if (cachedFailoverPolicy === 'off') {
+        for (const queued of turnQueue.list(accountId)) {
+          if (
+            !verifyingSessions.has(queued.sessionId) &&
+            !pendingFailoverSessions.has(queued.sessionId)
+          ) {
+            setQueuePaused({ sessionId: queued.sessionId, paused: true });
+          }
+        }
+        return;
+      }
+      const targetIds = await migrateExhaustedAccountQueues({
+        accountId,
+        policy: cachedFailoverPolicy,
+      });
+      for (const targetId of targetIds) {
+        void drainAccountQueue(targetId).catch((error: unknown) => {
+          console.error(`inova: failed to drain turn queue for ${targetId}`, error);
+        });
       }
       return;
     }
+    const skipSessions = new Set([
+      ...pausedQueues,
+      ...verifyingSessions,
+      ...pendingFailoverSessions,
+    ]);
     const preferred = preferredQueueSession.get(accountId);
-    preferredQueueSession.delete(accountId);
+    if (preferred !== undefined && !skipSessions.has(preferred)) {
+      preferredQueueSession.delete(accountId);
+    }
     const next =
-      (preferred !== undefined && !pausedQueues.has(preferred)
+      (preferred !== undefined && !skipSessions.has(preferred)
         ? turnQueue.dequeueNextForSession(preferred)
-        : undefined) ?? turnQueue.dequeueNext(accountId, { skipSessions: pausedQueues });
+        : undefined) ?? turnQueue.dequeueNext(accountId, { skipSessions });
     if (!next) return;
     emitQueueSnapshot();
     const store = await loadStore(deps.root);
@@ -525,6 +910,22 @@ export function createHandlers(deps: HandlerDeps) {
         ? resolveSessionAccount({ session, project, accounts: store.accounts })
         : undefined;
     if (!session || !project || !account) return;
+    const costReason = circuitBreaker.checkCostLimit({
+      sessionId: session.id,
+      limits: cachedSessionSettings,
+    });
+    if (costReason !== null) {
+      turnQueue.requeueFront(next);
+      setQueuePaused({ sessionId: session.id, paused: true });
+      emitQueueSnapshot();
+      emitCircuitBreakerError(session.id, costReason);
+      enqueueInboxUpdate({
+        sessionId: session.id,
+        kind: 'waiting-input',
+        summary: costReason,
+      });
+      return;
+    }
     const adapter = providers[account.provider];
     const baseEnv = await deps.baseEnv();
     const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
@@ -694,15 +1095,29 @@ export function createHandlers(deps: HandlerDeps) {
     }
   }
 
-  async function maybeRunAutoVerification(sessionId: string): Promise<void> {
-    const store = await loadStore(deps.root);
-    const session = store.sessions?.find((item) => item.id === sessionId);
-    if (!session) return;
-    const project = store.projects.find((item) => item.id === session.projectId);
-    if (!project || project.autoVerify !== true) return;
-    const checks = project.verificationChecks ?? [];
-    const turnId = sessionTurnIds.get(sessionId) ?? randomUUID();
-    await runVerificationForSession({ session, project, checks, turnId });
+  async function maybeRunAutoVerification(sessionId: string, accountId?: string): Promise<void> {
+    try {
+      const store = await loadStore(deps.root);
+      const session = store.sessions?.find((item) => item.id === sessionId);
+      if (!session) return;
+      const project = store.projects.find((item) => item.id === session.projectId);
+      if (!project || project.autoVerify !== true) return;
+      const checks = project.verificationChecks ?? [];
+      const turnId = sessionTurnIds.get(sessionId) ?? randomUUID();
+      await runVerificationForSession({ session, project, checks, turnId });
+    } finally {
+      const wasVerifying = verifyingSessions.delete(sessionId);
+      if (wasVerifying && accountId !== undefined && !pausedQueues.has(sessionId)) {
+        if (turnQueue.forSession(sessionId).length > 0) {
+          preferredQueueSession.set(accountId, sessionId);
+        }
+        if (!deps.chat.accountsInUse().has(accountId)) {
+          void drainAccountQueue(accountId).catch((error: unknown) => {
+            console.error(`inova: failed to drain turn queue for ${accountId}`, error);
+          });
+        }
+      }
+    }
   }
 
   async function cachedProjectFiles(
@@ -770,68 +1185,175 @@ export function createHandlers(deps: HandlerDeps) {
       if (owner && isAuthRevokedMessage(event.message)) expiredAccounts.add(owner.accountId);
       if (owner && isRateLimitMessage(event.message)) {
         const windows = streamUsage.get(owner.accountId)?.windows ?? [];
-        exhaustedAccounts.set(
-          owner.accountId,
-          exhaustionResetAt(windows) ?? exhaustedAccounts.get(owner.accountId) ?? null,
-        );
+        const knownReset =
+          exhaustionResetAt(windows) ?? exhaustedAccounts.get(owner.accountId) ?? null;
+        const cooldownReset = new Date(
+          deps.usageDeps.now().getTime() + DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+        ).toISOString();
+        exhaustedAccounts.set(owner.accountId, knownReset ?? cooldownReset);
+      }
+    }
+    if (event.kind === 'tool-use') {
+      circuitBreaker.recordToolUse({ sessionId, toolId: event.toolId, name: event.name });
+    }
+    if (event.kind === 'tool-result') {
+      const reason = circuitBreaker.recordToolResult({
+        sessionId,
+        toolId: event.toolId,
+        output: event.output,
+        isError: event.isError,
+        limits: cachedSessionSettings,
+      });
+      if (reason !== null) {
+        deps.chat.cancel(sessionId);
+        emitCircuitBreakerError(sessionId, reason);
+        if (turnQueue.forSession(sessionId).length > 0) {
+          setQueuePaused({ sessionId, paused: true });
+        }
+        enqueueInboxUpdate({
+          sessionId,
+          kind: 'waiting-input',
+          summary: reason,
+        });
+      }
+    }
+    if (event.kind === 'context') {
+      const reason = circuitBreaker.recordContext({
+        sessionId,
+        usedTokens: event.usedTokens,
+        windowTokens: event.windowTokens,
+        limits: cachedSessionSettings,
+      });
+      if (reason !== null) {
+        emitCircuitBreakerError(sessionId, reason);
+        if (turnQueue.forSession(sessionId).length > 0) {
+          setQueuePaused({ sessionId, paused: true });
+        }
+        enqueueInboxUpdate({
+          sessionId,
+          kind: 'waiting-input',
+          summary: reason,
+        });
       }
     }
     if (event.kind === 'verification') {
       if (event.status === 'failed') {
-        enqueueInboxUpdate({
+        if (turnQueue.forSession(sessionId).length > 0) {
+          setQueuePaused({ sessionId, paused: true });
+        }
+        const reason = circuitBreaker.recordVerification({
           sessionId,
-          kind: 'failed',
-          summary: 'Verificação pós-turno falhou.',
+          status: 'failed',
+          limits: cachedSessionSettings,
         });
-      } else if (
-        event.status === 'passed' &&
-        (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused)
-      ) {
-        enqueueInboxUpdate({
+        if (reason !== null) {
+          emitCircuitBreakerError(sessionId, reason);
+          enqueueInboxUpdate({
+            sessionId,
+            kind: 'waiting-input',
+            summary: reason,
+          });
+        } else {
+          enqueueInboxUpdate({
+            sessionId,
+            kind: 'failed',
+            summary: 'Verificação pós-turno falhou.',
+          });
+        }
+      } else if (event.status === 'passed') {
+        circuitBreaker.recordVerification({
           sessionId,
-          kind: 'completed',
-          summary: 'Verificação pós-turno aprovada.',
+          status: 'passed',
+          limits: cachedSessionSettings,
         });
+        if (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused) {
+          enqueueInboxUpdate({
+            sessionId,
+            kind: 'completed',
+            summary: 'Verificação pós-turno aprovada.',
+          });
+        }
       }
     }
     if (event.kind === 'done') {
       turnOwners.delete(sessionId);
       const wasCancelled = cancelledTurns.delete(sessionId);
+      const failedInput = activeTurnInputs.get(sessionId);
+      activeTurnInputs.delete(sessionId);
       const lastError = lastErrorBySession.get(sessionId);
       lastErrorBySession.delete(sessionId);
       invalidateProjectFiles(sessionId);
+      const rateLimited =
+        event.isError && !wasCancelled && lastError !== undefined && isRateLimitMessage(lastError);
+      if (rateLimited && owner && failedInput && cachedFailoverPolicy !== 'off') {
+        pendingFailoverSessions.add(sessionId);
+        void attemptMidTurnFailover({
+          sessionId,
+          owner,
+          failedInput,
+          lastError,
+        }).catch((error: unknown) => {
+          console.error(`inova: failed to failover session ${sessionId}`, error);
+        });
+        return;
+      }
+      const { costTripReason, turnTripReason } = circuitBreaker.recordDone({
+        sessionId,
+        costUsd: event.costUsd,
+        limits: cachedSessionSettings,
+      });
+      if (costTripReason !== null) {
+        emitCircuitBreakerError(sessionId, costTripReason);
+      }
+      const circuitBroken = turnTripReason !== null;
       const hasQueued = turnQueue.forSession(sessionId).length > 0;
-      if (event.isError && !wasCancelled) {
+      const willAutoVerify =
+        !event.isError &&
+        !wasCancelled &&
+        !circuitBroken &&
+        isAutoVerifyEnabledForSession(sessionId);
+      if (willAutoVerify) {
+        verifyingSessions.add(sessionId);
+      }
+      if ((event.isError && !wasCancelled) || circuitBroken) {
         if (hasQueued) setQueuePaused({ sessionId, paused: true });
       } else if (owner && hasQueued && isAccountExhausted(owner.accountId)) {
         setQueuePaused({ sessionId, paused: true });
-      } else {
+      } else if (!willAutoVerify) {
         setQueuePaused({ sessionId, paused: false });
         if (owner && hasQueued) preferredQueueSession.set(owner.accountId, sessionId);
       }
-      if (event.isError && !wasCancelled) {
-        const rateLimited = lastError ? isRateLimitMessage(lastError) : false;
+      if (circuitBroken) {
+        enqueueInboxUpdate({
+          sessionId,
+          kind: 'waiting-input',
+          summary: turnTripReason,
+        });
+      } else if (event.isError && !wasCancelled) {
         enqueueInboxUpdate({
           sessionId,
           kind: rateLimited ? 'waiting-input' : 'failed',
           summary: failedTurnSummary({ owner, lastError, rateLimited }),
         });
-      } else if (!event.isError && !wasCancelled) {
-        if (owner) expiredAccounts.delete(owner.accountId);
-        const atLimit = streamUsage
-          .get(owner?.accountId ?? '')
-          ?.windows.some((window) => window.usedPercent >= 100);
-        if (owner && !atLimit) exhaustedAccounts.delete(owner.accountId);
-        if (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused) {
-          enqueueInboxUpdate({
-            sessionId,
-            kind: 'completed',
-            summary: 'Resposta concluída.',
+      } else {
+        failoverTriedAccounts.delete(sessionId);
+        if (!event.isError && !wasCancelled) {
+          if (owner) expiredAccounts.delete(owner.accountId);
+          const atLimit = streamUsage
+            .get(owner?.accountId ?? '')
+            ?.windows.some((window) => window.usedPercent >= 100);
+          if (owner && !atLimit) exhaustedAccounts.delete(owner.accountId);
+          if (sessionId !== uiFocus.activeSessionId || !uiFocus.windowFocused) {
+            enqueueInboxUpdate({
+              sessionId,
+              kind: 'completed',
+              summary: 'Resposta concluída.',
+            });
+          }
+          void maybeRunAutoVerification(sessionId, owner?.accountId).catch((error: unknown) => {
+            console.error(`inova: failed to run verification of ${sessionId}`, error);
           });
         }
-        void maybeRunAutoVerification(sessionId).catch((error: unknown) => {
-          console.error(`inova: failed to run verification of ${sessionId}`, error);
-        });
       }
       if (owner && !deps.chat.accountsInUse().has(owner.accountId)) {
         void drainAccountQueue(owner.accountId).catch((error: unknown) => {
@@ -955,15 +1477,35 @@ export function createHandlers(deps: HandlerDeps) {
       claude: account.provider === 'claude',
     });
     const persistNow = account.provider === 'claude' && newId !== null;
+    const preservedHandoff = session.handoffContext ?? null;
     const handoffPrefix = session.handoffContext?.trim();
+    const slash = splitLeadingSlash(prompt.trim());
+    const isCompactSlash = slash !== null && slash.name === 'compact';
+    const pinnedBlock = formatPinnedMemoryBlock({
+      projectMemory: project.pinnedMemory,
+      sessionMemory: session.pinnedMemory,
+    });
+    const currentPinnedHash = hashPinnedMemory(pinnedBlock);
+    const shouldInjectPinnedMemory =
+      !isCompactSlash &&
+      pinnedBlock !== null &&
+      (turn.mode === 'new' ||
+        Boolean(handoffPrefix) ||
+        session.pinnedMemoryHash !== currentPinnedHash);
+    const contextSections = [
+      ...(shouldInjectPinnedMemory ? [pinnedBlock] : []),
+      ...(handoffPrefix ? [handoffPrefix] : []),
+    ];
+    const contextPrefix = contextSections.join('\n\n---\n\n');
     const commandPrompt = await expandProjectCommand({
       projectPath: project.path,
       prompt,
-      keepClaudeLiteral: account.provider === 'claude' && !handoffPrefix,
+      keepClaudeLiteral: account.provider === 'claude' && contextPrefix === '',
     });
-    const promptForCli = handoffPrefix
-      ? `${handoffPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
-      : commandPrompt;
+    const promptForCli =
+      contextPrefix !== ''
+        ? `${contextPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
+        : commandPrompt;
     await updateSession({
       root: deps.root,
       sessionId,
@@ -971,6 +1513,7 @@ export function createHandlers(deps: HandlerDeps) {
         ...(persistNow ? { providerSessionId: newId } : {}),
         ...(DEFAULT_TITLES.has(session.title) ? { title: titleFromPrompt(prompt) } : {}),
         ...(handoffPrefix ? { handoffContext: null } : {}),
+        pinnedMemoryHash: isCompactSlash ? null : currentPinnedHash,
       },
     });
     const executionMode = resolveExecutionMode({
@@ -978,11 +1521,15 @@ export function createHandlers(deps: HandlerDeps) {
       sessionMode: session.mode ?? null,
       defaultModes: store.defaultModes,
     });
+    const settings = await getSettings(deps.root);
+    cachedSessionSettings = settings.sessions;
+    cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+    cachedFailoverPolicyLoaded = true;
     const modelConfig = resolveModelConfig({
       provider: account.provider,
       model: session.model ?? null,
       effort: session.effort ?? null,
-      settings: await getSettings(deps.root),
+      settings,
     });
     const spec = buildChatTurn({
       account,
@@ -998,11 +1545,18 @@ export function createHandlers(deps: HandlerDeps) {
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
     }
+    syncProjectAutoVerify(project);
+    circuitBreaker.startTurn(sessionId);
     sessionProjects.set(sessionId, session.projectId);
     turnOwners.set(sessionId, {
       accountId: account.id,
       accountLabel: account.label,
       provider: account.provider,
+    });
+    activeTurnInputs.set(sessionId, {
+      prompt,
+      ...(input.extraDirs && input.extraDirs.length > 0 ? { extraDirs: [...input.extraDirs] } : {}),
+      handoffContext: preservedHandoff,
     });
     if (checkpoint !== null) {
       handleChatEvent(sessionId, {
@@ -1188,42 +1742,46 @@ export function createHandlers(deps: HandlerDeps) {
         }),
       ),
     updateSession: (input: unknown): Promise<Result<Session>> =>
-      validated(input, parseSessionUpdate, ({ sessionId, title, archived, model, effort, mode }) =>
-        serialized(async () => {
-          const store = await loadStore(deps.root);
-          const session = requireSession(store, sessionId);
-          if (archived === true) {
-            if ([...descendantIds(store, sessionId)].some((id) => deps.chat.isRunning(id))) {
-              return fail('Pare o turno em andamento antes de arquivar.');
+      validated(
+        input,
+        parseSessionUpdate,
+        ({ sessionId, title, archived, model, effort, mode, pinnedMemory }) =>
+          serialized(async () => {
+            const store = await loadStore(deps.root);
+            const session = requireSession(store, sessionId);
+            if (archived === true) {
+              if ([...descendantIds(store, sessionId)].some((id) => deps.chat.isRunning(id))) {
+                return fail('Pare o turno em andamento antes de arquivar.');
+              }
             }
-          }
-          if (effort !== undefined && effort !== null) {
-            const project = store.projects.find((item) => item.id === session.projectId);
-            const account = project
-              ? resolveSessionAccount({ session, project, accounts: store.accounts })
-              : undefined;
-            if (account && !isEffortSupported(account.provider, effort)) {
-              return fail('Nível de esforço não suportado por este provedor.');
+            if (effort !== undefined && effort !== null) {
+              const project = store.projects.find((item) => item.id === session.projectId);
+              const account = project
+                ? resolveSessionAccount({ session, project, accounts: store.accounts })
+                : undefined;
+              if (account && !isEffortSupported(account.provider, effort)) {
+                return fail('Nível de esforço não suportado por este provedor.');
+              }
             }
-          }
-          if (mode !== undefined && mode !== null) {
-            const project = store.projects.find((item) => item.id === session.projectId);
-            const account = project
-              ? resolveSessionAccount({ session, project, accounts: store.accounts })
-              : undefined;
-            if (account && !isModeSupported(account.provider, mode)) {
-              return fail('Modo não suportado por este provedor.');
+            if (mode !== undefined && mode !== null) {
+              const project = store.projects.find((item) => item.id === session.projectId);
+              const account = project
+                ? resolveSessionAccount({ session, project, accounts: store.accounts })
+                : undefined;
+              if (account && !isModeSupported(account.provider, mode)) {
+                return fail('Modo não suportado por este provedor.');
+              }
             }
-          }
-          const patch = {
-            ...(title === undefined ? {} : { title }),
-            ...(archived === undefined ? {} : { archived }),
-            ...(model === undefined ? {} : { model }),
-            ...(effort === undefined ? {} : { effort }),
-            ...(mode === undefined ? {} : { mode }),
-          };
-          return ok(await updateSession({ root: deps.root, sessionId, patch }));
-        }),
+            const patch = {
+              ...(title === undefined ? {} : { title }),
+              ...(archived === undefined ? {} : { archived }),
+              ...(model === undefined ? {} : { model }),
+              ...(effort === undefined ? {} : { effort }),
+              ...(mode === undefined ? {} : { mode }),
+              ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
+            };
+            return ok(await updateSession({ root: deps.root, sessionId, patch }));
+          }),
       ),
     getDefaultModes: (): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>> =>
       guarded(async () => ok(await getDefaultModes(deps.root))),
@@ -1234,10 +1792,22 @@ export function createHandlers(deps: HandlerDeps) {
         ),
       ),
     getSettings: (): Promise<Result<Settings>> =>
-      guarded(async () => ok(await getSettings(deps.root))),
+      guarded(async () => {
+        const settings = await getSettings(deps.root);
+        cachedSessionSettings = settings.sessions;
+        cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+        cachedFailoverPolicyLoaded = true;
+        return ok(settings);
+      }),
     updateSettings: (input: unknown): Promise<Result<Settings>> =>
       validated(input, parseSettingsPatch, (patch) =>
-        serialized(async () => ok(await updateSettings({ root: deps.root, patch }))),
+        serialized(async () => {
+          const settings = await updateSettings({ root: deps.root, patch });
+          cachedSessionSettings = settings.sessions;
+          cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+          cachedFailoverPolicyLoaded = true;
+          return ok(settings);
+        }),
       ),
     sendTestNotification: (): Promise<Result<null>> =>
       guarded(async () => {
@@ -1404,6 +1974,7 @@ export function createHandlers(deps: HandlerDeps) {
             preserveFiles,
             ...(files ? { files } : {}),
           });
+          circuitBreaker.resetManual(sessionId);
           invalidateProjectFiles(sessionId);
           return ok(null);
         }),
@@ -1419,7 +1990,7 @@ export function createHandlers(deps: HandlerDeps) {
       validated(
         input,
         parseProjectVerification,
-        ({ projectId, autoWorktree, autoVerify, verificationChecks }) =>
+        ({ projectId, autoWorktree, autoVerify, verificationChecks, pinnedMemory }) =>
           serialized(async () => {
             const updated = await updateProjectConfig({
               root: deps.root,
@@ -1428,8 +1999,10 @@ export function createHandlers(deps: HandlerDeps) {
                 ...(autoWorktree === undefined ? {} : { autoWorktree }),
                 ...(autoVerify === undefined ? {} : { autoVerify }),
                 ...(verificationChecks === undefined ? {} : { verificationChecks }),
+                ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
               },
             });
+            syncProjectAutoVerify(updated);
             const store = await loadStore(deps.root);
             const account = store.accounts.find((item) => item.id === updated.accountId);
             if (!account) return fail('Conta do projeto não encontrada.');
@@ -1457,7 +2030,9 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     sendMessage: (input: unknown): Promise<Result<null>> =>
       validated(input, parseMessage, async ({ sessionId, prompt, extraDirs }) => {
-        if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
+        if (deps.chat.isRunning(sessionId) || pendingFailoverSessions.has(sessionId)) {
+          return fail(BUSY_MESSAGE);
+        }
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
         if (session.archivedAt !== null) return fail(ARCHIVED_MESSAGE);
@@ -1471,32 +2046,70 @@ export function createHandlers(deps: HandlerDeps) {
             'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
           );
         }
+        let activeAccount = account;
+        let resolvedFile: string | undefined;
+        let resolvedBaseEnv: NodeJS.ProcessEnv | undefined;
         const entry = exhaustionEntry(account.id);
         if (entry !== null) {
-          if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
-          const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
-          if (blocked !== null) return fail(blocked);
+          const blocked = isFutureReset(entry.resetsAt)
+            ? exhaustedMessage(entry.resetsAt)
+            : await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+          if (blocked !== null) {
+            const settings = await getSettings(deps.root);
+            cachedSessionSettings = settings.sessions;
+            cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+            cachedFailoverPolicyLoaded = true;
+            const failoverTarget = await resolveFailoverTarget({
+              policy: settings.sessions.rateLimitFailover,
+              store,
+              currentAccount: account,
+              allowBusy: false,
+            });
+            if (!failoverTarget) return fail(blocked);
+            activeAccount = failoverTarget.account;
+            resolvedFile = failoverTarget.file;
+            resolvedBaseEnv = failoverTarget.baseEnv;
+          }
         }
-        const adapter = providers[account.provider];
-        const baseEnv = await deps.baseEnv();
-        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        const baseEnv = resolvedBaseEnv ?? (await deps.baseEnv());
+        let file = resolvedFile;
         if (file === undefined) {
-          return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
+          const adapter = providers[activeAccount.provider];
+          file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+          if (file === undefined) {
+            return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
+          }
+          await adapter.prepareLaunch(activeAccount.homeDir, baseEnv['HOME']);
         }
-        await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
+        const targetFile = file;
         return serialized(async () => {
-          if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
-          if (deps.chat.accountsInUse().has(account.id)) {
+          if (deps.chat.isRunning(sessionId) || pendingFailoverSessions.has(sessionId)) {
+            return fail(BUSY_MESSAGE);
+          }
+          if (deps.chat.accountsInUse().has(activeAccount.id)) {
             return fail(
               'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
             );
           }
+          if (activeAccount.id !== account.id) {
+            const latestStore = await loadStore(deps.root);
+            const latestSession = requireSession(latestStore, sessionId);
+            const events = await readTranscriptEvents(sessionId);
+            await switchSessionToFailoverAccount({
+              session: latestSession,
+              project,
+              fromAccount: account,
+              toAccount: activeAccount,
+              events,
+              rollbackLastTurn: false,
+            });
+          }
           return runTurn({
             sessionId,
             prompt,
-            account,
+            account: activeAccount,
             project,
-            file,
+            file: targetFile,
             baseEnv,
             extraDirs,
           });
@@ -1541,24 +2154,61 @@ export function createHandlers(deps: HandlerDeps) {
     resumeSessionQueue: (input: unknown): Promise<Result<null>> =>
       validated(input, parseSessionRef, async ({ sessionId }) => {
         const head = turnQueue.forSession(sessionId)[0];
+        let targetAccountId = head?.accountId;
         if (head) {
           const entry = exhaustionEntry(head.accountId);
           if (entry !== null) {
-            if (isFutureReset(entry.resetsAt)) return fail(exhaustedMessage(entry.resetsAt));
-            const account = (await loadStore(deps.root)).accounts.find(
-              (item) => item.id === head.accountId,
-            );
-            if (account) {
-              const blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
-              if (blocked !== null) return fail(blocked);
+            const store = await loadStore(deps.root);
+            const account = store.accounts.find((item) => item.id === head.accountId);
+            let blocked: string | null = isFutureReset(entry.resetsAt)
+              ? exhaustedMessage(entry.resetsAt)
+              : null;
+            if (blocked === null && account) {
+              blocked = await recheckExhaustion({ account, resetsAt: entry.resetsAt });
+            }
+            if (blocked !== null) {
+              const settings = await getSettings(deps.root);
+              cachedSessionSettings = settings.sessions;
+              cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+              cachedFailoverPolicyLoaded = true;
+              const target =
+                account === undefined
+                  ? null
+                  : await resolveFailoverTarget({
+                      policy: settings.sessions.rateLimitFailover,
+                      store,
+                      currentAccount: account,
+                      triedAccountIds: failoverTriedAccounts.get(sessionId),
+                      allowBusy: true,
+                    });
+              if (!target) return fail(blocked);
+              await serialized(async () => {
+                const latestStore = await loadStore(deps.root);
+                const latestSession = sessionsOf(latestStore).find((item) => item.id === sessionId);
+                const latestProject = latestSession
+                  ? latestStore.projects.find((item) => item.id === latestSession.projectId)
+                  : undefined;
+                if (!latestSession || !latestProject || !account) return;
+                const events = await readTranscriptEvents(sessionId);
+                await switchSessionToFailoverAccount({
+                  session: latestSession,
+                  project: latestProject,
+                  fromAccount: account,
+                  toAccount: target.account,
+                  events,
+                  rollbackLastTurn: false,
+                });
+              });
+              targetAccountId = target.account.id;
             }
           }
         }
+        circuitBreaker.resetManual(sessionId);
         setQueuePaused({ sessionId, paused: false });
-        if (head) {
-          preferredQueueSession.set(head.accountId, sessionId);
-          void drainAccountQueue(head.accountId).catch((error: unknown) => {
-            console.error(`inova: failed to drain turn queue for ${head.accountId}`, error);
+        if (targetAccountId !== undefined) {
+          preferredQueueSession.set(targetAccountId, sessionId);
+          void drainAccountQueue(targetAccountId).catch((error: unknown) => {
+            console.error(`inova: failed to drain turn queue for ${targetAccountId}`, error);
           });
         }
         return ok(null);
@@ -1644,6 +2294,7 @@ export function createHandlers(deps: HandlerDeps) {
             title: `${session.title} (handoff)`,
             accountIdOverride: targetAccount.id,
             handoffContext,
+            pinnedMemory: session.pinnedMemory ?? null,
             worktree: createWorktree ? null : (session.worktree ?? null),
           });
           if (createWorktree) {
@@ -1718,6 +2369,7 @@ export function createHandlers(deps: HandlerDeps) {
               title: `${session.title} (fork)`,
               accountIdOverride: targetAccount.id,
               handoffContext,
+              pinnedMemory: session.pinnedMemory ?? null,
               worktree: null,
             });
             let resultSession = created;
@@ -1834,6 +2486,7 @@ export function createHandlers(deps: HandlerDeps) {
               },
             });
             await writeTranscriptEvents(sessionId, kept);
+            circuitBreaker.resetManual(sessionId);
           } finally {
             if (checkpointRef !== null) invalidateProjectFiles(sessionId);
           }
@@ -1858,6 +2511,7 @@ export function createHandlers(deps: HandlerDeps) {
             },
           });
           await writeTranscriptEvents(sessionId, []);
+          circuitBreaker.deleteSession(sessionId);
           return ok(null);
         }),
       ),

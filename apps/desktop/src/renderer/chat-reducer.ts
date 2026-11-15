@@ -51,6 +51,7 @@ export type ChatAction =
   | { type: 'event'; event: ChatEvent }
   | { type: 'load'; events: ChatEvent[] }
   | { type: 'replace'; events: ChatEvent[] }
+  | { type: 'rollback-last-turn' }
   | { type: 'started' };
 
 function upsertTextBlock(
@@ -255,6 +256,19 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
   }
 }
 
+function rollbackLastTurnItems(items: ChatItem[]): ChatItem[] {
+  let lastUserIndex = -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    if (items[i]?.type === 'user') {
+      lastUserIndex = i;
+      break;
+    }
+  }
+  if (lastUserIndex === -1) return items;
+  const hasPreCheckpoint = lastUserIndex > 0 && items[lastUserIndex - 1]?.type === 'checkpoint';
+  return items.slice(0, hasPreCheckpoint ? lastUserIndex - 1 : lastUserIndex);
+}
+
 export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case 'started':
@@ -267,6 +281,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'replace':
       if (state.running) return state;
       return loadTranscript(action.events);
+    case 'rollback-last-turn':
+      return { ...state, items: rollbackLastTurnItems(state.items), running: false };
   }
 }
 

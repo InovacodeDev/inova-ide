@@ -1,6 +1,12 @@
 import { loadStore, saveStore, withStoreLock } from './store.js';
 import { isEffortLevel, isEffortSupported } from './models.js';
-import type { ProviderId, Settings, SettingsPatch, VoiceModelId } from './types.js';
+import type {
+  ProviderId,
+  RateLimitFailoverPolicy,
+  Settings,
+  SettingsPatch,
+  VoiceModelId,
+} from './types.js';
 
 export class SettingsError extends Error {
   constructor(message: string) {
@@ -16,10 +22,24 @@ export const VOICE_MODEL_IDS: readonly VoiceModelId[] = [
   'large-v3-turbo-q5_0',
 ];
 
+export const RATE_LIMIT_FAILOVER_POLICIES: readonly RateLimitFailoverPolicy[] = [
+  'off',
+  'same-provider',
+  'any-provider',
+];
+
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: 'dark', sidebarCollapsed: false, detailsCollapsed: false },
   voice: { language: 'auto', modelId: 'large-v3-turbo-q5_0' },
-  sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
+  sessions: {
+    autoArchiveDays: 0,
+    collapseFinishedTurns: true,
+    rateLimitFailover: 'off',
+    maxConsecutiveToolErrors: 5,
+    maxConsecutiveVerificationFailures: 3,
+    maxSessionCostUsd: 0,
+    maxContextPercent: 90,
+  },
   notifications: {
     waitingInput: true,
     failed: true,
@@ -71,6 +91,11 @@ const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Secti
     sessions: {
       autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
       collapseFinishedTurns: isBoolean,
+      rateLimitFailover: oneOf(RATE_LIMIT_FAILOVER_POLICIES),
+      maxConsecutiveToolErrors: oneOf([0, 3, 5, 10]),
+      maxConsecutiveVerificationFailures: oneOf([0, 2, 3, 5]),
+      maxSessionCostUsd: oneOf([0, 1, 5, 10, 25]),
+      maxContextPercent: oneOf([0, 80, 90, 95]),
     },
     notifications: {
       waitingInput: isBoolean,

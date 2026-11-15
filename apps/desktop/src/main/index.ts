@@ -285,6 +285,7 @@ void app.whenReady().then(async () => {
       emitInbox: (items) => sendToWindow(CHANNELS.inboxEvent, items),
       emitQueue: (queue) => sendToWindow(CHANNELS.queueEvent, queue),
       emitQueuePaused: (sessionIds) => sendToWindow(CHANNELS.queuePausedEvent, sessionIds),
+      emitFailover: (event) => sendToWindow(CHANNELS.failoverEvent, event),
       notify: notifier,
       updates,
       installUpdate: installer.install,

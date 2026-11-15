@@ -2,6 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import {
   createSession,
   deleteSession,
@@ -319,6 +320,60 @@ describe('sessions', () => {
     expect(
       await codeOf(updateSession({ root, sessionId: created.id, patch: { mode: 'read-only' } })),
     ).toBe('invalid-mode');
+  });
+
+  it('normalizes pinnedMemory, enforces limit, and resets pinnedMemoryHash when providerSessionId is cleared', async () => {
+    const created = await createSession({
+      root,
+      projectId: 'p1',
+      title: 'Fixado',
+      pinnedMemory: '  Regra inicial\nlinha 2  ',
+    });
+    expect(created.pinnedMemory).toBe('Regra inicial\nlinha 2');
+    expect(created.pinnedMemoryHash).toBeUndefined();
+
+    const withHash = await updateSession({
+      root,
+      sessionId: created.id,
+      patch: { providerSessionId: 'prov-1', pinnedMemoryHash: 'abc12345' },
+    });
+    expect(withHash.providerSessionId).toBe('prov-1');
+    expect(withHash.pinnedMemoryHash).toBe('abc12345');
+
+    const clearedProvider = await updateSession({
+      root,
+      sessionId: created.id,
+      patch: { providerSessionId: null },
+    });
+    expect(clearedProvider.providerSessionId).toBeNull();
+    expect(clearedProvider.pinnedMemoryHash).toBeNull();
+
+    const clearedMemory = await updateSession({
+      root,
+      sessionId: created.id,
+      patch: { pinnedMemory: '   ' },
+    });
+    expect(clearedMemory.pinnedMemory).toBeNull();
+
+    expect(
+      await codeOf(
+        createSession({
+          root,
+          projectId: 'p1',
+          pinnedMemory: 'a'.repeat(MAX_PINNED_MEMORY_CHARS + 1),
+        }),
+      ),
+    ).toBe('invalid-pinned-memory');
+
+    expect(
+      await codeOf(
+        updateSession({
+          root,
+          sessionId: created.id,
+          patch: { pinnedMemory: 'a'.repeat(MAX_PINNED_MEMORY_CHARS + 1) },
+        }),
+      ),
+    ).toBe('invalid-pinned-memory');
   });
 });
 

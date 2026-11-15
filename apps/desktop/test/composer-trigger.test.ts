@@ -12,6 +12,7 @@ import {
   nativeActionForSubmit,
   parseLeadingSlashTag,
   parseMessageFileSegments,
+  parsePinCommand,
   resolveDroppedPath,
 } from '../src/renderer/composer-trigger.js';
 import { nativeSlashCommands } from '@inova/core/slash-commands';
@@ -234,4 +235,13 @@ test('applyFileSuggestion quotes paths with spaces', () => {
     text: 'ver @"img/a b.png" ',
     cursor: 'ver @"img/a b.png" '.length,
   });
+});
+
+test('parsePinCommand parses /pin notes and nativeActionForSubmit keeps /pin editable', () => {
+  expect(parsePinCommand('/pin Use pnpm no projeto')).toEqual({ note: 'Use pnpm no projeto' });
+  expect(parsePinCommand('  /pin   Sem comentários  ')).toEqual({ note: 'Sem comentários' });
+  expect(parsePinCommand('/pin')).toEqual({ note: '' });
+  expect(parsePinCommand('/compact agora')).toBeNull();
+  expect(nativeActionForSubmit({ text: '/pin', provider: 'claude' })).toBeNull();
+  expect(nativeActionForSubmit({ text: '/pin regra', provider: 'codex' })).toBeNull();
 });

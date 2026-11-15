@@ -15,7 +15,15 @@ const settings: Settings = {
   },
   appearance: { theme: 'dark', sidebarCollapsed: false, detailsCollapsed: false },
   voice: { language: 'auto', modelId: 'small-q5_1' },
-  sessions: { autoArchiveDays: 0, collapseFinishedTurns: true },
+  sessions: {
+    autoArchiveDays: 0,
+    collapseFinishedTurns: true,
+    rateLimitFailover: 'off',
+    maxConsecutiveToolErrors: 5,
+    maxConsecutiveVerificationFailures: 3,
+    maxSessionCostUsd: 0,
+    maxContextPercent: 90,
+  },
   notifications: {
     waitingInput: true,
     failed: true,
@@ -50,7 +58,15 @@ describe('inverseSettingsPatch', () => {
       sessions: { collapseFinishedTurns: false },
     });
     const rolledBack = applySettingsPatch(laterChange, inverseSettingsPatch(settings, patch));
-    expect(rolledBack.sessions).toEqual({ autoArchiveDays: 0, collapseFinishedTurns: false });
+    expect(rolledBack.sessions).toEqual({
+      autoArchiveDays: 0,
+      collapseFinishedTurns: false,
+      rateLimitFailover: 'off',
+      maxConsecutiveToolErrors: 5,
+      maxConsecutiveVerificationFailures: 3,
+      maxSessionCostUsd: 0,
+      maxContextPercent: 90,
+    });
   });
 
   test('ignores sections that the patch does not touch', () => {

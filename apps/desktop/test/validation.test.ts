@@ -222,6 +222,21 @@ test('session mode update and default provider mode validation', () => {
     mode: null,
   });
   expect(parseSessionUpdate({ sessionId: 's1', mode: 'bad-mode' })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: '  Regra da sessão  ' })).toEqual({
+    sessionId: 's1',
+    pinnedMemory: '  Regra da sessão  ',
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: null })).toEqual({
+    sessionId: 's1',
+    pinnedMemory: null,
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: 'a'.repeat(4000) })).toEqual({
+    sessionId: 's1',
+    pinnedMemory: 'a'.repeat(4000),
+  });
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: 'a'.repeat(4001) })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: 123 })).toBeUndefined();
+  expect(parseSessionUpdate({ sessionId: 's1', pinnedMemory: 'a\0b' })).toBeUndefined();
   expect(parseDefaultMode({ provider: 'claude', mode: 'plan' })).toEqual({
     provider: 'claude',
     mode: 'plan',
@@ -233,13 +248,41 @@ test('session mode update and default provider mode validation', () => {
 test('settings patch validation rejects the whole patch on any unknown key or invalid value', () => {
   const valid = {
     voice: { language: 'pt', modelId: 'medium-q5_0' },
-    sessions: { autoArchiveDays: 30, collapseFinishedTurns: false },
+    sessions: {
+      autoArchiveDays: 30,
+      collapseFinishedTurns: false,
+      rateLimitFailover: 'same-provider',
+      maxConsecutiveToolErrors: 10,
+      maxConsecutiveVerificationFailures: 2,
+      maxSessionCostUsd: 5,
+      maxContextPercent: 80,
+    },
     notifications: { waitingInput: true, onlyWhenUnfocused: false },
   };
   expect(parseSettingsPatch(valid)).toEqual(valid);
   expect(parseSettingsPatch({})).toEqual({});
   expect(parseSettingsPatch({ sessions: { autoArchiveDays: 3 } })).toEqual({
     sessions: { autoArchiveDays: 3 },
+  });
+  expect(parseSettingsPatch({ sessions: { rateLimitFailover: 'any-provider' } })).toEqual({
+    sessions: { rateLimitFailover: 'any-provider' },
+  });
+  expect(
+    parseSettingsPatch({
+      sessions: {
+        maxConsecutiveToolErrors: 0,
+        maxConsecutiveVerificationFailures: 5,
+        maxSessionCostUsd: 25,
+        maxContextPercent: 95,
+      },
+    }),
+  ).toEqual({
+    sessions: {
+      maxConsecutiveToolErrors: 0,
+      maxConsecutiveVerificationFailures: 5,
+      maxSessionCostUsd: 25,
+      maxContextPercent: 95,
+    },
   });
   for (const input of [
     null,
@@ -253,6 +296,13 @@ test('settings patch validation rejects the whole patch on any unknown key or in
     { voice: { language: 'pt', volume: 1 } },
     { sessions: { autoArchiveDays: 2 } },
     { sessions: { autoArchiveDays: '7' } },
+    { sessions: { rateLimitFailover: 'auto' } },
+    { sessions: { rateLimitFailover: true } },
+    { sessions: { maxConsecutiveToolErrors: 4 } },
+    { sessions: { maxConsecutiveVerificationFailures: 1 } },
+    { sessions: { maxSessionCostUsd: 3 } },
+    { sessions: { maxContextPercent: 70 } },
+    { sessions: { maxContextPercent: '90' } },
     { notifications: { completed: 'true' } },
     { notifications: 'all' },
     { voice: { language: 'pt' }, sessions: { autoArchiveDays: 99 } },
@@ -302,6 +352,24 @@ test('worktree, checkpoint restore, and project verification validation', () => 
     verificationChecks: [{ id: 't', label: 'Test', command: 'pnpm test', enabled: true }],
   });
   expect(parseProjectVerification({ projectId: 'p1' })).toBeUndefined();
+  expect(
+    parseProjectVerification({ projectId: 'p1', pinnedMemory: '  Regra do projeto  ' }),
+  ).toEqual({
+    projectId: 'p1',
+    pinnedMemory: '  Regra do projeto  ',
+  });
+  expect(parseProjectVerification({ projectId: 'p1', pinnedMemory: null })).toEqual({
+    projectId: 'p1',
+    pinnedMemory: null,
+  });
+  expect(parseProjectVerification({ projectId: 'p1', pinnedMemory: 'a'.repeat(4000) })).toEqual({
+    projectId: 'p1',
+    pinnedMemory: 'a'.repeat(4000),
+  });
+  expect(
+    parseProjectVerification({ projectId: 'p1', pinnedMemory: 'a'.repeat(4001) }),
+  ).toBeUndefined();
+  expect(parseProjectVerification({ projectId: 'p1', pinnedMemory: 42 })).toBeUndefined();
 });
 
 test('orchestration, fork, handoff, queue, and uiFocus validation', () => {

@@ -150,7 +150,15 @@ export function nativeActionForSubmit(input: {
   const parsed = splitLeadingSlash(input.text.trim());
   if (parsed === null || parsed.rest !== '') return null;
   const command = nativeSlashCommands(input.provider).find((item) => item.name === parsed.name);
-  return command !== undefined && command.action !== 'passthrough' ? command : null;
+  return command !== undefined && command.action !== 'passthrough' && command.action !== 'pin'
+    ? command
+    : null;
+}
+
+export function parsePinCommand(text: string): { note: string } | null {
+  const parsed = splitLeadingSlash(text.trim());
+  if (parsed === null || parsed.name !== 'pin') return null;
+  return { note: parsed.rest.trim() };
 }
 
 function appendTextSegment(segments: MessageFileSegment[], value: string): void {

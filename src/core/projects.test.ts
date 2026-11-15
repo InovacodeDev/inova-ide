@@ -3,7 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AccountError, addAccount } from './accounts.js';
-import { bindProject, PathNotFoundError, resolveProject, unbindProject } from './projects.js';
+import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
+import {
+  bindProject,
+  PathNotFoundError,
+  resolveProject,
+  unbindProject,
+  updateProjectConfig,
+} from './projects.js';
 import { createSession } from './sessions.js';
 import { loadStore } from './store.js';
 import type { Store } from './types.js';
@@ -107,5 +114,34 @@ describe('unbindProject', () => {
     await rm(workDir, { recursive: true });
     await unbindProject({ root, path: workDir });
     expect((await loadStore(root)).projects).toEqual([]);
+  });
+});
+
+describe('updateProjectConfig pinnedMemory', () => {
+  it('normalizes, clears, and rejects oversized project pinned memory', async () => {
+    await addAccount({ root, provider: 'claude', label: 'work' });
+    const project = await bindProject({ root, path: workDir, accountLabel: 'work' });
+
+    const saved = await updateProjectConfig({
+      root,
+      projectId: project.id,
+      patch: { pinnedMemory: '  Use pnpm sem comentários  ' },
+    });
+    expect(saved.pinnedMemory).toBe('Use pnpm sem comentários');
+
+    const cleared = await updateProjectConfig({
+      root,
+      projectId: project.id,
+      patch: { pinnedMemory: '   ' },
+    });
+    expect(cleared.pinnedMemory).toBeNull();
+
+    await expect(
+      updateProjectConfig({
+        root,
+        projectId: project.id,
+        patch: { pinnedMemory: 'a'.repeat(MAX_PINNED_MEMORY_CHARS + 1) },
+      }),
+    ).rejects.toThrow();
   });
 });

@@ -244,4 +244,43 @@ describe('store', () => {
   it('dataRoot resolves a relative INOVA_HOME to an absolute path', () => {
     expect(dataRoot({ INOVA_HOME: 'rel/dir' })).toBe(resolve('rel/dir'));
   });
+
+  it('loadStore preserves valid pinnedMemory fields and rejects invalid types', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [{ id: 'p1', path: '/repo', accountId: 'a1', pinnedMemory: 'Regra fixa' }],
+        sessions: [
+          { ...goodSession, pinnedMemory: 'Nota da sessão', pinnedMemoryHash: 'abcd1234' },
+        ],
+      }),
+    );
+    const loaded = await loadStore(root);
+    expect(loaded.projects[0]?.pinnedMemory).toBe('Regra fixa');
+    expect(loaded.sessions?.[0]?.pinnedMemory).toBe('Nota da sessão');
+    expect(loaded.sessions?.[0]?.pinnedMemoryHash).toBe('abcd1234');
+
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [{ id: 'p1', path: '/repo', accountId: 'a1', pinnedMemory: 123 }],
+      }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({
+        version: 1,
+        accounts: [],
+        projects: [],
+        sessions: [{ ...goodSession, pinnedMemoryHash: 42 }],
+      }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
 });

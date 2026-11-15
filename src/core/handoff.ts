@@ -1,5 +1,5 @@
-import type { ChatEvent } from './chat-types.js';
-import type { ProviderId } from './types.js';
+import type { ChatEvent, UsageWindow } from './chat-types.js';
+import type { Account, ProviderId, RateLimitFailoverPolicy } from './types.js';
 
 export const DEFAULT_HANDOFF_MAX_CHARS = 12_000;
 
@@ -209,4 +209,111 @@ export function sliceTranscriptToTurn(
     postTurnCheckpointRef: hasPostCheckpoint ? beforeNextUser.ref : null,
     isLatestTurn: false,
   };
+}
+
+const PRIMARY_FAILOVER_PROVIDERS: ReadonlySet<ProviderId> = new Set(['claude', 'codex', 'gemini']);
+
+export function peakUsagePercent(windows: readonly UsageWindow[]): number {
+  let peak = 0;
+  for (const window of windows) {
+    if (Number.isFinite(window.usedPercent) && window.usedPercent > peak) {
+      peak = window.usedPercent;
+    }
+  }
+  return peak;
+}
+
+function providerFailoverTier(provider: ProviderId, currentProvider: ProviderId): number {
+  if (provider === currentProvider) return 0;
+  if (PRIMARY_FAILOVER_PROVIDERS.has(provider)) return 1;
+  return 2;
+}
+
+export interface SelectFailoverAccountInput {
+  policy: RateLimitFailoverPolicy;
+  currentAccountId: string;
+  currentProvider: ProviderId;
+  accounts: readonly Account[];
+  busyAccountIds?: ReadonlySet<string>;
+  exhaustedAccountIds?: ReadonlySet<string>;
+  expiredAccountIds?: ReadonlySet<string>;
+  triedAccountIds?: ReadonlySet<string>;
+  usageByAccount?: ReadonlyMap<string, readonly UsageWindow[]>;
+}
+
+export function rankFailoverAccounts(input: SelectFailoverAccountInput): Account[] {
+  const {
+    policy,
+    currentAccountId,
+    currentProvider,
+    accounts,
+    busyAccountIds,
+    exhaustedAccountIds,
+    expiredAccountIds,
+    triedAccountIds,
+    usageByAccount,
+  } = input;
+  if (policy === 'off') return [];
+
+  const eligible = accounts
+    .map((account, index) => ({ account, index }))
+    .filter(({ account }) => {
+      if (account.id === currentAccountId) return false;
+      if (policy === 'same-provider' && account.provider !== currentProvider) return false;
+      if (exhaustedAccountIds?.has(account.id)) return false;
+      if (expiredAccountIds?.has(account.id)) return false;
+      if (triedAccountIds?.has(account.id)) return false;
+      return true;
+    });
+
+  eligible.sort((a, b) => {
+    const tierDiff =
+      providerFailoverTier(a.account.provider, currentProvider) -
+      providerFailoverTier(b.account.provider, currentProvider);
+    if (tierDiff !== 0) return tierDiff;
+
+    const busyDiff =
+      (busyAccountIds?.has(a.account.id) ? 1 : 0) - (busyAccountIds?.has(b.account.id) ? 1 : 0);
+    if (busyDiff !== 0) return busyDiff;
+
+    const peakDiff =
+      peakUsagePercent(usageByAccount?.get(a.account.id) ?? []) -
+      peakUsagePercent(usageByAccount?.get(b.account.id) ?? []);
+    if (peakDiff !== 0) return peakDiff;
+
+    return a.index - b.index;
+  });
+
+  return eligible.map(({ account }) => account);
+}
+
+export function selectFailoverAccount(input: SelectFailoverAccountInput): Account | null {
+  return rankFailoverAccounts(input)[0] ?? null;
+}
+
+export const MAX_PINNED_MEMORY_CHARS = 4_000;
+
+export function formatPinnedMemoryBlock(input: {
+  projectMemory?: string | null;
+  sessionMemory?: string | null;
+}): string | null {
+  const projectText = input.projectMemory?.trim() ?? '';
+  const sessionText = input.sessionMemory?.trim() ?? '';
+  if (projectText === '' && sessionText === '') return null;
+  const sections = [
+    'Memória fixada (regras, decisões e restrições ativas — respeite em toda resposta):',
+  ];
+  if (projectText !== '') sections.push(`### Projeto\n${projectText}`);
+  if (sessionText !== '') sections.push(`### Sessão\n${sessionText}`);
+  return sections.join('\n\n');
+}
+
+export function hashPinnedMemory(block: string | null): string | null {
+  if (block === null || block.trim() === '') return null;
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < block.length; i += 1) {
+    hash ^= block.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }

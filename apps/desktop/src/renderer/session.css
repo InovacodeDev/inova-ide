@@ -240,11 +240,15 @@
   gap: 2px;
   min-width: 0;
   flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .session-details-tab {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: 5px;
   padding: 7px 9px;
   border: 0;
@@ -279,13 +283,6 @@
 .session-details-tab.active .session-details-tab-badge {
   background: var(--accent-soft);
   color: var(--accent);
-}
-
-.session-details-collapse {
-  width: 28px;
-  height: 28px;
-  flex: none;
-  margin-bottom: 4px;
 }
 
 .session-details-body {
@@ -905,4 +902,45 @@
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
   font-size: 11px;
+}
+
+.pinned-memory-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pinned-memory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pinned-memory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pinned-memory-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.pinned-memory-textarea {
+  width: 100%;
+  min-height: 68px;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.pinned-memory-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }

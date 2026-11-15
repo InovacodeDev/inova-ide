@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
+import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
 import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import { PROVIDER_MODES, resolveExecutionMode } from '@inova/core/modes';
 import type {
@@ -377,6 +378,31 @@ export function App() {
   useEffect(() => {
     return window.inova.onQueuePausedEvent((sessionIds) => setPausedQueueIds(sessionIds));
   }, []);
+
+  useEffect(() => {
+    return window.inova.onFailoverEvent(({ session, rollbackLastTurn }) => {
+      setSessions((current) => {
+        const list = current[session.projectId] ?? [];
+        const exists = list.some((item) => item.id === session.id);
+        return {
+          ...current,
+          [session.projectId]: exists
+            ? list.map((item) => (item.id === session.id ? session : item))
+            : [...list, session],
+        };
+      });
+      setBusyConflicts((current) => {
+        if (!(session.id in current)) return current;
+        const next = { ...current };
+        delete next[session.id];
+        return next;
+      });
+      if (rollbackLastTurn) {
+        dispatchChat({ sessionId: session.id, action: { type: 'rollback-last-turn' } });
+      }
+      void reloadAccounts();
+    });
+  }, [reloadAccounts]);
 
   useEffect(() => {
     const onFocus = () => setWindowFocused(true);
@@ -874,15 +900,17 @@ export function App() {
       autoWorktree?: boolean;
       autoVerify?: boolean;
       verificationChecks?: VerificationCheck[];
+      pinnedMemory?: string | null;
     },
-  ) => {
+  ): Promise<boolean> => {
     const result = await call(() =>
       window.inova.updateProjectVerification({ projectId, ...patch }),
     );
-    if (!result) return;
+    if (!result) return false;
     setProjects((current) =>
       current.map((item) => (item.id === result.value.id ? result.value : item)),
     );
+    return true;
   };
 
   const detectChecks = async (project: ProjectView) => {
@@ -909,12 +937,17 @@ export function App() {
 
   const updateSessionModelConfig = async (input: {
     sessionId: string;
-    patch: { model?: string | null; effort?: EffortLevel | null; mode?: ExecutionMode | null };
-  }) => {
+    patch: {
+      model?: string | null;
+      effort?: EffortLevel | null;
+      mode?: ExecutionMode | null;
+      pinnedMemory?: string | null;
+    };
+  }): Promise<boolean> => {
     const result = await call(() =>
       window.inova.updateSession({ sessionId: input.sessionId, ...input.patch }),
     );
-    if (!result) return;
+    if (!result) return false;
     const updated = result.value;
     setSessions((current) => ({
       ...current,
@@ -922,6 +955,36 @@ export function App() {
         item.id === updated.id ? updated : item,
       ),
     }));
+    return true;
+  };
+
+  const updateProjectPinnedMemory = async (projectId: string, pinnedMemory: string | null) => {
+    const saved = await updateProjectVerification(projectId, { pinnedMemory });
+    if (!saved) return;
+    setNotice(pinnedMemory === null ? 'Memória do projeto limpa.' : 'Memória do projeto salva.');
+  };
+
+  const updateSessionPinnedMemory = async (sessionId: string, pinnedMemory: string | null) => {
+    const saved = await updateSessionModelConfig({ sessionId, patch: { pinnedMemory } });
+    if (!saved) return;
+    setNotice(pinnedMemory === null ? 'Memória da sessão limpa.' : 'Memória da sessão salva.');
+  };
+
+  const pinSessionNote = async (sessionId: string, note: string) => {
+    const trimmed = note.trim();
+    if (trimmed === '') return;
+    const session = Object.values(latest.current.sessions)
+      .flat()
+      .find((item) => item.id === sessionId);
+    if (!session) return;
+    const existing = session.pinnedMemory?.trim() ?? '';
+    const next = existing === '' ? trimmed : `${existing}\n${trimmed}`;
+    if (next.length > MAX_PINNED_MEMORY_CHARS) {
+      warn(`Memória da sessão excede o limite de ${MAX_PINNED_MEMORY_CHARS} caracteres.`);
+      return;
+    }
+    const saved = await updateSessionModelConfig({ sessionId, patch: { pinnedMemory: next } });
+    if (saved) setNotice('Nota fixada na memória da sessão.');
   };
 
   const setDefaultProviderMode = async (provider: ProviderId, mode: ExecutionMode) => {
@@ -1700,6 +1763,7 @@ export function App() {
                       })
                     }
                     onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
+                    onPinNote={(note) => void pinSessionNote(tab.sessionId, note)}
                     onSend={(prompt, extraDirs) =>
                       void sendMessage(tab.sessionId, prompt, extraDirs)
                     }
@@ -1713,9 +1777,6 @@ export function App() {
                   subagents={chats[activeSession.id]?.subagents}
                   context={chats[activeSession.id]?.context}
                   collapsed={detailsCollapsed}
-                  onToggleCollapsed={() =>
-                    void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } })
-                  }
                   kind={activeSession.parentId ? 'subsession' : 'session'}
                   sectionName={folderName(activeProject.path)}
                   parentTitle={activeParentTitle}
@@ -1734,6 +1795,15 @@ export function App() {
                   }
                   onRevertFiles={(files) => revertSessionFiles(activeSession, files)}
                   onHandoff={() => setPendingHandoff(activeSession)}
+                  projectPinnedMemory={activeProject.pinnedMemory ?? null}
+                  sessionPinnedMemory={activeSession.pinnedMemory ?? null}
+                  pinnedMemoryDisabled={archivedIds.has(activeSession.id)}
+                  onSaveProjectPinnedMemory={(value) =>
+                    updateProjectPinnedMemory(activeProject.id, value)
+                  }
+                  onSaveSessionPinnedMemory={(value) =>
+                    updateSessionPinnedMemory(activeSession.id, value)
+                  }
                 />
               )}
             </div>

@@ -102,7 +102,11 @@ describe('settings', () => {
     const expected = {
       ...DEFAULT_SETTINGS,
       voice: { ...DEFAULT_SETTINGS.voice, language: 'pt' },
-      sessions: { autoArchiveDays: 7, collapseFinishedTurns: true },
+      sessions: {
+        ...DEFAULT_SETTINGS.sessions,
+        autoArchiveDays: 7,
+        collapseFinishedTurns: true,
+      },
       notifications: { ...DEFAULT_SETTINGS.notifications, completed: true },
     };
     expect(result).toEqual(expected);
@@ -130,7 +134,11 @@ describe('settings', () => {
     expect(await getSettings(root)).toEqual({
       ...DEFAULT_SETTINGS,
       voice: { ...DEFAULT_SETTINGS.voice, language: 'es' },
-      sessions: { autoArchiveDays: 0, collapseFinishedTurns: false },
+      sessions: {
+        ...DEFAULT_SETTINGS.sessions,
+        autoArchiveDays: 0,
+        collapseFinishedTurns: false,
+      },
       notifications: { ...DEFAULT_SETTINGS.notifications, failed: false },
     });
   });
@@ -164,6 +172,28 @@ describe('settings', () => {
     });
   });
 
+  it('updateSettings persists circuit breaker session limits', async () => {
+    const updated = await updateSettings({
+      root,
+      patch: {
+        sessions: {
+          maxConsecutiveToolErrors: 10,
+          maxConsecutiveVerificationFailures: 5,
+          maxSessionCostUsd: 25,
+          maxContextPercent: 95,
+        },
+      },
+    });
+    expect(updated.sessions).toEqual({
+      ...DEFAULT_SETTINGS.sessions,
+      maxConsecutiveToolErrors: 10,
+      maxConsecutiveVerificationFailures: 5,
+      maxSessionCostUsd: 25,
+      maxContextPercent: 95,
+    });
+    expect((await getSettings(root)).sessions).toEqual(updated.sessions);
+  });
+
   it.each<[string, unknown]>([
     ['a voice model outside the catalog', { voice: { modelId: 'huge' } }],
     ['a path as voice model', { voice: { modelId: '../ggml-base' } }],
@@ -171,6 +201,13 @@ describe('settings', () => {
     ['a theme outside the enum', { appearance: { theme: 'sepia' } }],
     ['an unknown field', { voice: { volume: 1 } }],
     ['a value outside the enum', { sessions: { autoArchiveDays: 5 } }],
+    ['a tool error limit outside the enum', { sessions: { maxConsecutiveToolErrors: 4 } }],
+    [
+      'a verification failure limit outside the enum',
+      { sessions: { maxConsecutiveVerificationFailures: 4 } },
+    ],
+    ['a session cost limit outside the enum', { sessions: { maxSessionCostUsd: 2 } }],
+    ['a context percent limit outside the enum', { sessions: { maxContextPercent: 50 } }],
     ['a wrong type', { notifications: { failed: 'yes' } }],
     ['an explicit undefined', { voice: { language: undefined } }],
     ['a non-object section', { voice: 'pt' }],
@@ -247,6 +284,21 @@ describe('settings', () => {
     expect(isSettings({ voice: {} })).toBe(true);
     expect(isSettings({ voice: { language: 'fr' } })).toBe(false);
     expect(isSettings({ voice: { modelId: 'future' } })).toBe(false);
+    expect(isSettings({ sessions: { maxConsecutiveToolErrors: 4 } })).toBe(false);
+    expect(isSettings({ sessions: { maxConsecutiveVerificationFailures: 4 } })).toBe(false);
+    expect(isSettings({ sessions: { maxSessionCostUsd: 2 } })).toBe(false);
+    expect(isSettings({ sessions: { maxContextPercent: 50 } })).toBe(false);
     expect(isSettings('settings')).toBe(false);
+  });
+
+  it('updateSettings validates and persists rateLimitFailover policies', async () => {
+    expect(DEFAULT_SETTINGS.sessions.rateLimitFailover).toBe('off');
+    for (const rateLimitFailover of ['same-provider', 'any-provider', 'off'] as const) {
+      const updated = await updateSettings({ root, patch: { sessions: { rateLimitFailover } } });
+      expect(updated.sessions.rateLimitFailover).toBe(rateLimitFailover);
+    }
+    await expect(
+      updateSettings({ root, patch: { sessions: { rateLimitFailover: 'auto' } as never } }),
+    ).rejects.toThrow(SettingsError);
   });
 });

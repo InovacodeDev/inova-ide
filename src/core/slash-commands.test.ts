@@ -55,6 +55,16 @@ describe('nativeSlashCommands', () => {
     }
   });
 
+  it('expõe /pin como pin em todo provider', () => {
+    for (const provider of PROVIDERS) {
+      expect(nativeSlashCommands(provider), provider).toContainEqual({
+        name: 'pin',
+        description: 'Fixa uma nota na memória da sessão',
+        action: 'pin',
+      });
+    }
+  });
+
   it('usa nomes sem barra e únicos em cada provider', () => {
     for (const provider of PROVIDERS) {
       const names = nativeSlashCommands(provider).map((command) => command.name);

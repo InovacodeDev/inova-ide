@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
 import { loadStore, saveStore, withStoreLock } from './store.js';
@@ -22,7 +23,8 @@ type SessionErrorCode =
   | 'invalid-model'
   | 'invalid-effort'
   | 'invalid-mode'
-  | 'invalid-workspace';
+  | 'invalid-workspace'
+  | 'invalid-pinned-memory';
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_MODEL_LENGTH = 200;
@@ -180,6 +182,19 @@ function normalizeModel(model: string | null): string | null {
   return trimmed;
 }
 
+function normalizePinnedMemory(value: string | null): string | null {
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  if (trimmed.length > MAX_PINNED_MEMORY_CHARS) {
+    throw new SessionError(
+      'invalid-pinned-memory',
+      `Pinned memory must have at most ${MAX_PINNED_MEMORY_CHARS} characters`,
+    );
+  }
+  return trimmed;
+}
+
 function providerForSession(
   store: Store,
   projectId: string,
@@ -223,6 +238,8 @@ export async function createSession(ctx: {
   providerSessionId?: string | null;
   accountIdOverride?: string | null;
   handoffContext?: string | null;
+  pinnedMemory?: string | null;
+  pinnedMemoryHash?: string | null;
   comparisonGroupId?: string | null;
   comparisonRole?: 'left' | 'right' | null;
   model?: string | null;
@@ -252,6 +269,8 @@ export async function createSession(ctx: {
       ctx.accountIdOverride !== undefined ? ctx.accountIdOverride : parentAccountOverride;
     const provider = providerForSession(store, ctx.projectId, resolvedAccountOverride);
     const resolvedModel = normalizeModel(ctx.model ?? null);
+    const resolvedPinnedMemory =
+      ctx.pinnedMemory === undefined ? undefined : normalizePinnedMemory(ctx.pinnedMemory);
     const resolvedEffort = ctx.effort ?? null;
     if (resolvedEffort !== null && !isEffortLevel(resolvedEffort)) {
       throw new SessionError('invalid-effort', `Invalid effort level: ${String(resolvedEffort)}`);
@@ -277,6 +296,8 @@ export async function createSession(ctx: {
       providerSessionId: ctx.providerSessionId ?? null,
       ...(resolvedAccountOverride === null ? {} : { accountIdOverride: resolvedAccountOverride }),
       ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
+      ...(resolvedPinnedMemory === undefined ? {} : { pinnedMemory: resolvedPinnedMemory }),
+      ...(ctx.pinnedMemoryHash === undefined ? {} : { pinnedMemoryHash: ctx.pinnedMemoryHash }),
       ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
       ...(ctx.comparisonRole ? { comparisonRole: ctx.comparisonRole } : {}),
       model: resolvedModel,
@@ -312,6 +333,8 @@ export async function updateSession(ctx: {
       | 'providerSessionId'
       | 'accountIdOverride'
       | 'handoffContext'
+      | 'pinnedMemory'
+      | 'pinnedMemoryHash'
       | 'detachedFromParent'
       | 'model'
       | 'effort'
@@ -331,6 +354,8 @@ export async function updateSession(ctx: {
       providerSessionId,
       accountIdOverride,
       handoffContext,
+      pinnedMemory,
+      pinnedMemoryHash,
       detachedFromParent,
       model,
       effort,
@@ -340,7 +365,12 @@ export async function updateSession(ctx: {
     } = ctx.patch;
     const timestamp = (ctx.now?.() ?? new Date()).toISOString();
     if (title !== undefined) session.title = normalizeTitle(title);
-    if (providerSessionId !== undefined) session.providerSessionId = providerSessionId;
+    if (providerSessionId !== undefined) {
+      session.providerSessionId = providerSessionId;
+      if (providerSessionId === null && pinnedMemoryHash === undefined) {
+        session.pinnedMemoryHash = null;
+      }
+    }
     if (accountIdOverride !== undefined) {
       const prevProvider = providerForSession(store, session.projectId, session.accountIdOverride);
       session.accountIdOverride = accountIdOverride;
@@ -354,6 +384,8 @@ export async function updateSession(ctx: {
       }
     }
     if (handoffContext !== undefined) session.handoffContext = handoffContext;
+    if (pinnedMemory !== undefined) session.pinnedMemory = normalizePinnedMemory(pinnedMemory);
+    if (pinnedMemoryHash !== undefined) session.pinnedMemoryHash = pinnedMemoryHash;
     if (detachedFromParent !== undefined) session.detachedFromParent = detachedFromParent;
     if (model !== undefined) session.model = normalizeModel(model);
     if (worktree !== undefined) session.worktree = worktree;

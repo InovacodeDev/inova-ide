@@ -281,4 +281,31 @@ describe('chatReducer', () => {
     expect(verifs).toHaveLength(1);
     expect(verifs[0]).toMatchObject({ status: 'failed', turnId: 't1' });
   });
+
+  test('rollback-last-turn removes the trailing user turn, its checkpoint, and error while keeping prior turns', () => {
+    const state = run(
+      [
+        { kind: 'user', text: 'passo 1', at: 't1' },
+        { kind: 'text', blockId: 'b1', text: 'ok 1' },
+        { kind: 'done', isError: false, costUsd: null, durationMs: 1 },
+        {
+          kind: 'checkpoint',
+          turnId: 'turn-2',
+          ref: 'refs/inova/checkpoints/s/turn-2',
+          createdAt: 't2',
+          skippedLargeFiles: [],
+        },
+        { kind: 'user', text: 'passo 2', at: 't2' },
+        { kind: 'error', message: '429 rate_limit_exceeded' },
+        { kind: 'done', isError: true, costUsd: null, durationMs: 1 },
+      ],
+      chatReducer(initialChatState, { type: 'started' }),
+    );
+    const rolledBack = chatReducer(state, { type: 'rollback-last-turn' });
+    expect(rolledBack.running).toBe(false);
+    expect(rolledBack.items).toEqual([
+      { type: 'user', id: 'user-0', text: 'passo 1', at: 't1' },
+      { type: 'assistant', id: 'b1', text: 'ok 1', streaming: false },
+    ]);
+  });
 });

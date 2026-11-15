@@ -1,12 +1,18 @@
 import { describe, expect, test } from 'vitest';
-import type { ChatEvent } from './chat-types.js';
+import type { ChatEvent, UsageWindow } from './chat-types.js';
 import {
   buildHandoffContext,
+  formatPinnedMemoryBlock,
+  hashPinnedMemory,
   isAuthRevokedMessage,
   isRateLimitMessage,
+  peakUsagePercent,
+  rankFailoverAccounts,
+  selectFailoverAccount,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from './handoff.js';
+import type { Account, ProviderId } from './types.js';
 
 describe('handoff', () => {
   test('isRateLimitMessage detects common quota and 429 errors', () => {
@@ -196,6 +202,142 @@ describe('handoff', () => {
 
     test('returns null when the turn does not exist', () => {
       expect(truncateTranscriptAtTurn(withCheckpoints, 5)).toBeNull();
+    });
+  });
+
+  describe('selectFailoverAccount', () => {
+    const acc = (id: string, provider: ProviderId): Account => ({
+      id,
+      provider,
+      label: id,
+      homeDir: `/tmp/${id}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    test('returns null when policy is off', () => {
+      const a1 = acc('a1', 'claude');
+      const a2 = acc('a2', 'claude');
+      expect(
+        selectFailoverAccount({
+          policy: 'off',
+          currentAccountId: 'a1',
+          currentProvider: 'claude',
+          accounts: [a1, a2],
+        }),
+      ).toBeNull();
+      expect(
+        rankFailoverAccounts({
+          policy: 'off',
+          currentAccountId: 'a1',
+          currentProvider: 'claude',
+          accounts: [a1, a2],
+        }),
+      ).toEqual([]);
+    });
+
+    test('same-provider excludes cross-provider accounts', () => {
+      const a1 = acc('a1', 'claude');
+      const c1 = acc('c1', 'codex');
+      const a2 = acc('a2', 'claude');
+      expect(
+        rankFailoverAccounts({
+          policy: 'same-provider',
+          currentAccountId: 'a1',
+          currentProvider: 'claude',
+          accounts: [a1, c1],
+        }),
+      ).toEqual([]);
+      expect(
+        selectFailoverAccount({
+          policy: 'same-provider',
+          currentAccountId: 'a1',
+          currentProvider: 'claude',
+          accounts: [a1, c1, a2],
+        }),
+      ).toEqual(a2);
+    });
+
+    test('any-provider ranks same provider, then primary providers, then others, idle before busy, then least-used', () => {
+      const a1 = acc('a1', 'claude');
+      const q1 = acc('q1', 'qwen');
+      const cBusy = acc('c-busy', 'codex');
+      const cHigh = acc('c-high', 'codex');
+      const gLow = acc('g-low', 'gemini');
+      const aBusy = acc('a-busy', 'claude');
+      const usageByAccount = new Map<string, readonly UsageWindow[]>([
+        ['c-high', [{ kind: 'session', usedPercent: 80, resetsAt: null }]],
+        [
+          'g-low',
+          [
+            { kind: 'session', usedPercent: 20, resetsAt: null },
+            { kind: 'weekly', usedPercent: 35, resetsAt: null },
+          ],
+        ],
+      ]);
+      const ranked = rankFailoverAccounts({
+        policy: 'any-provider',
+        currentAccountId: 'a1',
+        currentProvider: 'claude',
+        accounts: [a1, q1, cBusy, cHigh, gLow, aBusy],
+        busyAccountIds: new Set(['c-busy', 'a-busy']),
+        usageByAccount,
+      });
+      expect(ranked.map((account) => account.id)).toEqual([
+        'a-busy',
+        'g-low',
+        'c-high',
+        'c-busy',
+        'q1',
+      ]);
+      expect(peakUsagePercent(usageByAccount.get('g-low') ?? [])).toBe(35);
+      expect(peakUsagePercent([])).toBe(0);
+    });
+
+    test('excludes exhausted, expired, and already tried accounts', () => {
+      const accounts = [
+        acc('a1', 'claude'),
+        acc('a2', 'claude'),
+        acc('a3', 'claude'),
+        acc('a4', 'claude'),
+        acc('a5', 'codex'),
+      ];
+      const chosen = selectFailoverAccount({
+        policy: 'any-provider',
+        currentAccountId: 'a1',
+        currentProvider: 'claude',
+        accounts,
+        exhaustedAccountIds: new Set(['a2']),
+        expiredAccountIds: new Set(['a3']),
+        triedAccountIds: new Set(['a4']),
+      });
+      expect(chosen?.id).toBe('a5');
+    });
+  });
+
+  describe('formatPinnedMemoryBlock and hashPinnedMemory', () => {
+    test('returns null when both memories are empty or whitespace', () => {
+      expect(formatPinnedMemoryBlock({})).toBeNull();
+      expect(formatPinnedMemoryBlock({ projectMemory: '   ', sessionMemory: null })).toBeNull();
+      expect(hashPinnedMemory(null)).toBeNull();
+      expect(hashPinnedMemory('   ')).toBeNull();
+    });
+
+    test('formats project-only, session-only, and combined pinned memory sections', () => {
+      const projectOnly = formatPinnedMemoryBlock({ projectMemory: '  Use pnpm  ' });
+      expect(projectOnly).toContain('### Projeto\nUse pnpm');
+      expect(projectOnly).not.toContain('### Sessão');
+
+      const sessionOnly = formatPinnedMemoryBlock({ sessionMemory: 'Não alterar schema' });
+      expect(sessionOnly).toContain('### Sessão\nNão alterar schema');
+      expect(sessionOnly).not.toContain('### Projeto');
+
+      const combined = formatPinnedMemoryBlock({
+        projectMemory: 'Use pnpm',
+        sessionMemory: 'Não alterar schema',
+      });
+      expect(combined).toContain('### Projeto\nUse pnpm\n\n### Sessão\nNão alterar schema');
+      expect(hashPinnedMemory(combined)).not.toBe(hashPinnedMemory(projectOnly));
+      expect(hashPinnedMemory(combined)).toBe(hashPinnedMemory(combined));
     });
   });
 });
