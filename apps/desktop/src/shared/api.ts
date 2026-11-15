@@ -1,4 +1,5 @@
 import type { AuthStatus } from '@inova/core/providers';
+import type { CapabilityKind, CapabilityListing } from '@inova/core/capabilities/types';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ComparisonDiffView } from '@inova/core/git-compare';
@@ -10,6 +11,14 @@ import type {
   RulesStrategy,
 } from '@inova/core/profile-sync';
 
+export type {
+  CapabilityApplyMode,
+  CapabilityCategoryResult,
+  CapabilityCostSummary,
+  CapabilityItem,
+  CapabilityKind,
+  CapabilityListing,
+} from '@inova/core/capabilities/types';
 export type {
   ComparisonDiffView,
   ComparisonFileDiff,
@@ -267,6 +276,13 @@ export interface InovaApi {
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
   getContextBreakdown(input: { sessionId: string }): Promise<Result<ContextBreakdown>>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
+  listCapabilities(input: { accountLabel: string }): Promise<Result<CapabilityListing>>;
+  setCapabilityEnabled(input: {
+    accountLabel: string;
+    kind: CapabilityKind;
+    id: string;
+    enabled: boolean;
+  }): Promise<Result<CapabilityListing>>;
   searchFiles(input: {
     projectId: string;
     query: string;
@@ -373,6 +389,8 @@ export const CHANNELS = {
   getUsage: 'inova:getUsage',
   getContextBreakdown: 'inova:getContextBreakdown',
   listModels: 'inova:listModels',
+  listCapabilities: 'inova:listCapabilities',
+  setCapabilityEnabled: 'inova:setCapabilityEnabled',
   searchFiles: 'inova:searchFiles',
   listCommands: 'inova:listCommands',
   startComparison: 'inova:startComparison',

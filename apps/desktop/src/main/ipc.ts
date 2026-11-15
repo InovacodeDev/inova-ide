@@ -84,6 +84,8 @@ export function registerIpc(deps: {
   handle(CHANNELS.getUsage, (input) => handlers.getUsage(input));
   handle(CHANNELS.getContextBreakdown, (input) => handlers.getContextBreakdown(input));
   handle(CHANNELS.listModels, (input) => handlers.listModels(input));
+  handle(CHANNELS.listCapabilities, (input) => handlers.listCapabilities(input));
+  handle(CHANNELS.setCapabilityEnabled, (input) => handlers.setCapabilityEnabled(input));
   handle(CHANNELS.searchFiles, (input) => handlers.searchFiles(input));
   handle(CHANNELS.listCommands, (input) => handlers.listCommands(input));
   handle(CHANNELS.startComparison, (input) => handlers.startComparison(input));

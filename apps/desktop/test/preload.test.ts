@@ -118,6 +118,13 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
   expect(electron.invoke).toHaveBeenCalledWith('inova:listAccounts');
   void api.listModels({ accountLabel: 'pessoal' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:listModels', { accountLabel: 'pessoal' });
+  void api.listCapabilities({ accountLabel: 'pessoal' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listCapabilities', {
+    accountLabel: 'pessoal',
+  });
+  const toggle = { accountLabel: 'pessoal', kind: 'skill', id: 'x', enabled: false } as const;
+  void api.setCapabilityEnabled(toggle);
+  expect(electron.invoke).toHaveBeenCalledWith('inova:setCapabilityEnabled', toggle);
   void api.searchFiles({ projectId: 'p', query: 'app' });
   expect(electron.invoke).toHaveBeenCalledWith('inova:searchFiles', {
     projectId: 'p',

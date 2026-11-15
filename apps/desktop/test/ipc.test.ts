@@ -66,6 +66,8 @@ function setup() {
       'getUsage',
       'getContextBreakdown',
       'listModels',
+      'listCapabilities',
+      'setCapabilityEnabled',
       'startLogin',
       'submitLoginCode',
       'listAccounts',
@@ -196,6 +198,8 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:getUsage', trusted, input);
   await invoke('inova:getContextBreakdown', trusted, input);
   await invoke('inova:listModels', trusted, input);
+  await invoke('inova:listCapabilities', trusted, input);
+  await invoke('inova:setCapabilityEnabled', trusted, input);
   await invoke('inova:getDefaultModes', trusted);
   await invoke('inova:setDefaultMode', trusted, { provider: 'claude', mode: 'plan' });
   await invoke('inova:getSettings', trusted);
@@ -240,6 +244,8 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   expect(handlers['getUsage']).toHaveBeenCalledWith(input);
   expect(handlers['getContextBreakdown']).toHaveBeenCalledWith(input);
   expect(handlers['listModels']).toHaveBeenCalledWith(input);
+  expect(handlers['listCapabilities']).toHaveBeenCalledWith(input);
+  expect(handlers['setCapabilityEnabled']).toHaveBeenCalledWith(input);
   expect(handlers['getDefaultModes']).toHaveBeenCalledWith();
   expect(handlers['setDefaultMode']).toHaveBeenCalledWith({ provider: 'claude', mode: 'plan' });
   expect(handlers['getSettings']).toHaveBeenCalledWith();
