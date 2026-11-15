@@ -1,6 +1,7 @@
 import type { ContextBreakdown } from '../chat-types.js';
 import { parseClaudeContextOutput } from '../context-report.js';
 import type { CommandRunner } from '../providers.js';
+import { isRecord } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityContext,
@@ -128,10 +129,6 @@ function costSummary(breakdown: ContextBreakdown | null): CapabilityCostSummary 
     instructionTokens: categoryTokens(breakdown, 'MCP server instructions'),
     deferredTokens: categoryTokens(breakdown, 'MCP tools (deferred)'),
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parsePlugins(stdout: string): CapabilityItem[] | null {

@@ -9,7 +9,7 @@ import {
   tomlTableHeader,
   updateTomlFile,
 } from './file-edit.js';
-import { categoryFromFsError, isRecord, skillsIn } from './shared.js';
+import { category, categoryFromFsError, isRecord, parseJson, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -29,15 +29,6 @@ const NATIVELY_OFF_MESSAGE = 'Este MCP está desligado no config.toml da conta.'
 
 function isDisabled(disabled: readonly CapabilityRef[], ref: CapabilityRef): boolean {
   return disabled.some((entry) => entry.kind === ref.kind && entry.id === ref.id);
-}
-
-function parseJson(stdout: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  }
 }
 
 function parseMcpItems(
@@ -92,16 +83,6 @@ function parsePluginItems(stdout: string): CapabilityItem[] | null {
 
 function runCodex(ctx: CapabilityContext, args: string[]): ReturnType<CommandRunner['run']> {
   return ctx.runner.run({ command: 'codex', args, env: ctx.env, timeoutMs: COMMAND_TIMEOUT_MS });
-}
-
-function category(input: {
-  kind: CapabilityCategoryResult['kind'];
-  items: CapabilityItem[] | null;
-  error: string;
-}): CapabilityCategoryResult {
-  return input.items === null
-    ? { kind: input.kind, items: [], error: input.error }
-    : { kind: input.kind, items: input.items, error: null };
 }
 
 async function listSkills(ctx: CapabilityContext): Promise<CapabilityItem[]> {

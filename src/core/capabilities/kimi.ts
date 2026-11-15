@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
-import { baseItem, categoryFromFsError, isRecord, skillsIn } from './shared.js';
+import { baseItem, categoryFromFsError, isRecord, parseJson, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -19,15 +19,6 @@ const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Kimi';
 
 function mcpFile(ctx: CapabilityContext): string {
   return join(ctx.account.homeDir, 'mcp.json');
-}
-
-function parseJson(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  }
 }
 
 function unsupported(item: CapabilityItem, reason: string): CapabilityItem {

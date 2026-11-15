@@ -8,6 +8,25 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+export function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+export function category(input: {
+  kind: CapabilityKind;
+  items: CapabilityItem[] | null;
+  error: string;
+}): CapabilityCategoryResult {
+  return input.items === null
+    ? { kind: input.kind, items: [], error: input.error }
+    : { kind: input.kind, items: input.items, error: null };
+}
+
 export function categoryFromFsError(input: {
   kind: CapabilityKind;
   message: string;

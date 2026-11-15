@@ -1,9 +1,8 @@
 import type { CommandRunner } from '../providers.js';
 import { serialize } from './file-edit.js';
-import { baseItem, isRecord } from './shared.js';
+import { baseItem, category, isRecord, parseJson } from './shared.js';
 import type {
   CapabilityAdapter,
-  CapabilityCategoryResult,
   CapabilityContext,
   CapabilityItem,
   CapabilityListing,
@@ -17,15 +16,6 @@ const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do agy.
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do agy.';
 const MCP_TABLE_HEADER = /^NAME\s+TYPE\s+STATUS\b/;
 const MCP_EMPTY_MESSAGE = 'No MCP servers configured.';
-
-function parseJson(stdout: string): unknown {
-  try {
-    return JSON.parse(stdout);
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) return null;
-    throw error;
-  }
-}
 
 export function parseMcpItems(stdout: string): CapabilityItem[] | null {
   const lines = stdout
@@ -88,16 +78,6 @@ function skillItems(plugins: Record<string, unknown>[]): CapabilityItem[] {
 
 function runAgy(ctx: CapabilityContext, args: string[]): ReturnType<CommandRunner['run']> {
   return ctx.runner.run({ command: 'agy', args, env: ctx.env, timeoutMs: COMMAND_TIMEOUT_MS });
-}
-
-function category(input: {
-  kind: CapabilityCategoryResult['kind'];
-  items: CapabilityItem[] | null;
-  error: string;
-}): CapabilityCategoryResult {
-  return input.items === null
-    ? { kind: input.kind, items: [], error: input.error }
-    : { kind: input.kind, items: input.items, error: null };
 }
 
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
