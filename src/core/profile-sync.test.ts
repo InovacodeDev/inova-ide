@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { serialize } from './capabilities/file-edit.js';
 import type { CommandRunner } from './providers.js';
 import {
   applyProfileSync,
@@ -219,6 +220,40 @@ describe('profile-sync helpers', () => {
     expect(await readFile(join(codexHome, 'config.toml'), 'utf8')).toContain(
       '[mcp_servers.github]',
     );
+  });
+
+  test('apply waits for a pending capability write on the same file', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const claudeHome = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(claudeHome, '.claude.json'),
+      JSON.stringify({ mcpServers: { github: { command: 'npx', args: ['mcp-github'] } } }),
+    );
+    const configPath = join(codexHome, 'config.toml');
+    await writeFile(configPath, 'model = "gpt-5"\n');
+    const accounts = [
+      { id: 'acc-claude', provider: 'claude' as const, label: 'claude-1', homeDir: claudeHome },
+      { id: 'acc-codex', provider: 'codex' as const, label: 'codex-1', homeDir: codexHome },
+    ];
+    let release: () => void = () => undefined;
+    const held = serialize(configPath, () => new Promise<void>((resolve) => (release = resolve)));
+
+    const applying = applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      sourceAccountId: 'acc-claude',
+      approvedIds: ['mcp:acc-codex'],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await readFile(configPath, 'utf8')).not.toContain('[mcp_servers.github]');
+
+    release();
+    await held;
+    await applying;
+    expect(await readFile(configPath, 'utf8')).toContain('[mcp_servers.github]');
   });
 
   test('preview detects conflicts & masks secrets; apply saves timestamped backup, copies/symlinks rules, and runs agy CLI', async () => {

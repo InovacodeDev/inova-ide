@@ -13,6 +13,7 @@ import {
   CapabilityFileError,
   listTomlTables,
   readTomlTableKey,
+  serialize,
   tomlTableHeader,
   writeAtomic,
 } from './capabilities/file-edit.js';
@@ -820,6 +821,10 @@ async function backupExistingFile(input: {
   return true;
 }
 
+function writeSerialized(path: string, content: string): Promise<void> {
+  return serialize(path, () => writeAtomic(path, content));
+}
+
 export async function applyProfileSync(input: {
   root: string;
   projectPath: string;
@@ -917,13 +922,13 @@ export async function applyProfileSync(input: {
         appliedIds.push(item.id);
         continue;
       } catch {
-        await writeAtomic(planned.rawPath, planned.rawAfter);
+        await writeSerialized(planned.rawPath, planned.rawAfter);
         appliedIds.push(item.id);
         continue;
       }
     }
 
-    await writeAtomic(planned.rawPath, planned.rawAfter);
+    await writeSerialized(planned.rawPath, planned.rawAfter);
     appliedIds.push(item.id);
   }
 
