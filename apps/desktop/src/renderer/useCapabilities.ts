@@ -18,6 +18,7 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const latestRequest = useRef(0);
   const mounted = useRef(false);
+  const pendingToggle = useRef<number | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -49,6 +50,7 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
 
   useEffect(() => {
     setListing(listingCache.get(accountLabel) ?? null);
+    pendingToggle.current = null;
     setPendingKey(null);
     setLoading(true);
     void refresh().finally(() => {
@@ -61,12 +63,12 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
 
   const toggle = useCallback(
     async (input: { item: CapabilityItem; enabled: boolean }) => {
-      if (pendingKey !== null) return;
+      if (pendingToggle.current !== null) return;
       const { item, enabled } = input;
       setPendingKey(capabilityKey(item));
       latestRequest.current += 1;
       const requestId = latestRequest.current;
-      let current = false;
+      pendingToggle.current = requestId;
       try {
         const updated = await call(() =>
           window.inova.setCapabilityEnabled({
@@ -76,7 +78,7 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
             enabled,
           }),
         );
-        current = shouldApplyListing({
+        const current = shouldApplyListing({
           requestId,
           latestRequestId: latestRequest.current,
           mounted: mounted.current,
@@ -85,10 +87,13 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
         if (updated) store(requestId, updated.value);
         else await refresh();
       } finally {
-        if (current) setPendingKey(null);
+        if (mounted.current && pendingToggle.current === requestId) {
+          pendingToggle.current = null;
+          setPendingKey(null);
+        }
       }
     },
-    [accountLabel, call, pendingKey, refresh, store],
+    [accountLabel, call, refresh, store],
   );
 
   return { listing, loading, pendingKey, toggle };
