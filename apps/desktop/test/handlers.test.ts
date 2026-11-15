@@ -1270,6 +1270,66 @@ test('listCapabilities builds the context, keeps cached items for a failing cate
   expect(await handlers.listCapabilities({})).toEqual(INVALID);
 });
 
+function launchModeAdapter(items: CapabilityItem[]): CapabilityAdapter {
+  return {
+    list: async ({ account }) => {
+      const disabled = account.disabledCapabilities ?? [];
+      return {
+        categories: [
+          {
+            kind: 'skill',
+            items: items.map((item) => ({
+              ...item,
+              enabled: !disabled.some(
+                (ref) => ref.kind === item.kind && (ref.id === item.id || ref.id === '*'),
+              ),
+            })),
+            error: null,
+          },
+        ],
+        cost: null,
+      };
+    },
+    launchArgs: () => [],
+    setEnabled: vi.fn(async () => undefined),
+  };
+}
+
+test('setCapabilityEnabled stores launch toggles and the connector wildcard', async () => {
+  const items = [
+    capabilityItem({ kind: 'skill', id: 'a' }),
+    capabilityItem({ kind: 'connector', id: 'c1' }),
+    capabilityItem({ kind: 'connector', id: 'c2' }),
+  ];
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters(launchModeAdapter(items)),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = (kind: 'skill' | 'connector', id: string, enabled: boolean) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind, id, enabled });
+  const stored = async () => (await loadStore(root)).accounts[0]?.disabledCapabilities;
+
+  const off = unwrap(await toggle('skill', 'a', false));
+  expect(off.categories[0]?.items.find((item) => item.id === 'a')?.enabled).toBe(false);
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'a' }]);
+  await toggle('skill', 'a', false);
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'a' }]);
+
+  await toggle('connector', 'c1', false);
+  expect(await stored()).not.toContainEqual({ kind: 'connector', id: '*' });
+  await toggle('connector', 'c2', false);
+  expect(await stored()).toContainEqual({ kind: 'connector', id: '*' });
+  await toggle('connector', 'c1', true);
+  const finalDisabled = await stored();
+  expect(finalDisabled).not.toContainEqual({ kind: 'connector', id: '*' });
+  expect(finalDisabled).not.toContainEqual({ kind: 'connector', id: 'c1' });
+  expect(finalDisabled).toContainEqual({ kind: 'connector', id: 'c2' });
+  expect(await toggle('skill', 'missing', false)).toEqual({
+    ok: false,
+    message: 'Item não encontrado.',
+  });
+});
+
 test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {
   const { root, handlers } = await setup();
   const { project, session } = await seedSession(root);

@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
+import { AccountError, addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
 import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
 import type {
   CapabilityAdapter,
   CapabilityContext,
   CapabilityListing,
+  CapabilityRef,
 } from '@inova/core/capabilities/types';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
@@ -81,7 +82,7 @@ import {
   updateSession,
 } from '@inova/core/sessions';
 import { getSettings, updateSettings } from '@inova/core/settings';
-import { loadStore } from '@inova/core/store';
+import { loadStore, saveStore, withStoreLock } from '@inova/core/store';
 import type {
   Account,
   ExecutionMode,
@@ -126,6 +127,7 @@ import {
   parseAttachmentPick,
   parseBinding,
   parseCapabilityList,
+  parseCapabilityToggle,
   parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
@@ -294,23 +296,64 @@ export function createHandlers(deps: HandlerDeps) {
     );
   }
 
+  function capabilityAdapterOf(account: Account): CapabilityAdapter {
+    return (deps.capabilityAdapters ?? capabilityAdapters)[account.provider];
+  }
+
+  async function capabilityContext(input: {
+    account: Account;
+    backupRoot: string;
+  }): Promise<CapabilityContext> {
+    const store = await loadStore(deps.root);
+    const account = store.accounts.find((item) => item.id === input.account.id) ?? input.account;
+    const baseEnv = await deps.baseEnv();
+    await providers[account.provider].prepareLaunch(account.homeDir, baseEnv['HOME']);
+    return {
+      account,
+      runner: deps.runner,
+      env: isolatedEnv(account, baseEnv),
+      projectPath: store.projects.find((item) => item.accountId === account.id)?.path ?? null,
+      backupRoot: input.backupRoot,
+    };
+  }
+
+  async function setLaunchCapability(input: {
+    accountId: string;
+    ref: CapabilityRef;
+    enabled: boolean;
+    connectorIds: string[];
+  }): Promise<void> {
+    const { accountId, ref, enabled, connectorIds } = input;
+    await withStoreLock(deps.root, async () => {
+      const store = await loadStore(deps.root);
+      const account = store.accounts.find((item) => item.id === accountId);
+      if (!account) throw new AccountError('not-found', 'Conta não encontrada.');
+      const isRef = (other: CapabilityRef, target: CapabilityRef): boolean =>
+        other.kind === target.kind && other.id === target.id;
+      let disabled = (account.disabledCapabilities ?? []).filter((other) => !isRef(other, ref));
+      if (!enabled) disabled.push(ref);
+      if (ref.kind === 'connector') {
+        const wildcard: CapabilityRef = { kind: 'connector', id: '*' };
+        const allOff =
+          !enabled &&
+          connectorIds.every((connectorId) =>
+            disabled.some((other) => isRef(other, { kind: 'connector', id: connectorId })),
+          );
+        disabled = disabled.filter((other) => !isRef(other, wildcard));
+        if (allOff) disabled.push(wildcard);
+      }
+      account.disabledCapabilities = disabled;
+      await saveStore(deps.root, store);
+    });
+  }
+
   async function listAccountCapabilities(input: {
     account: Account;
     backupRoot: string;
   }): Promise<CapabilityListing> {
     const { account, backupRoot } = input;
-    const store = await loadStore(deps.root);
-    const baseEnv = await deps.baseEnv();
-    await providers[account.provider].prepareLaunch(account.homeDir, baseEnv['HOME']);
-    const ctx: CapabilityContext = {
-      account,
-      runner: deps.runner,
-      env: isolatedEnv(account, baseEnv),
-      projectPath: store.projects.find((item) => item.accountId === account.id)?.path ?? null,
-      backupRoot,
-    };
-    const adapter = (deps.capabilityAdapters ?? capabilityAdapters)[account.provider];
-    const fresh = await adapter.list(ctx);
+    const ctx = await capabilityContext({ account, backupRoot });
+    const fresh = await capabilityAdapterOf(account).list(ctx);
     const previous = capabilityCache.get(account.id);
     const merged: CapabilityListing = {
       ...fresh,
@@ -2104,6 +2147,34 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseCapabilityList, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
         return ok(await listAccountCapabilities({ account, backupRoot: newBackupRoot() }));
+      }),
+    setCapabilityEnabled: (input: unknown): Promise<Result<CapabilityListing>> =>
+      validated(input, parseCapabilityToggle, async ({ accountLabel, kind, id, enabled }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        const backupRoot = newBackupRoot();
+        const listing =
+          capabilityCache.get(account.id) ??
+          (await listAccountCapabilities({ account, backupRoot }));
+        const item = listing.categories
+          .flatMap((category) => category.items)
+          .find((candidate) => candidate.kind === kind && candidate.id === id);
+        if (!item) return fail('Item não encontrado.');
+        if (item.applyMode === 'unsupported') {
+          return fail(item.unsupportedReason ?? 'Item não configurável.');
+        }
+        if (item.applyMode === 'launch') {
+          await setLaunchCapability({
+            accountId: account.id,
+            ref: { kind, id },
+            enabled,
+            connectorIds: listing.categories
+              .flatMap((category) => category.items)
+              .filter((candidate) => candidate.kind === 'connector')
+              .map((candidate) => candidate.id),
+          });
+          return ok(await listAccountCapabilities({ account, backupRoot }));
+        }
+        return fail('Item não configurável.');
       }),
     searchFiles: (input: unknown) =>
       validated(input, parseFileSearch, async ({ projectId, query, limit, sessionId }) => {
