@@ -54,6 +54,14 @@ export function filterItems(input: {
   );
 }
 
+export function shouldApplyListing(input: {
+  requestId: number;
+  latestRequestId: number;
+  mounted: boolean;
+}): boolean {
+  return input.mounted && input.requestId === input.latestRequestId;
+}
+
 export function displayEnabled(input: {
   item: CapabilityItem;
   plugins: readonly CapabilityItem[];

@@ -4,6 +4,7 @@ import {
   applyModeLabel,
   displayEnabled,
   filterItems,
+  shouldApplyListing,
   sortItems,
   visibleTabs,
 } from '../src/renderer/capabilities-state';
@@ -73,6 +74,20 @@ describe('applyModeLabel', () => {
     expect(applyModeLabel('account-file')).toBe('Na conta');
     expect(applyModeLabel('global-file')).toBe('Global');
     expect(applyModeLabel('unsupported')).toBe('Não configurável');
+  });
+});
+
+describe('shouldApplyListing', () => {
+  test('applies only the latest request while mounted', () => {
+    expect(shouldApplyListing({ requestId: 3, latestRequestId: 3, mounted: true })).toBe(true);
+  });
+
+  test('ignores a stale response', () => {
+    expect(shouldApplyListing({ requestId: 2, latestRequestId: 3, mounted: true })).toBe(false);
+  });
+
+  test('ignores a response after unmount', () => {
+    expect(shouldApplyListing({ requestId: 3, latestRequestId: 3, mounted: false })).toBe(false);
   });
 });
 
