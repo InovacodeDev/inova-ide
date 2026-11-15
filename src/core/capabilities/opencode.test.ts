@@ -51,6 +51,34 @@ async function readConfig(ctx: CapabilityContext) {
   return JSON.parse(await readFile(file, 'utf8'));
 }
 
+describe('opencodeCapabilities plugins', () => {
+  it('merges the plugins array and the plugin folder, honoring the - prefix', async () => {
+    await withHome(async (ctx) => {
+      const dir = join(ctx.env['HOME'] ?? '', '.config', 'opencode', 'plugins');
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'gamma.ts'), '');
+      await mkdir(join(dir, 'alpha'));
+      const category = await categoryOf(ctx, 'plugin');
+      expect(category?.error).toBeNull();
+      expect(category?.items.map((item) => [item.id, item.enabled, item.applyMode])).toEqual([
+        ['alpha', true, 'global-file'],
+        ['beta', false, 'global-file'],
+        ['gamma', true, 'global-file'],
+      ]);
+    });
+  });
+
+  it('adds and removes only the -<name> entry, keeping positive entries', async () => {
+    await withHome(async (ctx) => {
+      await setEnabled(ctx, 'plugin', 'alpha')(false);
+      expect((await readConfig(ctx)).plugins).toEqual(['alpha', '-beta', 'alpha', '-alpha']);
+      await setEnabled(ctx, 'plugin', 'alpha')(true);
+      await setEnabled(ctx, 'plugin', 'beta')(true);
+      expect((await readConfig(ctx)).plugins).toEqual(['alpha', 'alpha']);
+    });
+  });
+});
+
 describe('opencodeCapabilities setEnabled', () => {
   it('writes mcp disabled: true and removes the key on enable, keeping the rest', async () => {
     await withHome(async (ctx) => {

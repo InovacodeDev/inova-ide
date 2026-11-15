@@ -3,5 +3,6 @@
   "mcp": {
     "docs": { "type": "remote", "url": "https://example.com/mcp" },
     "search": { "type": "local", "command": ["search-mcp"], "disabled": true }
-  }
+  },
+  "plugins": ["alpha", "-beta", "alpha"]
 }

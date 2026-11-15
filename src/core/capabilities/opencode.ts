@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
-import { baseItem, isRecord } from './shared.js';
+import { baseItem, isRecord, pluginNamesIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -13,6 +13,8 @@ import type {
 const NO_HOME_MESSAGE = 'HOME não definido.';
 const INVALID_CONFIG_MESSAGE = 'O opencode.json do OpenCode é inválido.';
 const UNSUPPORTED_KIND_MESSAGE = 'OpenCode não suporta desligar este item.';
+const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do OpenCode';
+const CATEGORY_KINDS = ['mcp', 'plugin'] as const;
 
 type Config = Record<string, unknown>;
 
@@ -46,17 +48,53 @@ function mcpItems(config: Config): CapabilityItem[] {
   );
 }
 
+function pluginEntries(config: Config): string[] {
+  const entries: unknown = config['plugins'];
+  return Array.isArray(entries)
+    ? entries.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
+async function pluginCategory(input: {
+  dir: string;
+  config: Config;
+}): Promise<CapabilityCategoryResult> {
+  try {
+    const entries = pluginEntries(input.config);
+    const off = new Set(entries.filter((e) => e.startsWith('-')).map((e) => e.slice(1)));
+    const listed = entries.filter((entry) => !entry.startsWith('-'));
+    const folder = await pluginNamesIn(join(input.dir, 'plugins'));
+    const ids = [...new Set([...listed, ...folder, ...off])].sort();
+    const items = ids.map((id) =>
+      globalItem(baseItem({ kind: 'plugin', id, enabled: !off.has(id) })),
+    );
+    return { kind: 'plugin', items, error: null };
+  } catch (error: unknown) {
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: 'plugin', items: [], error: `${PLUGIN_LIST_FAILED_MESSAGE} (${code}).` };
+  }
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   const dir = openCodeDir(ctx);
   const failed = (error: string): CapabilityListing => ({
-    categories: [{ kind: 'mcp', items: [], error }],
+    categories: CATEGORY_KINDS.map((kind) => ({ kind, items: [], error })),
     cost: null,
   });
   if (dir === null) return failed(NO_HOME_MESSAGE);
   const config = await readConfig(dir);
   if (config === null) return failed(INVALID_CONFIG_MESSAGE);
   const mcp: CapabilityCategoryResult = { kind: 'mcp', items: mcpItems(config), error: null };
-  return { categories: [mcp], cost: null };
+  return { categories: [mcp, await pluginCategory({ dir, config })], cost: null };
+}
+
+function withPluginDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
+  const marker = `-${input.id}`;
+  const current: unknown = input.root['plugins'];
+  const entries: unknown[] = Array.isArray(current) ? current : [];
+  const rest = entries.filter((entry) => entry !== marker);
+  return { ...input.root, plugins: input.enabled ? rest : [...rest, marker] };
 }
 
 function withMcpDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
@@ -70,6 +108,7 @@ function withMcpDisabled(input: { root: Config; id: string; enabled: boolean }):
 function configUpdateFor(input: SetEnabledInput): ((root: Config) => Config) | null {
   const { ref, enabled } = input;
   if (ref.kind === 'mcp') return (root) => withMcpDisabled({ root, id: ref.id, enabled });
+  if (ref.kind === 'plugin') return (root) => withPluginDisabled({ root, id: ref.id, enabled });
   return null;
 }
 
