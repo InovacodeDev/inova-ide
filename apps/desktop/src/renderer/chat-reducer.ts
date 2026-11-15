@@ -43,7 +43,7 @@ export interface ChatState {
   feedback?: Record<number, 'up' | 'down'>;
 }
 
-const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
+export const INTERRUPTED_MESSAGE = 'Turno interrompido ao fechar o app.';
 
 export const initialChatState: ChatState = { items: [], running: false };
 

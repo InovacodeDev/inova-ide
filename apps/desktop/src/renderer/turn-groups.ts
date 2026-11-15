@@ -1,4 +1,5 @@
 import type { ChatItem } from './chat-reducer';
+import { translate, type SupportedLocale } from './i18n';
 import { plural, presentTool, toolSummary } from './tool-presentation';
 
 export { toolSummary };
@@ -28,15 +29,18 @@ function baseName(filePath: string): string {
   return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
 }
 
-function clipActivityTarget(target: string): string {
+function clipActivityTarget(target: string, locale: SupportedLocale = 'pt-BR'): string {
   const trimmed = target.trim();
-  if (trimmed === '') return 'arquivos';
+  if (trimmed === '') return translate(locale, 'turn.defaultTarget');
   return trimmed.length > MAX_ACTIVITY_TARGET_CHARS
     ? `${trimmed.slice(0, MAX_ACTIVITY_TARGET_CHARS - 1)}…`
     : trimmed;
 }
 
-export function summarizeWork(entries: readonly ChatEntry[]): string {
+export function summarizeWork(
+  entries: readonly ChatEntry[],
+  locale: SupportedLocale = 'pt-BR',
+): string {
   const hasThinking = entries.some((entry) => entry.item.type === 'thinking');
   const tools = entries.flatMap((entry) => (entry.item.type === 'tool' ? [entry.item] : []));
   const count = (kind: ToolKind) => tools.filter((tool) => toolKind(tool.name) === kind).length;
@@ -45,7 +49,7 @@ export function summarizeWork(entries: readonly ChatEntry[]): string {
   let addedTotal = 0;
   let removedTotal = 0;
   for (const tool of tools) {
-    const presented = presentTool(tool);
+    const presented = presentTool(tool, locale);
     if (presented.kind === 'edit') {
       addedTotal += presented.addedLines;
       removedTotal += presented.removedLines;
@@ -53,27 +57,49 @@ export function summarizeWork(entries: readonly ChatEntry[]): string {
   }
 
   const editCount = count('edit');
+  const editLabel = plural({
+    count: editCount,
+    one: translate(locale, 'turn.editOne'),
+    many: translate(locale, 'turn.editMany'),
+  });
   const editSummary =
     editCount === 0
       ? null
       : addedTotal > 0 || removedTotal > 0
-        ? `${plural({ count: editCount, one: 'edição', many: 'edições' })} (+${addedTotal} -${removedTotal})`
-        : plural({ count: editCount, one: 'edição', many: 'edições' });
+        ? `${editLabel} (+${addedTotal} -${removedTotal})`
+        : editLabel;
 
   const parts: string[] = [];
-  if (hasThinking) parts.push('raciocínio');
+  if (hasThinking) parts.push(translate(locale, 'turn.thinking'));
   const shellCount = count('shell');
-  if (shellCount > 0) parts.push(plural({ count: shellCount, one: 'comando', many: 'comandos' }));
+  if (shellCount > 0) {
+    parts.push(
+      plural({
+        count: shellCount,
+        one: translate(locale, 'turn.cmdOne'),
+        many: translate(locale, 'turn.cmdMany'),
+      }),
+    );
+  }
   if (editSummary !== null) parts.push(editSummary);
   const otherCount = count('other');
   if (otherCount > 0) {
-    parts.push(plural({ count: otherCount, one: 'outra ação', many: 'outras ações' }));
+    parts.push(
+      plural({
+        count: otherCount,
+        one: translate(locale, 'turn.otherOne'),
+        many: translate(locale, 'turn.otherMany'),
+      }),
+    );
   }
-  if (failed > 0) parts.push(`${failed} com erro`);
+  if (failed > 0) parts.push(translate(locale, 'turn.failedCount', { count: failed }));
   return parts.join(' · ');
 }
 
-export function activeTurnActivity(items: readonly ChatItem[]): string {
+export function activeTurnActivity(
+  items: readonly ChatItem[],
+  locale: SupportedLocale = 'pt-BR',
+): string {
   let start = 0;
   for (let i = items.length - 1; i >= 0; i -= 1) {
     if (items[i]?.type === 'user') {
@@ -85,23 +111,25 @@ export function activeTurnActivity(items: readonly ChatItem[]): string {
   for (let i = turnItems.length - 1; i >= 0; i -= 1) {
     const item = turnItems[i];
     if (item?.type !== 'tool' || item.output !== null) continue;
-    const presented = presentTool(item);
+    const presented = presentTool(item, locale);
     switch (presented.kind) {
       case 'edit':
-        return `Editando ${baseName(presented.filePath)}…`;
+        return translate(locale, 'turn.activeEditing', { file: baseName(presented.filePath) });
       case 'shell':
-        return 'Executando comando…';
+        return translate(locale, 'turn.activeShell');
       case 'lookup':
-        return `Consultando ${clipActivityTarget(presented.target)}…`;
+        return translate(locale, 'turn.activeLookup', {
+          target: clipActivityTarget(presented.target, locale),
+        });
       case 'todo':
-        return 'Atualizando tarefas…';
+        return translate(locale, 'turn.activeTodo');
       case 'generic':
-        return `Executando ${item.name}…`;
+        return translate(locale, 'turn.activeGeneric', { name: item.name });
     }
   }
   const last = turnItems[turnItems.length - 1];
-  if (last?.type === 'thinking' && last.streaming) return 'Raciocinando…';
-  return 'Pensando…';
+  if (last?.type === 'thinking' && last.streaming) return translate(locale, 'turn.activeThinking');
+  return translate(locale, 'turn.activePending');
 }
 
 function groupTurn(entries: ChatEntry[], expanded: boolean): ChatBlock[] {

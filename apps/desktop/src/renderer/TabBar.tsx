@@ -1,3 +1,4 @@
+import { useI18n } from './I18nContext';
 import { CloseIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { queueCountLabel } from './queue-state';
@@ -16,13 +17,14 @@ interface TabBarProps {
 
 export function TabBar(props: TabBarProps) {
   const { tabs, active, statusOf, queuedCountOf, onActivate, onClose } = props;
+  const { locale, t } = useI18n();
   const tabIds = tabs.map((tab) => tab.sessionId);
   const focusableId = tabIds.includes(active ?? '') ? active : (tabIds[0] ?? null);
   return (
     <div
       className="tab-bar"
       role="tablist"
-      aria-label="Sessões abertas"
+      aria-label={t('tabs.openSessions')}
       onKeyDown={(event) =>
         handleHorizontalTabListKeyDown({
           event,
@@ -52,13 +54,13 @@ export function TabBar(props: TabBarProps) {
               <ProviderBadge provider={tab.provider} size={16} />
               <span className="tab-bar-title">{tab.title}</span>
               {statusOf(tab.sessionId) === 'running' && (
-                <span className="tab-bar-running" role="img" aria-label="Executando" />
+                <span className="tab-bar-running" role="img" aria-label={t('tabs.running')} />
               )}
               {queuedCount > 0 && (
                 <span
                   className="tab-bar-queue"
                   role="img"
-                  aria-label={queueCountLabel(queuedCount)}
+                  aria-label={queueCountLabel(queuedCount, locale)}
                 >
                   {queuedCount}
                 </span>
@@ -67,7 +69,7 @@ export function TabBar(props: TabBarProps) {
             <button
               type="button"
               className="icon-btn tab-bar-close"
-              aria-label={`Fechar ${tab.title}`}
+              aria-label={t('tabs.closeTab', { title: tab.title })}
               onClick={() => onClose(tab)}
             >
               <CloseIcon size={12} />

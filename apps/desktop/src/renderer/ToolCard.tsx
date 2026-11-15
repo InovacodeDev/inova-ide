@@ -10,6 +10,7 @@ import {
   PencilIcon,
   TerminalIcon,
 } from './icons';
+import { useI18n } from './I18nContext';
 import {
   presentTool,
   type DiffLine,
@@ -43,16 +44,19 @@ function ToolStatusBadges({
   running: boolean;
   result?: string | null;
 }) {
+  const { t } = useI18n();
   return (
     <>
       {result !== null && result !== undefined ? (
         <span className="chat-tool-status chat-tool-result">{result}</span>
       ) : null}
-      {isError ? <span className="chat-tool-status chat-tool-failed">erro</span> : null}
+      {isError ? (
+        <span className="chat-tool-status chat-tool-failed">{t('tool.error')}</span>
+      ) : null}
       {running ? (
         <span className="chat-tool-status chat-tool-pending">
           <span className="dot pulse" aria-hidden="true" />
-          executando
+          {t('tool.running')}
         </span>
       ) : null}
     </>
@@ -68,13 +72,14 @@ function EditToolCard({
   presented: PresentedEditTool;
   defaultOpen: boolean;
 }) {
+  const { t } = useI18n();
   const [expandedAll, setExpandedAll] = useState(false);
   const totalLines = presented.diffLines.length;
   const visibleLines = expandedAll
     ? presented.diffLines
     : presented.diffLines.slice(0, DIFF_PREVIEW_LIMIT);
   const hiddenCount = totalLines - visibleLines.length;
-  const label = presented.operation === 'write' ? 'Novo arquivo' : 'Edição';
+  const label = presented.operation === 'write' ? t('tool.newFile') : t('tool.edit');
 
   return (
     <details
@@ -102,7 +107,7 @@ function EditToolCard({
           <div
             className="chat-diff-view"
             role="region"
-            aria-label={`Diff de ${presented.filePath}`}
+            aria-label={t('tool.diffAria', { path: presented.filePath })}
           >
             {visibleLines.map((line, idx) => (
               <div key={idx} className={diffRowClass(line.type)}>
@@ -113,7 +118,7 @@ function EditToolCard({
             ))}
             {hiddenCount > 0 ? (
               <button type="button" className="chat-diff-more" onClick={() => setExpandedAll(true)}>
-                Mostrar todas as {totalLines} linhas (+{hiddenCount})
+                {t('tool.showAllLinesExtra', { total: totalLines, hidden: hiddenCount })}
               </button>
             ) : null}
           </div>
@@ -137,12 +142,15 @@ function ShellToolCard({
   presented: PresentedShellTool;
   onCopyText: (text: string) => void;
 }) {
+  const { t } = useI18n();
   const result =
     item.output === null
       ? null
       : presented.lineCount > 0
-        ? `${presented.lineCount} ${presented.lineCount === 1 ? 'linha' : 'linhas'}`
-        : 'ok';
+        ? t(presented.lineCount === 1 ? 'tool.lineSingular' : 'tool.linePlural', {
+            count: presented.lineCount,
+          })
+        : t('tool.ok');
   const title = presented.command || item.name;
   return (
     <details
@@ -155,7 +163,7 @@ function ShellToolCard({
         <span className="chat-tool-icon">
           <TerminalIcon size={16} />
         </span>
-        <span className="chat-tool-name">Terminal</span>
+        <span className="chat-tool-name">{t('tool.terminal')}</span>
         <span className="chat-tool-preview">$ {title}</span>
         <ToolStatusBadges isError={item.isError} running={item.output === null} result={result} />
       </summary>
@@ -165,8 +173,8 @@ function ShellToolCard({
           <button
             type="button"
             className="chat-meta-btn"
-            aria-label="Copiar comando"
-            data-tooltip="Copiar comando"
+            aria-label={t('tool.copyCommand')}
+            data-tooltip={t('tool.copyCommand')}
             onClick={() => onCopyText(title)}
           >
             <CopyIcon size={12} />
@@ -177,9 +185,9 @@ function ShellToolCard({
         ) : null}
         {presented.output === null ? null : (
           <div className="chat-shell-output-wrap">
-            <div className="chat-tool-label">Saída</div>
+            <div className="chat-tool-label">{t('tool.outputLabel')}</div>
             <pre className="chat-shell-pre">
-              {presented.output === '' ? '(sem saída)' : presented.output}
+              {presented.output === '' ? t('tool.emptyOutputLabel') : presented.output}
             </pre>
           </div>
         )}
@@ -239,6 +247,7 @@ function TodoToolCard({
   presented: PresentedTodoTool;
   defaultOpen: boolean;
 }) {
+  const { t } = useI18n();
   const summaryCount = `${presented.completedCount}/${presented.items.length}`;
   return (
     <details
@@ -251,9 +260,11 @@ function TodoToolCard({
         <span className="chat-tool-icon">
           <ListTodoIcon size={16} />
         </span>
-        <span className="chat-tool-name">Plano de tarefas</span>
+        <span className="chat-tool-name">{t('tool.todoPlan')}</span>
         <span className="chat-tool-preview">
-          {presented.items.length === 1 ? '1 item' : `${presented.items.length} itens`}
+          {t(presented.items.length === 1 ? 'tool.itemSingular' : 'tool.itemPlural', {
+            count: presented.items.length,
+          })}
         </span>
         <ToolStatusBadges
           isError={item.isError}
@@ -302,6 +313,7 @@ function GenericToolCard({
   item: Extract<ChatItem, { type: 'tool' }>;
   presented: PresentedGenericTool;
 }) {
+  const { t } = useI18n();
   return (
     <details className={item.isError ? 'chat-tool chat-tool-error' : 'chat-tool'}>
       <summary className="chat-tool-summary">
@@ -317,7 +329,7 @@ function GenericToolCard({
         />
       </summary>
       <div className="chat-tool-body">
-        <div className="chat-tool-label">Entrada</div>
+        <div className="chat-tool-label">{t('tool.inputLabel')}</div>
         {presented.entries.length > 0 ? (
           <div className="chat-tool-kv">
             {presented.entries.map((entry) => (
@@ -332,7 +344,7 @@ function GenericToolCard({
         )}
         {presented.output === null ? null : (
           <>
-            <div className="chat-tool-label">Saída</div>
+            <div className="chat-tool-label">{t('tool.outputLabel')}</div>
             <pre className="chat-tool-pre">{presented.output}</pre>
           </>
         )}
@@ -350,7 +362,8 @@ export function ToolCard({
   defaultOpen?: boolean;
   onCopyText: (text: string) => void;
 }) {
-  const presented = presentTool(item);
+  const { locale } = useI18n();
+  const presented = presentTool(item, locale);
   switch (presented.kind) {
     case 'edit':
       return <EditToolCard item={item} presented={presented} defaultOpen={defaultOpen} />;

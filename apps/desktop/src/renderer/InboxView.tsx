@@ -1,5 +1,7 @@
 import { useState, type Ref } from 'react';
 import type { InboxAttentionKind, InboxItem } from '@inova/core/types';
+import { useI18n } from './I18nContext';
+import type { TranslationKey } from './i18n';
 import { InboxIcon } from './icons';
 import { filterInbox, inboxFilterCounts, unreadInboxCount, type InboxFilter } from './inbox-state';
 import { ProviderBadge } from './ProviderBadge';
@@ -13,19 +15,20 @@ interface InboxViewProps {
   onClearRead: () => void;
 }
 
-const KIND_LABEL: Record<InboxAttentionKind, string> = {
-  completed: 'Concluída',
-  failed: 'Falhou',
-  'waiting-input': 'Aguardando',
+const KIND_KEY: Record<InboxAttentionKind, TranslationKey> = {
+  completed: 'inbox.kind.completed',
+  failed: 'inbox.kind.failed',
+  'waiting-input': 'inbox.kind.waiting-input',
 };
 
-const FILTER_OPTIONS: { id: InboxFilter; label: string }[] = [
-  { id: 'all', label: 'Todas' },
-  { id: 'failed', label: 'Erros' },
-  { id: 'waiting', label: 'Aguardando' },
+const FILTER_OPTIONS: { id: InboxFilter; labelKey: TranslationKey }[] = [
+  { id: 'all', labelKey: 'inbox.filter.all' },
+  { id: 'failed', labelKey: 'inbox.filter.failed' },
+  { id: 'waiting', labelKey: 'inbox.filter.waiting' },
 ];
 
 export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProps) {
+  const { locale, t } = useI18n();
   const [filter, setFilter] = useState<InboxFilter>('all');
   const unread = unreadInboxCount(items);
   const counts = inboxFilterCounts(items);
@@ -34,16 +37,16 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
   const now = new Date();
 
   return (
-    <section ref={ref} className="inbox-section" aria-label="Caixa de entrada" tabIndex={-1}>
+    <section ref={ref} className="inbox-section" aria-label={t('inbox.title')} tabIndex={-1}>
       <div className="inbox-header">
         <span className="inbox-title-wrap">
           <InboxIcon size={14} />
-          <span className="inbox-heading">Caixa de entrada</span>
+          <span className="inbox-heading">{t('inbox.title')}</span>
           {unread > 0 ? <span className="inbox-badge">{unread}</span> : null}
         </span>
         {hasRead ? (
           <button type="button" className="inbox-clear" onClick={onClearRead}>
-            Limpar lidas
+            {t('inbox.clearRead')}
           </button>
         ) : null}
       </div>
@@ -52,7 +55,7 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
           <div
             className="inbox-filters"
             role="tablist"
-            aria-label="Filtro da caixa de entrada"
+            aria-label={t('inbox.filterLabel')}
             onKeyDown={(event) =>
               handleHorizontalTabListKeyDown({
                 event,
@@ -72,7 +75,7 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
                 className={filter === option.id ? 'inbox-filter active' : 'inbox-filter'}
                 onClick={() => setFilter(option.id)}
               >
-                <span>{option.label}</span>
+                <span>{t(option.labelKey)}</span>
                 {counts[option.id] > 0 ? (
                   <span className="inbox-filter-count">{counts[option.id]}</span>
                 ) : null}
@@ -80,7 +83,7 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
             ))}
           </div>
           {visible.length === 0 ? (
-            <p className="inbox-empty">Nenhum item neste filtro.</p>
+            <p className="inbox-empty">{t('inbox.emptyFilter')}</p>
           ) : (
             <ul className="inbox-list">
               {visible.map((item) => (
@@ -92,18 +95,20 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
                   >
                     <div className="inbox-item-top">
                       {item.unread ? (
-                        <span className="inbox-unread-dot" aria-label="Não lida" />
+                        <span className="inbox-unread-dot" aria-label={t('inbox.unreadLabel')} />
                       ) : null}
                       <ProviderBadge provider={item.provider} size={16} />
                       <span className="inbox-item-title">{item.sessionTitle}</span>
                       <span className={`inbox-kind inbox-kind-${item.kind}`}>
-                        {KIND_LABEL[item.kind]}
+                        {t(KIND_KEY[item.kind])}
                       </span>
                     </div>
                     <div className="inbox-item-summary">{item.summary}</div>
                     <div className="inbox-item-meta">
                       <span className="inbox-item-project">{item.projectName}</span>
-                      <span className="inbox-item-time">{relativeTime({ iso: item.at, now })}</span>
+                      <span className="inbox-item-time">
+                        {relativeTime({ iso: item.at, now, locale })}
+                      </span>
                     </div>
                   </button>
                 </li>
@@ -112,7 +117,7 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
           )}
         </>
       ) : (
-        <p className="inbox-empty">Nenhuma notificação pendente.</p>
+        <p className="inbox-empty">{t('inbox.empty')}</p>
       )}
     </section>
   );

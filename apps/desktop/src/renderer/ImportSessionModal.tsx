@@ -7,6 +7,7 @@ import type {
   Result,
 } from '../shared/api';
 import { CloseIcon, DownloadIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { buildImportGroups, formatBytes, selectableIds } from './import-state';
 import { folderName } from './path-name';
 import { PlatformSelect } from './PlatformSelect';
@@ -42,11 +43,14 @@ export function ImportSessionModal({
   onImport,
   onClose,
 }: ImportSessionModalProps) {
+  const { locale, t } = useI18n();
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [targets, setTargets] = useState<Partial<Record<ImportProvider, string>>>({});
   const [importing, setImporting] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const unexpectedRef = useRef(t('alerts.unexpected'));
+  unexpectedRef.current = t('alerts.unexpected');
 
   useDialogFocus(cardRef);
 
@@ -62,7 +66,7 @@ export function ImportSessionModal({
         );
       },
       () => {
-        if (active) setState({ status: 'error', message: 'Erro inesperado.' });
+        if (active) setState({ status: 'error', message: unexpectedRef.current });
       },
     );
     return () => {
@@ -135,17 +139,17 @@ export function ImportSessionModal({
           <DownloadIcon size={17} />
           <div className="modal-title-group">
             <h2 id="import-modal-title" className="modal-title">
-              Importar sessões
+              {t('importSession.title')}
             </h2>
             <span className="modal-subtitle" title={project.path}>
-              {folderName(project.path)} · sessões criadas fora do InovaIDE nesta pasta
+              {t('importSession.subtitle', { folder: folderName(project.path) })}
             </span>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar importação"
-            data-tooltip="Fechar importação"
+            aria-label={t('importSession.close')}
+            data-tooltip={t('importSession.close')}
             data-shortcut="dismiss"
             onClick={onClose}
           >
@@ -153,12 +157,12 @@ export function ImportSessionModal({
           </button>
         </div>
         <div className="modal-body import-body">
-          {state.status === 'loading' && <p className="modal-description">Procurando sessões…</p>}
+          {state.status === 'loading' && (
+            <p className="modal-description">{t('importSession.loading')}</p>
+          )}
           {state.status === 'error' && <p className="modal-description">{state.message}</p>}
           {state.status === 'ready' && groups.length === 0 && (
-            <p className="modal-description">
-              Nenhuma sessão externa do Claude Code ou do Codex encontrada para esta pasta.
-            </p>
+            <p className="modal-description">{t('importSession.empty')}</p>
           )}
           {groups.map((group) => (
             <section key={group.provider} className="import-group">
@@ -167,7 +171,9 @@ export function ImportSessionModal({
                 <span className="import-group-title">{PROVIDER_NAME[group.provider]}</span>
                 {group.accounts.length > 1 && (
                   <PlatformSelect
-                    ariaLabel={`Conta de destino para ${PROVIDER_NAME[group.provider]}`}
+                    ariaLabel={t('importSession.providerTargetAria', {
+                      provider: PROVIDER_NAME[group.provider],
+                    })}
                     value={targets[group.provider] ?? group.defaultAccountId}
                     options={group.accounts.map((account) => ({
                       value: account.id,
@@ -181,7 +187,7 @@ export function ImportSessionModal({
               </div>
               {group.accounts.length === 0 && (
                 <p className="import-note">
-                  Adicione uma conta {PROVIDER_NAME[group.provider]} para importar estas sessões.
+                  {t('importSession.addAccountNote', { provider: PROVIDER_NAME[group.provider] })}
                 </p>
               )}
               <ul className="import-list">
@@ -199,8 +205,8 @@ export function ImportSessionModal({
                         <span className="import-row-title">{session.title}</span>
                         <span className="import-row-meta">
                           {session.imported
-                            ? 'já importada'
-                            : `${relativeTime({ iso: session.updatedAt, now })} · ${formatBytes(session.sizeBytes)}`}
+                            ? t('importSession.alreadyImported')
+                            : `${relativeTime({ iso: session.updatedAt, now, locale })} · ${formatBytes(session.sizeBytes)}`}
                         </span>
                       </label>
                     </li>
@@ -212,7 +218,7 @@ export function ImportSessionModal({
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onClose}>
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -220,7 +226,11 @@ export function ImportSessionModal({
             disabled={total === 0 || importing}
             onClick={() => void confirm()}
           >
-            {importing ? 'Importando…' : total > 0 ? `Importar (${total})` : 'Importar'}
+            {importing
+              ? t('importSession.importing')
+              : total > 0
+                ? t('importSession.submitCount', { count: total })
+                : t('importSession.submit')}
           </button>
         </div>
       </div>

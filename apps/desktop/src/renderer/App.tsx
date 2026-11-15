@@ -59,7 +59,9 @@ import { sessionStatus } from './session-status';
 import { SettingsModal } from './SettingsModal';
 import { ChangelogModal } from './ChangelogModal';
 import { I18nProvider } from './I18nContext';
-import { resolveLocale } from './i18n';
+import { resolveLocale, translate, type TranslationKey, type TranslationParams } from './i18n';
+import { modeOptionText } from './mode-picker-state';
+import { localizeModelOption } from './model-picker-state';
 import { UpdateProgress } from './UpdateProgress';
 import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
@@ -169,6 +171,7 @@ export function App() {
     history: warningHistory,
     dismiss,
     clearHistory: clearWarningHistory,
+    setLocale: setWarningLocale,
     guard,
     call,
     warn,
@@ -183,6 +186,12 @@ export function App() {
   const activeChatRef = useRef<ChatViewHandle>(null);
   useTheme(settings?.appearance.theme);
   const locale = resolveLocale(settings?.appearance.locale, navigator.language);
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
+  useEffect(() => {
+    setWarningLocale(locale);
+  }, [locale, setWarningLocale]);
+  const t = (key: TranslationKey, params?: TranslationParams) => translate(locale, key, params);
   const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
   const detailsCollapsed = settings?.appearance.detailsCollapsed ?? false;
   const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
@@ -483,7 +492,12 @@ export function App() {
         });
         setFailoverNotices((current) => ({
           ...current,
-          [session.id]: buildFailoverNotice({ fromAccount, toAccount, rollbackLastTurn }),
+          [session.id]: buildFailoverNotice({
+            fromAccount,
+            toAccount,
+            rollbackLastTurn,
+            locale: localeRef.current,
+          }),
         }));
         if (toAccount) {
           dispatch({ type: 'rebind', sessionId: session.id, provider: toAccount.provider });
@@ -729,7 +743,10 @@ export function App() {
     });
     if (matched) {
       setNotice(
-        `Sessão retornada para ${PROVIDER_NAME[matched.provider]} (${accountDisplayName(matched)}).`,
+        translate(localeRef.current, 'app.returnedSessionNotice', {
+          provider: PROVIDER_NAME[matched.provider],
+          account: accountDisplayName(matched),
+        }),
       );
     }
   };
@@ -902,13 +919,13 @@ export function App() {
       (item) => item.id === childSession.parentId && item.archivedAt === null,
     );
     if (!parent) {
-      setNotice('Sessão pai não encontrada ou arquivada.');
+      setNotice(translate(localeRef.current, 'app.parentNotFoundNotice'));
       return;
     }
     if (!ensureTabRoom(parent.id)) return;
     await openChatTab(parent);
     seedComposer(parent.id, buildParentFixPrompt(findings));
-    setNotice('Achados enviados para o rascunho da sessão pai.');
+    setNotice(translate(localeRef.current, 'app.sentToParentNotice'));
   };
 
   const startAccountLogin = async (account: AccountView) => {
@@ -929,7 +946,11 @@ export function App() {
       console.error('inova: startLogin failed', error);
       setLoginModal((current) =>
         current?.accountLabel === account.label
-          ? { ...current, stage: 'failed', message: 'Erro inesperado ao iniciar autenticação.' }
+          ? {
+              ...current,
+              stage: 'failed',
+              message: translate(localeRef.current, 'app.authStartFailed'),
+            }
           : current,
       );
       return;
@@ -1014,7 +1035,9 @@ export function App() {
       setWorktreeModal(null);
       setGitRevision((revision) => revision + 1);
       setNotice(
-        `Alterações aplicadas no projeto principal (${result.value.appliedFiles.length} arquivo(s)).`,
+        translate(localeRef.current, 'app.appliedWorktreeNotice', {
+          count: result.value.appliedFiles.length,
+        }),
       );
     } finally {
       setApplyingWorktree(false);
@@ -1040,8 +1063,8 @@ export function App() {
       }
       setNotice(
         files.length === 1
-          ? `Arquivo revertido: ${files[0]}`
-          : `${files.length} arquivo(s) revertido(s).`,
+          ? translate(localeRef.current, 'app.revertedSingleNotice', { file: files[0] ?? '' })
+          : translate(localeRef.current, 'app.revertedMultiNotice', { count: files.length }),
       );
       return true;
     } finally {
@@ -1063,7 +1086,7 @@ export function App() {
     );
     if (!result) return;
     setGitRevision((revision) => revision + 1);
-    setNotice('Checkpoint restaurado no repositório.');
+    setNotice(translate(localeRef.current, 'app.restoredCheckpointNotice'));
   };
 
   const updateProjectVerification = async (
@@ -1133,13 +1156,23 @@ export function App() {
   const updateProjectPinnedMemory = async (projectId: string, pinnedMemory: string | null) => {
     const saved = await updateProjectVerification(projectId, { pinnedMemory });
     if (!saved) return;
-    setNotice(pinnedMemory === null ? 'Memória do projeto limpa.' : 'Memória do projeto salva.');
+    setNotice(
+      translate(
+        localeRef.current,
+        pinnedMemory === null ? 'app.projectMemoryCleared' : 'app.projectMemorySaved',
+      ),
+    );
   };
 
   const updateSessionPinnedMemory = async (sessionId: string, pinnedMemory: string | null) => {
     const saved = await updateSessionModelConfig({ sessionId, patch: { pinnedMemory } });
     if (!saved) return;
-    setNotice(pinnedMemory === null ? 'Memória da sessão limpa.' : 'Memória da sessão salva.');
+    setNotice(
+      translate(
+        localeRef.current,
+        pinnedMemory === null ? 'app.sessionMemoryCleared' : 'app.sessionMemorySaved',
+      ),
+    );
   };
 
   const pinSessionNote = async (sessionId: string, note: string) => {
@@ -1152,11 +1185,15 @@ export function App() {
     const existing = session.pinnedMemory?.trim() ?? '';
     const next = existing === '' ? trimmed : `${existing}\n${trimmed}`;
     if (next.length > MAX_PINNED_MEMORY_CHARS) {
-      warn(`Memória da sessão excede o limite de ${MAX_PINNED_MEMORY_CHARS} caracteres.`);
+      warn(
+        translate(localeRef.current, 'app.pinnedMemoryTooLong', {
+          max: MAX_PINNED_MEMORY_CHARS,
+        }),
+      );
       return;
     }
     const saved = await updateSessionModelConfig({ sessionId, patch: { pinnedMemory: next } });
-    if (saved) setNotice('Nota fixada na memória da sessão.');
+    if (saved) setNotice(translate(localeRef.current, 'app.pinnedMemorySaved'));
   };
 
   const setDefaultProviderMode = async (provider: ProviderId, mode: ExecutionMode) => {
@@ -1427,17 +1464,20 @@ export function App() {
     ? (() => {
         const projectMap = new Map(projects.map((project) => [project.id, project] as const));
         return buildCommandPaletteItems({
+          locale,
           actions: [
             {
               id: 'action:new-session',
-              title: 'Nova sessão',
-              subtitle: 'Abrir formulário de nova sessão',
+              title: t('app.palette.newSessionTitle'),
+              subtitle: t('app.palette.newSessionSub'),
               shortcutId: 'new-session',
-              keywords: ['criar', 'chat'],
+              keywords: ['criar', 'chat', 'new'],
             },
             {
               id: 'action:toggle-sidebar',
-              title: sidebarCollapsed ? 'Expandir barra lateral' : 'Recolher barra lateral',
+              title: sidebarCollapsed
+                ? t('app.palette.toggleSidebarOpen')
+                : t('app.palette.toggleSidebarClose'),
               keywords: ['sidebar', 'painel'],
             },
             ...(activeSession
@@ -1445,47 +1485,47 @@ export function App() {
                   {
                     id: 'action:toggle-inspector',
                     title: detailsCollapsed
-                      ? 'Abrir inspetor da sessão'
-                      : 'Recolher inspetor da sessão',
+                      ? t('app.palette.toggleDetailsOpen')
+                      : t('app.palette.toggleDetailsClose'),
                     keywords: ['inspector', 'contexto', 'detalhes'],
                   },
                   {
                     id: 'action:open-git-diff',
-                    title: 'Inspecionar diff Git da sessão',
+                    title: t('app.palette.inspectDiffTitle'),
                     keywords: ['git', 'diff', 'alteracoes'],
                   },
                   {
                     id: 'action:run-verification',
-                    title: 'Executar verificação do projeto',
+                    title: t('app.palette.runVerifyTitle'),
                     keywords: ['check', 'testes', 'lint'],
                   },
                 ]
               : []),
             {
               id: 'action:view-workspace',
-              title: 'Ir para Workspace',
+              title: t('app.palette.goToWorkspace'),
               keywords: ['chat', 'conversa'],
             },
             {
               id: 'action:view-agents',
-              title: 'Ir para Agentes em paralelo',
+              title: t('app.palette.goToAgents'),
               keywords: ['agentes', 'execucao'],
             },
             {
               id: 'action:view-compare',
-              title: 'Ir para Comparar modelos',
+              title: t('app.palette.goToCompare'),
               keywords: ['compare', 'diff'],
             },
             {
               id: 'action:view-accounts',
-              title: 'Ir para Contas',
+              title: t('app.palette.goToAccounts'),
               keywords: ['contas', 'uso'],
             },
             ...(settings !== null
               ? [
                   {
                     id: 'action:open-settings',
-                    title: 'Abrir configurações',
+                    title: t('app.palette.settingsTitle'),
                     shortcutId: 'open-settings' as const,
                     keywords: ['settings', 'preferencias'],
                   },
@@ -1501,7 +1541,7 @@ export function App() {
               return {
                 id: session.id,
                 title: session.title,
-                projectName: project ? folderName(project.path) : 'Projeto',
+                projectName: project ? folderName(project.path) : t('app.palette.projectFallback'),
                 providerLabel: PROVIDER_NAME[provider],
                 branch: session.worktree?.branch ?? null,
                 active: activeSession?.id === session.id && inWorkspace,
@@ -1518,7 +1558,7 @@ export function App() {
             activeSession && activeCatalog
               ? activeCatalog.models.map((model) => ({
                   id: model.id,
-                  label: model.label,
+                  label: localizeModelOption(model, locale).label,
                   active: activeModelConfig.model === model.id,
                 }))
               : [],
@@ -1526,7 +1566,7 @@ export function App() {
             activeSession && activeProvider && activeMode
               ? PROVIDER_MODES[activeProvider].options.map((option) => ({
                   id: option.id,
-                  label: option.label,
+                  label: modeOptionText(activeProvider, option, locale).label,
                   active: activeMode === option.id,
                 }))
               : [],
@@ -1801,7 +1841,7 @@ export function App() {
                   onClose={() => requestCloseTab(activeTab)}
                 />
               ) : (
-                <p className="hint">Nenhuma sessão aberta. Escolha uma sessão ou crie uma nova.</p>
+                <p className="hint">{t('app.emptySessionHint')}</p>
               )}
               <div className="session-stage">
                 {tabs.tabs.map((tab) => {
@@ -2070,9 +2110,13 @@ export function App() {
         )}
         {confirmUpdateRestart && (
           <ConfirmModal
-            title="Reiniciar para atualizar?"
-            description={`${runningCount === 1 ? 'Há 1 sessão executando' : `Há ${runningCount} sessões executando`}. Reiniciar interrompe o turno em andamento.`}
-            confirmLabel="Atualizar e reiniciar"
+            title={t('app.confirmRestartTitle')}
+            description={
+              runningCount === 1
+                ? t('app.confirmRestartDescSingular')
+                : t('app.confirmRestartDescPlural', { count: runningCount })
+            }
+            confirmLabel={t('app.confirmRestartBtn')}
             onCancel={() => setConfirmUpdateRestart(false)}
             onConfirm={() => {
               setConfirmUpdateRestart(false);
@@ -2082,9 +2126,11 @@ export function App() {
         )}
         {pendingRemoveAccount && (
           <ConfirmModal
-            title="Deslogar e remover conta"
-            description={`Deslogar e remover a conta ${accountDisplayName(pendingRemoveAccount)}? As seções e sessões vinculadas a ela serão removidas.`}
-            confirmLabel="Deslogar e remover"
+            title={t('app.confirmRemoveAccountTitle')}
+            description={t('app.confirmRemoveAccountDesc', {
+              account: accountDisplayName(pendingRemoveAccount),
+            })}
+            confirmLabel={t('app.confirmRemoveAccountBtn')}
             danger
             onCancel={() => setPendingRemoveAccount(null)}
             onConfirm={() => {
@@ -2096,9 +2142,15 @@ export function App() {
         )}
         {pendingRewind && (
           <ConfirmModal
-            title={pendingRewind.resend ? 'Regerar a resposta?' : 'Retroceder até esta mensagem?'}
-            description="Os turnos seguintes serão desfeitos e o repositório volta ao estado anterior a este turno."
-            confirmLabel={pendingRewind.resend ? 'Regerar' : 'Retroceder'}
+            title={
+              pendingRewind.resend
+                ? t('app.confirmRewindRegenTitle')
+                : t('app.confirmRewindBackTitle')
+            }
+            description={t('app.confirmRewindDesc')}
+            confirmLabel={
+              pendingRewind.resend ? t('app.confirmRewindRegenBtn') : t('app.confirmRewindBackBtn')
+            }
             danger
             onCancel={() => setPendingRewind(null)}
             onConfirm={() => {
@@ -2120,9 +2172,9 @@ export function App() {
         )}
         {pendingCloseTab && (
           <ConfirmModal
-            title="Encerrar sessão em andamento"
-            description={`A sessão "${pendingCloseTab.title}" ainda está executando uma resposta. Fechar a aba encerrará o turno atual.`}
-            confirmLabel="Encerrar e fechar"
+            title={t('app.confirmCloseTabTitle')}
+            description={t('app.confirmCloseTabDesc', { title: pendingCloseTab.title })}
+            confirmLabel={t('app.confirmCloseTabBtn')}
             danger
             onCancel={() => setPendingCloseTab(null)}
             onConfirm={() => {
@@ -2134,14 +2186,20 @@ export function App() {
         )}
         {pendingArchive && (
           <ConfirmModal
-            title={pendingArchive.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'}
+            title={
+              pendingArchive.parentId !== null
+                ? t('app.confirmArchiveSubTitle')
+                : t('app.confirmArchiveSessionTitle')
+            }
             description={
               pendingArchive.parentId !== null
-                ? `Arquivar a subsessão "${pendingArchive.title}" e suas subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
-                : `Arquivar a sessão "${pendingArchive.title}" e todas as subsessões vinculadas? Ela ficará em modo somente leitura em Arquivadas.`
+                ? t('app.confirmArchiveSubDesc', { title: pendingArchive.title })
+                : t('app.confirmArchiveSessionDesc', { title: pendingArchive.title })
             }
             confirmLabel={
-              pendingArchive.parentId !== null ? 'Arquivar subsessão' : 'Arquivar sessão'
+              pendingArchive.parentId !== null
+                ? t('app.confirmArchiveSubBtn')
+                : t('app.confirmArchiveSessionBtn')
             }
             danger
             onCancel={() => setPendingArchive(null)}
@@ -2154,13 +2212,15 @@ export function App() {
         )}
         {pendingRestore && (
           <ConfirmModal
-            title="Restaurar checkpoint"
+            title={t('app.confirmRestoreTitle')}
             description={
               pendingRestore.skippedLargeFiles.length > 0
-                ? `Restaurar os arquivos do repositório ao estado anterior a este turno? Arquivos acima de 10 MB preservados: ${pendingRestore.skippedLargeFiles.join(', ')}.`
-                : 'Restaurar os arquivos do repositório ao estado anterior a este turno? Alterações posteriores neste worktree serão substituídas.'
+                ? t('app.confirmRestoreLargeDesc', {
+                    files: pendingRestore.skippedLargeFiles.join(', '),
+                  })
+                : t('app.confirmRestoreDefaultDesc')
             }
-            confirmLabel="Restaurar"
+            confirmLabel={t('app.confirmRestoreBtn')}
             danger
             onCancel={() => setPendingRestore(null)}
             onConfirm={() => {
@@ -2172,9 +2232,9 @@ export function App() {
         )}
         {pendingForceDelete && (
           <ConfirmModal
-            title="Descartar alterações do worktree"
-            description={`A sessão "${pendingForceDelete.title}" possui alterações não aplicadas no worktree. Apagar a sessão descartará essas alterações.`}
-            confirmLabel="Apagar e descartar"
+            title={t('app.confirmForceDeleteTitle')}
+            description={t('app.confirmForceDeleteDesc', { title: pendingForceDelete.title })}
+            confirmLabel={t('app.confirmForceDeleteBtn')}
             danger
             onCancel={() => setPendingForceDelete(null)}
             onConfirm={() => {
@@ -2213,15 +2273,19 @@ export function App() {
           <ConfirmModal
             title={
               pendingRevert.files.length === 1
-                ? 'Reverter arquivo?'
-                : 'Reverter todas as alterações?'
+                ? t('app.confirmRevertSingleTitle')
+                : t('app.confirmRevertAllTitle')
             }
             description={
               pendingRevert.files.length === 1
-                ? `Descartar as alterações locais em "${pendingRevert.files[0]}"? O arquivo volta ao último checkpoint e esta ação não pode ser desfeita.`
-                : `Descartar as alterações locais em ${pendingRevert.files.length} arquivos? Os arquivos voltam ao último checkpoint e esta ação não pode ser desfeita.`
+                ? t('app.confirmRevertSingleDesc', { file: pendingRevert.files[0] ?? '' })
+                : t('app.confirmRevertAllDesc', { count: pendingRevert.files.length })
             }
-            confirmLabel={pendingRevert.files.length === 1 ? 'Reverter arquivo' : 'Reverter tudo'}
+            confirmLabel={
+              pendingRevert.files.length === 1
+                ? t('app.confirmRevertSingleBtn')
+                : t('app.confirmRevertAllBtn')
+            }
             danger
             onCancel={() => setPendingRevert(null)}
             onConfirm={() => {

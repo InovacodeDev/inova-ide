@@ -12,11 +12,10 @@ describe('moveSection', () => {
     expect(moveSection({ current: 'general', delta: -1 })).toBe('shortcuts');
   });
 
-  test('exposes the six phase-one sections once each', () => {
+  test('exposes the six sections once each', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'general',
       'models',
-      'appearance',
       'sessions',
       'notifications',
       'voice',

@@ -48,11 +48,11 @@ export function NewSessionView(props: NewSessionViewProps) {
     return (
       <div className="view-scroll">
         <div className="new-session">
-          <h1>Nova sessão</h1>
+          <h1>{t('newSession.title')}</h1>
           <div className="new-session-empty">
-            <p>Nenhuma conta conectada.</p>
+            <p>{t('newSession.noAccountsShort')}</p>
             <button type="button" className="btn btn-primary" onClick={onManageAccounts}>
-              Adicionar conta
+              {t('newSession.addAccountBtn')}
             </button>
           </div>
         </div>
@@ -126,8 +126,8 @@ export function NewSessionView(props: NewSessionViewProps) {
     }),
     {
       value: OTHER_FOLDER,
-      label: 'Outra pasta…',
-      description: 'Escolher um diretório no computador',
+      label: t('newSession.otherFolder'),
+      description: t('newSession.otherFolderDesc'),
       leading: <FolderIcon size={16} />,
     },
   ];
@@ -135,7 +135,10 @@ export function NewSessionView(props: NewSessionViewProps) {
   const accountOptions = providerAccounts.map((a) => ({
     value: a.label,
     label: accountDisplayName(a),
-    description: a.status === 'logged-in' ? 'Conectada' : 'Desconectada',
+    description:
+      a.status === 'logged-in'
+        ? t('newSession.accountConnected')
+        : t('newSession.accountDisconnected'),
     leading: <ProviderBadge provider={a.provider} size={18} />,
   }));
 
@@ -143,17 +146,17 @@ export function NewSessionView(props: NewSessionViewProps) {
     <div className="view-scroll">
       <form className="new-session" onSubmit={(event) => void submit(event)} onKeyDown={onKeyDown}>
         <div>
-          <h1>Nova sessão</h1>
-          <p>Escolha onde o agente vai trabalhar e qual conta roda por baixo.</p>
+          <h1>{t('newSession.title')}</h1>
+          <p>{t('newSession.subtitle')}</p>
         </div>
 
         <div className="new-session-group">
           <label htmlFor="new-session-dir" className="section-label">
-            Diretório de trabalho
+            {t('newSession.workingDir')}
           </label>
           <PlatformSelect
             id="new-session-dir"
-            ariaLabel="Diretório de trabalho"
+            ariaLabel={t('newSession.workingDir')}
             value={selectedChoice}
             options={directoryOptions}
             onChange={(value) => setChoice(value)}
@@ -165,18 +168,22 @@ export function NewSessionView(props: NewSessionViewProps) {
                 {folderPath ? (
                   folderPath
                 ) : (
-                  <span className="new-session-path-empty">Nenhuma pasta escolhida</span>
+                  <span className="new-session-path-empty">{t('newSession.noFolderChosen')}</span>
                 )}
               </div>
               <button type="button" className="btn" onClick={() => void pickFolder()}>
-                Escolher pasta
+                {t('newSession.chooseFolder')}
               </button>
             </div>
           )}
         </div>
 
-        <div className="new-session-group" role="radiogroup" aria-label="Provider">
-          <span className="section-label">Provider</span>
+        <div
+          className="new-session-group"
+          role="radiogroup"
+          aria-label={t('newSession.providerLabel')}
+        >
+          <span className="section-label">{t('newSession.providerLabel')}</span>
           {project !== null ? (
             <p className="new-session-lock-note">{t('newSession.projectInheritHint')}</p>
           ) : null}
@@ -204,11 +211,11 @@ export function NewSessionView(props: NewSessionViewProps) {
 
         <div className="new-session-group">
           <label htmlFor="new-session-account" className="section-label">
-            Conta
+            {t('newSession.account')}
           </label>
           <PlatformSelect
             id="new-session-account"
-            ariaLabel="Conta"
+            ariaLabel={t('newSession.account')}
             value={accountLabel ?? ''}
             options={accountOptions}
             disabled={project !== null}
@@ -224,7 +231,7 @@ export function NewSessionView(props: NewSessionViewProps) {
             id="new-session-prompt"
             className="field"
             rows={3}
-            placeholder="O que o agente deve fazer primeiro?"
+            placeholder={t('newSession.firstMessagePlaceholder')}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />

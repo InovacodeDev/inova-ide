@@ -22,12 +22,14 @@ import {
   usageWindowKey,
   usageWindowLabel,
 } from './footer-state';
+import { useI18n } from './I18nContext';
+import type { SupportedLocale } from './i18n';
 import { folderName } from './path-name';
 import { PlatformSelect } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_BINARY, PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { relativeTime } from './relative-time';
-import { STATUS_TEXT, type UsageState } from './UsageBar';
+import { accountStatusText, type UsageState } from './UsageBar';
 import type { WarningCall } from './useWarning';
 import './views-forms.css';
 
@@ -43,23 +45,29 @@ export interface AccountsViewProps {
   onAddAccount: (input: { provider: string; label: string }) => Promise<boolean>;
 }
 
-const WINDOW_LABEL = { session: 'sessão', weekly: 'semana', monthly: 'mês' } as const;
 const MAX_PROJECT_CHIPS = 3;
 
 function plural(input: { count: number; one: string; many: string }): string {
   return `${input.count} ${input.count === 1 ? input.one : input.many}`;
 }
 
-function fetchedText(fetchedAt: string): string | null {
-  const elapsed = relativeTime({ iso: fetchedAt, now: new Date() });
+function fetchedText(
+  fetchedAt: string,
+  locale: SupportedLocale,
+  t: ReturnType<typeof useI18n>['t'],
+): string | null {
+  const elapsed = relativeTime({ iso: fetchedAt, now: new Date(), locale });
   if (elapsed === '') return null;
-  if (elapsed === 'agora' || elapsed === 'ontem') return `atualizado ${elapsed}`;
-  return `atualizado há ${elapsed}`;
+  if (elapsed === 'agora' || elapsed === 'ontem' || elapsed === 'now' || elapsed === 'yesterday') {
+    return t('accounts.updatedElapsed', { elapsed });
+  }
+  return t('accounts.updatedAgo', { elapsed });
 }
 
 function AccountProjects({ paths }: { paths: readonly string[] }) {
+  const { t } = useI18n();
   if (paths.length === 0) {
-    return <span className="account-sub">Nenhum projeto</span>;
+    return <span className="account-sub">{t('accounts.noProjects')}</span>;
   }
   const shown = paths.slice(0, MAX_PROJECT_CHIPS);
   const rest = paths.length - shown.length;
@@ -86,6 +94,7 @@ function NewAccountForm(props: {
   onDone: () => void;
 }) {
   const { onAddAccount, onDone } = props;
+  const { t } = useI18n();
   const [provider, setProvider] = useState<ProviderId>('claude');
   const [label, setLabel] = useState('');
 
@@ -115,33 +124,34 @@ function NewAccountForm(props: {
   return (
     <form className="accounts-new" onSubmit={(event) => void submit(event)}>
       <label>
-        Provedor
+        {t('accounts.providerLabel')}
         <PlatformSelect
-          ariaLabel="Provedor"
+          ariaLabel={t('accounts.providerLabel')}
           value={provider}
           options={providerOptions}
           onChange={(next) => setProvider(next as ProviderId)}
         />
       </label>
       <label>
-        Rótulo no terminal
+        {t('accounts.labelField')}
         <input
           className="field"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="ex.: trabalho"
+          placeholder={t('accounts.labelPlaceholder')}
         />
       </label>
       <button type="submit" className="btn btn-primary" disabled={!label.trim() || submitting}>
-        Adicionar
+        {t('common.add')}
       </button>
     </form>
   );
 }
 
 function AccountUsage({ state }: { state: UsageState | undefined }) {
+  const { t, locale } = useI18n();
   if (!state || state.status === 'loading') {
-    return <span className="account-usage-text">carregando consumo…</span>;
+    return <span className="account-usage-text">{t('accounts.loadingUsage')}</span>;
   }
   if (state.status === 'error') {
     return <span className="account-usage-text account-bad">{state.message}</span>;
@@ -149,16 +159,27 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
   const { snapshot } = state;
   const windows = orderedUsageWindows(snapshot.windows);
   if (snapshot.source === 'unavailable' || windows.length === 0) {
-    return <span className="account-usage-text">Consumo indisponível</span>;
+    return <span className="account-usage-text">{t('accounts.usageUnavailable')}</span>;
   }
-  const fetched = fetchedText(snapshot.fetchedAt);
+  const fetched = fetchedText(snapshot.fetchedAt, locale, t);
+  const windowLabels = {
+    session: t('accounts.windowShort.session'),
+    weekly: t('accounts.windowShort.weekly'),
+    monthly: t('accounts.windowShort.monthly'),
+  };
+  const resetNow = t('accounts.resetNow');
   return (
     <div className="account-usage-block">
       <div className="account-usage">
         {windows.map((w) => {
           const percent = Math.max(0, Math.min(100, w.usedPercent));
-          const reset = formatResetIn({ resetsAt: w.resetsAt, now: new Date() });
+          const reset = formatResetIn({ resetsAt: w.resetsAt, now: new Date(), locale });
           const exact = formatResetDateTime(w.resetsAt);
+          const resetWhen = reset
+            ? reset === resetNow
+              ? resetNow
+              : t('accounts.renewsIn', { reset })
+            : null;
           return (
             <div key={usageWindowKey(w)} className="account-usage-window">
               <div className="usage-track">
@@ -169,8 +190,8 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
               </div>
               <div className="account-usage-text">
                 <span className="mono">{Math.round(percent)}%</span>{' '}
-                {usageWindowLabel({ window: w, labels: WINDOW_LABEL })}
-                {reset ? ` · renova ${reset === 'agora' ? 'agora' : `em ${reset}`}` : ''}
+                {usageWindowLabel({ window: w, labels: windowLabels })}
+                {resetWhen !== null ? t('accounts.renewsAt', { when: resetWhen }) : ''}
                 {exact ? <span className="account-wide-only"> ({exact})</span> : null}
               </div>
             </div>
@@ -183,6 +204,7 @@ function AccountUsage({ state }: { state: UsageState | undefined }) {
 }
 
 export function AccountsView(props: AccountsViewProps) {
+  const { t, locale } = useI18n();
   const {
     accounts,
     projects,
@@ -217,11 +239,8 @@ export function AccountsView(props: AccountsViewProps) {
       <div className="accounts-view">
         <div className="accounts-head">
           <div>
-            <h1>Contas e providers</h1>
-            <p>
-              Cada provider é um CLI oficial. Cada conta mantém o próprio login e o próprio limite
-              de uso.
-            </p>
+            <h1>{t('accounts.title')}</h1>
+            <p>{t('accounts.subtitle')}</p>
           </div>
           <button
             type="button"
@@ -230,16 +249,14 @@ export function AccountsView(props: AccountsViewProps) {
             onClick={() => setAdding((v) => !v)}
           >
             <PlusIcon size={14} />
-            Adicionar conta
+            {t('accounts.addAccount')}
           </button>
         </div>
         {adding ? (
           <NewAccountForm onAddAccount={onAddAccount} onDone={() => setAdding(false)} />
         ) : null}
         {groups.length === 0 ? (
-          <div className="accounts-empty">
-            Nenhuma conta ainda. Adicione uma conta para começar.
-          </div>
+          <div className="accounts-empty">{t('accounts.empty')}</div>
         ) : (
           <div className="accounts-list">
             {groups.map((group) => {
@@ -261,36 +278,44 @@ export function AccountsView(props: AccountsViewProps) {
                           {group.connected}/
                           {plural({
                             count: group.accounts.length,
-                            one: 'conta conectada',
-                            many: 'contas conectadas',
+                            one: t('accounts.connectedSingular'),
+                            many: t('accounts.connectedPlural'),
                           })}
                         </span>
                         <span>
-                          {plural({ count: groupProjects, one: 'projeto', many: 'projetos' })}
+                          {plural({
+                            count: groupProjects,
+                            one: t('accounts.projectSingular'),
+                            many: t('accounts.projectPlural'),
+                          })}
                         </span>
                       </div>
                     </div>
                     {health.kind === 'ok' ? (
                       <span className="accounts-health accounts-health-ok">
                         <CheckIcon size={14} />
-                        Saudável
+                        {t('accounts.healthy')}
                       </span>
                     ) : (
                       <span className="accounts-health accounts-health-bad">
                         <AlertIcon size={14} />
                         {health.kind === 'missing-cli'
-                          ? 'CLI não instalado'
-                          : plural({ count: health.count, one: 'pendência', many: 'pendências' })}
+                          ? t('status.account.binaryMissing')
+                          : plural({
+                              count: health.count,
+                              one: t('accounts.pendingSingular'),
+                              many: t('accounts.pendingPlural'),
+                            })}
                       </span>
                     )}
                   </summary>
                   <div className="accounts-scroll">
                     <div className="account-row account-row-head section-label">
-                      <span>Conta</span>
-                      <span className="account-projects-cell">Projetos</span>
-                      <span className="account-col-center">Status</span>
-                      <span className="account-col-center">Uso</span>
-                      <span className="account-col-center">Ações</span>
+                      <span>{t('accounts.colAccount')}</span>
+                      <span className="account-projects-cell">{t('accounts.colProjects')}</span>
+                      <span className="account-col-center">{t('accounts.colStatus')}</span>
+                      <span className="account-col-center">{t('accounts.colUsage')}</span>
+                      <span className="account-col-center">{t('accounts.colActions')}</span>
                     </div>
                     {group.accounts.map((account) => {
                       const paths = projects
@@ -308,7 +333,11 @@ export function AccountsView(props: AccountsViewProps) {
                                 <span className="mono">{account.label}</span>
                               ) : null}
                               <span className="account-narrow-only">
-                                {plural({ count: paths.length, one: 'projeto', many: 'projetos' })}
+                                {plural({
+                                  count: paths.length,
+                                  one: t('accounts.projectSingular'),
+                                  many: t('accounts.projectPlural'),
+                                })}
                               </span>
                             </div>
                           </div>
@@ -320,7 +349,7 @@ export function AccountsView(props: AccountsViewProps) {
                               className={`account-status-tag ${statusTagClass(account.status)}`}
                             >
                               <span className="dot" aria-hidden="true" />
-                              {STATUS_TEXT[account.status]}
+                              {accountStatusText(account.status, locale)}
                             </span>
                           </span>
                           <div className="account-usage-cell">
@@ -334,16 +363,16 @@ export function AccountsView(props: AccountsViewProps) {
                               onClick={() => onLogin(account)}
                             >
                               {loggingInLabel === account.label
-                                ? 'Conectando…'
+                                ? t('accounts.connecting')
                                 : account.status === 'logged-in' || account.status === 'expired'
-                                  ? 'Renovar login'
-                                  : 'Entrar'}
+                                  ? t('accounts.renewLogin')
+                                  : t('accounts.signIn')}
                             </button>
                             <button
                               type="button"
                               className="icon-btn"
-                              aria-label="Atualizar consumo"
-                              data-tooltip="Atualizar consumo desta conta"
+                              aria-label={t('accounts.refreshUsage')}
+                              data-tooltip={t('accounts.refreshUsageTooltip')}
                               onClick={() => onLoadUsage(account)}
                             >
                               <RefreshIcon size={14} />
@@ -351,8 +380,8 @@ export function AccountsView(props: AccountsViewProps) {
                             <button
                               type="button"
                               className="icon-btn"
-                              aria-label="Configurar skills, MCPs e plugins da conta"
-                              data-tooltip="Configurar skills, MCPs e plugins"
+                              aria-label={t('accounts.configureCapabilities')}
+                              data-tooltip={t('accounts.configureCapabilitiesTooltip')}
                               onClick={() => setConfiguring(account)}
                             >
                               <SettingsIcon size={14} />
@@ -360,8 +389,8 @@ export function AccountsView(props: AccountsViewProps) {
                             <button
                               type="button"
                               className="icon-btn"
-                              aria-label={`Deslogar e remover conta ${display}`}
-                              data-tooltip="Deslogar e remover conta"
+                              aria-label={t('accounts.removeAccountAria', { display })}
+                              data-tooltip={t('accounts.removeAccountTooltip')}
                               onClick={() => onRemove(account)}
                             >
                               <TrashIcon size={14} />

@@ -1,18 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatCostUsd } from '@inova/core/cost-tracking';
-import { EFFORT_LABEL, PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
+import { PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
 import type { AccountView, ComparisonDiffView, ProjectView } from '../shared/api';
-import type { ChatItem, ChatState } from './chat-reducer';
+import { INTERRUPTED_MESSAGE, type ChatItem, type ChatState } from './chat-reducer';
 import { ConfirmModal } from './ConfirmModal';
 import { CompareIcon, PlusIcon, RefreshIcon } from './icons';
 import { copyToClipboard } from './clipboard';
+import { useI18n } from './I18nContext';
 import { Markdown } from './Markdown';
+import { modeOptionText } from './mode-picker-state';
+import { defaultModelLabel, effortLabel, localizeModelOption } from './model-picker-state';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
-import { STATUS_LABEL, sessionStatus } from './session-status';
+import { sessionStatus, sessionStatusLabel } from './session-status';
 import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import { ToolCard } from './ToolCard';
 import './compare.css';
@@ -90,6 +93,7 @@ function SideConfigCard({
   modelDefaults: Settings['models'] | null;
   onChange: (next: CompareSideDraft) => void;
 }) {
+  const { t, locale } = useI18n();
   const account = accounts.find((item) => item.id === draft.accountId) ?? accounts[0];
   const provider = account?.provider ?? 'claude';
   const catalog = PROVIDER_MODELS[provider];
@@ -103,17 +107,20 @@ function SideConfigCard({
   }));
 
   const modelOptions: PlatformSelectOption[] = [
-    { value: '', label: catalog.defaultModelLabel },
-    ...catalog.models.map((m) => ({
-      value: m.id,
-      label: m.label,
-      ...(m.description ? { description: m.description } : {}),
-    })),
+    { value: '', label: defaultModelLabel(catalog, locale) },
+    ...catalog.models.map((m) => {
+      const localized = localizeModelOption(m, locale);
+      return {
+        value: m.id,
+        label: localized.label,
+        ...(localized.description ? { description: localized.description } : {}),
+      };
+    }),
   ];
 
   const effortOptions: PlatformSelectOption[] = catalog.efforts.map((level) => ({
     value: level,
-    label: EFFORT_LABEL[level],
+    label: effortLabel(level, locale),
   }));
   const shownEffort =
     modelDefaults === null
@@ -126,25 +133,33 @@ function SideConfigCard({
         }).effort;
 
   const defaultOption = modeCatalog.options.find((opt) => opt.id === modeCatalog.defaultMode);
+  const localizedDefaultMode = defaultOption
+    ? modeOptionText(provider, defaultOption, locale)
+    : null;
   const modeOptions: PlatformSelectOption[] = [
     {
       value: '',
-      label: defaultOption ? `Padrão (${defaultOption.label})` : 'Padrão',
+      label: localizedDefaultMode
+        ? t('picker.defaultLabel', { label: localizedDefaultMode.label })
+        : t('picker.defaultFallback'),
     },
-    ...modeCatalog.options.map((opt) => ({
-      value: opt.id,
-      label: opt.label,
-      description: opt.description,
-    })),
+    ...modeCatalog.options.map((opt) => {
+      const localized = modeOptionText(provider, opt, locale);
+      return {
+        value: opt.id,
+        label: localized.label,
+        description: localized.description,
+      };
+    }),
   ];
 
   return (
     <div className="compare-side-card">
       <div className="compare-side-title">{heading}</div>
       <div className="modal-field">
-        <span className="modal-field-label">Conta e provedor</span>
+        <span className="modal-field-label">{t('compare.accountAndProvider')}</span>
         <PlatformSelect
-          ariaLabel={`${heading} conta`}
+          ariaLabel={t('compare.sideAccountAria', { heading })}
           value={account?.id ?? ''}
           options={accountOptions}
           onChange={(nextId) =>
@@ -153,9 +168,9 @@ function SideConfigCard({
         />
       </div>
       <div className="modal-field">
-        <span className="modal-field-label">Modelo</span>
+        <span className="modal-field-label">{t('compare.modelLabel')}</span>
         <PlatformSelect
-          ariaLabel={`${heading} modelo`}
+          ariaLabel={t('compare.sideModelAria', { heading })}
           value={draft.model ?? ''}
           options={modelOptions}
           onChange={(value) => onChange({ ...draft, model: value === '' ? null : value })}
@@ -163,9 +178,9 @@ function SideConfigCard({
       </div>
       {catalog.efforts.length > 0 ? (
         <div className="modal-field">
-          <span className="modal-field-label">Esforço</span>
+          <span className="modal-field-label">{t('compare.effortLabel')}</span>
           <PlatformSelect
-            ariaLabel={`${heading} esforço`}
+            ariaLabel={t('compare.sideEffortAria', { heading })}
             value={shownEffort ?? ''}
             options={effortOptions}
             onChange={(value) => onChange({ ...draft, effort: value as EffortLevel })}
@@ -173,9 +188,9 @@ function SideConfigCard({
         </div>
       ) : null}
       <div className="modal-field">
-        <span className="modal-field-label">Modo</span>
+        <span className="modal-field-label">{t('compare.modeLabel')}</span>
         <PlatformSelect
-          ariaLabel={`${heading} modo`}
+          ariaLabel={t('compare.sideModeAria', { heading })}
           value={draft.mode ?? ''}
           options={modeOptions}
           onChange={(value) =>
@@ -204,6 +219,7 @@ function ComparisonColumn({
   onOpenSession: () => void;
   onWarn?: (message: string) => void;
 }) {
+  const { t, locale } = useI18n();
   const status = sessionStatus(chat);
   const items: readonly ChatItem[] = chat?.items ?? [];
   const lastVerification = [...items]
@@ -211,6 +227,15 @@ function ComparisonColumn({
     .find(
       (item): item is Extract<ChatItem, { type: 'verification' }> => item.type === 'verification',
     );
+  const verificationStatusText = lastVerification
+    ? lastVerification.status === 'passed'
+      ? t('compare.verify.passed')
+      : lastVerification.status === 'failed'
+        ? t('compare.verify.failed')
+        : lastVerification.status === 'skipped'
+          ? t('compare.verify.skipped')
+          : t('compare.verify.running')
+    : null;
 
   return (
     <section className="compare-col" aria-label={label}>
@@ -222,14 +247,14 @@ function ComparisonColumn({
           </span>
         </div>
         <div className="compare-col-metrics">
-          <span>{STATUS_LABEL[status]}</span>
+          <span>{sessionStatusLabel(status, locale)}</span>
           <span>{formatDuration(metrics?.durationMs)}</span>
           <span>{formatCostUsd(metrics?.costUsd)}</span>
         </div>
       </div>
       <div className="compare-col-body">
         {items.length === 0 ? (
-          <p className="hint">Aguardando resposta…</p>
+          <p className="hint">{t('compare.waitingReply')}</p>
         ) : (
           items.map((item) => {
             if (item.type === 'assistant') {
@@ -242,7 +267,7 @@ function ComparisonColumn({
                   item={item}
                   defaultOpen={false}
                   onCopyText={(text) =>
-                    void copyToClipboard({ text, onError: (message) => onWarn?.(message) })
+                    void copyToClipboard({ text, locale, onError: (message) => onWarn?.(message) })
                   }
                 />
               );
@@ -250,7 +275,9 @@ function ComparisonColumn({
             if (item.type === 'error') {
               return (
                 <div key={item.id} className="chat-error">
-                  {item.message}
+                  {item.message === INTERRUPTED_MESSAGE
+                    ? t('tool.interruptedMessage')
+                    : item.message}
                 </div>
               );
             }
@@ -260,20 +287,12 @@ function ComparisonColumn({
       </div>
       <div className="compare-col-footer">
         <span className="hint">
-          {lastVerification
-            ? `Verificação: ${
-                lastVerification.status === 'passed'
-                  ? 'aprovada'
-                  : lastVerification.status === 'failed'
-                    ? 'falhou'
-                    : lastVerification.status === 'skipped'
-                      ? 'cancelada'
-                      : 'executando'
-              }`
-            : 'Sem verificação'}
+          {verificationStatusText !== null
+            ? t('compare.verificationStatus', { status: verificationStatusText })
+            : t('compare.noVerification')}
         </span>
         <button type="button" className="btn btn-sm" onClick={onOpenSession}>
-          Abrir conversa
+          {t('compare.openSession')}
         </button>
       </div>
     </section>
@@ -281,6 +300,7 @@ function ComparisonColumn({
 }
 
 export function CompareView(props: CompareViewProps) {
+  const { t } = useI18n();
   const {
     projects,
     accounts,
@@ -421,7 +441,7 @@ export function CompareView(props: CompareViewProps) {
       <div className="compare-header">
         <div className="compare-title-row">
           <CompareIcon size={18} />
-          <h1 className="compare-title">Execução paralela comparativa</h1>
+          <h1 className="compare-title">{t('compare.title')}</h1>
         </div>
         <button
           type="button"
@@ -432,7 +452,7 @@ export function CompareView(props: CompareViewProps) {
           }}
         >
           <PlusIcon size={14} />
-          Nova comparação
+          {t('compare.newBtn')}
         </button>
       </div>
 
@@ -460,15 +480,13 @@ export function CompareView(props: CompareViewProps) {
 
       {activeGroup === null ? (
         projects.length === 0 || accounts.length < 2 ? (
-          <p className="hint">
-            Vincule um projeto e cadastre ao menos duas contas diferentes para comparar provedores.
-          </p>
+          <p className="hint">{t('compare.needAccountsHint')}</p>
         ) : (
           <>
             <div className="modal-field">
-              <span className="modal-field-label">Projeto</span>
+              <span className="modal-field-label">{t('compare.projectLabel')}</span>
               <PlatformSelect
-                ariaLabel="Projeto para comparação"
+                ariaLabel={t('compare.projectAria')}
                 value={effectiveProjectId}
                 options={projectOptions}
                 onChange={setProjectId}
@@ -476,14 +494,14 @@ export function CompareView(props: CompareViewProps) {
             </div>
             <div className="compare-setup-grid">
               <SideConfigCard
-                heading="Lado A"
+                heading={t('compare.sideA')}
                 draft={leftDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
                 onChange={setLeftDraft}
               />
               <SideConfigCard
-                heading="Lado B"
+                heading={t('compare.sideB')}
                 draft={rightDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
@@ -491,12 +509,12 @@ export function CompareView(props: CompareViewProps) {
               />
             </div>
             <div className="modal-field">
-              <span className="modal-field-label">Prompt único para ambos os worktrees</span>
+              <span className="modal-field-label">{t('compare.promptLabel')}</span>
               <textarea
                 className="field"
                 rows={4}
                 value={prompt}
-                placeholder="Descreva a tarefa a executar em paralelo nos dois worktrees…"
+                placeholder={t('compare.promptPlaceholder')}
                 onChange={(event) => setPrompt(event.target.value)}
               />
             </div>
@@ -513,7 +531,7 @@ export function CompareView(props: CompareViewProps) {
                 }
                 onClick={() => void launchComparison()}
               >
-                {launching ? 'Iniciando…' : 'Executar em paralelo'}
+                {launching ? t('compare.launching') : t('compare.runParallel')}
               </button>
             </div>
           </>
@@ -524,7 +542,7 @@ export function CompareView(props: CompareViewProps) {
             <div
               className="compare-tablist"
               role="tablist"
-              aria-label="Visualização da comparação"
+              aria-label={t('compare.viewAria')}
               onKeyDown={(event) =>
                 handleHorizontalTabListKeyDown({
                   event,
@@ -552,7 +570,7 @@ export function CompareView(props: CompareViewProps) {
                 className={tab === 'stream' ? 'btn btn-sm btn-primary' : 'btn btn-sm'}
                 onClick={() => setTab('stream')}
               >
-                Respostas lado a lado
+                {t('compare.tabStream')}
               </button>
               <button
                 type="button"
@@ -567,7 +585,7 @@ export function CompareView(props: CompareViewProps) {
                   }
                 }}
               >
-                Diff lado a lado
+                {t('compare.tabDiff')}
               </button>
             </div>
             {tab === 'diff' && activeGroup.left.worktree && activeGroup.right.worktree ? (
@@ -578,7 +596,7 @@ export function CompareView(props: CompareViewProps) {
                 onClick={() => void refreshDiff(activeGroup.groupId)}
               >
                 <RefreshIcon size={13} />
-                {loadingDiff ? 'Atualizando…' : 'Atualizar diff'}
+                {loadingDiff ? t('compare.refreshingDiff') : t('compare.refreshDiff')}
               </button>
             ) : null}
           </div>
@@ -586,7 +604,7 @@ export function CompareView(props: CompareViewProps) {
           {tab === 'stream' ? (
             <div className="compare-split-columns">
               <ComparisonColumn
-                label="Lado A"
+                label={t('compare.sideA')}
                 session={activeGroup.left}
                 account={accounts.find((item) => item.id === activeGroup.left.accountIdOverride)}
                 chat={chats[activeGroup.left.id]}
@@ -595,7 +613,7 @@ export function CompareView(props: CompareViewProps) {
                 onWarn={onWarn}
               />
               <ComparisonColumn
-                label="Lado B"
+                label={t('compare.sideB')}
                 session={activeGroup.right}
                 account={accounts.find((item) => item.id === activeGroup.right.accountIdOverride)}
                 chat={chats[activeGroup.right.id]}
@@ -607,23 +625,21 @@ export function CompareView(props: CompareViewProps) {
           ) : (
             <div className="compare-diff-list">
               {loadingDiff && !diffView ? (
-                <p className="hint">Calculando diffs nos worktrees…</p>
+                <p className="hint">{t('compare.computingDiffs')}</p>
               ) : !diffView && (!activeGroup.left.worktree || !activeGroup.right.worktree) ? (
-                <p className="hint">
-                  Os worktrees desta comparação já foram limpos após a aplicação do vencedor.
-                </p>
+                <p className="hint">{t('compare.worktreesCleaned')}</p>
               ) : !diffView || diffView.files.length === 0 ? (
-                <p className="hint">Nenhuma alteração registrada ainda em nenhum dos lados.</p>
+                <p className="hint">{t('compare.noSideChanges')}</p>
               ) : (
                 diffView.files.map((entry) => (
                   <div key={entry.path} className="compare-diff-file">
                     <div className="compare-diff-file-head mono">{entry.path}</div>
                     <div className="compare-diff-panes">
                       <pre className="compare-diff-pane mono">
-                        {entry.leftChanged ? entry.leftDiff : 'Sem alterações no Lado A'}
+                        {entry.leftChanged ? entry.leftDiff : t('compare.noLeftChanges')}
                       </pre>
                       <pre className="compare-diff-pane mono">
-                        {entry.rightChanged ? entry.rightDiff : 'Sem alterações no Lado B'}
+                        {entry.rightChanged ? entry.rightDiff : t('compare.noRightChanges')}
                       </pre>
                     </div>
                   </div>
@@ -640,7 +656,7 @@ export function CompareView(props: CompareViewProps) {
                   checked={cleanupWorktrees}
                   onChange={(event) => setCleanupWorktrees(event.target.checked)}
                 />
-                <span>Remover worktrees temporários após aplicar vencedor</span>
+                <span>{t('compare.cleanupCheckbox')}</span>
               </label>
               <div className="compare-resolve-actions">
                 <button
@@ -659,7 +675,7 @@ export function CompareView(props: CompareViewProps) {
                     void resolveWinner('left');
                   }}
                 >
-                  Aplicar vencedor A
+                  {t('compare.applyLeft')}
                 </button>
                 <button
                   type="button"
@@ -677,7 +693,7 @@ export function CompareView(props: CompareViewProps) {
                     void resolveWinner('right');
                   }}
                 >
-                  Aplicar vencedor B
+                  {t('compare.applyRight')}
                 </button>
               </div>
             </div>
@@ -686,9 +702,11 @@ export function CompareView(props: CompareViewProps) {
       )}
       {pendingWinner ? (
         <ConfirmModal
-          title="Aplicar vencedor e remover worktrees?"
-          description={`As alterações do ${pendingWinner === 'left' ? 'Lado A' : 'Lado B'} serão aplicadas no repositório principal e os dois worktrees temporários desta comparação serão removidos.`}
-          confirmLabel="Aplicar e remover"
+          title={t('compare.confirmTitle')}
+          description={t('compare.confirmDesc', {
+            side: pendingWinner === 'left' ? t('compare.sideA') : t('compare.sideB'),
+          })}
+          confirmLabel={t('compare.confirmBtn')}
           danger
           onCancel={() => setPendingWinner(null)}
           onConfirm={() => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useI18n } from './I18nContext';
 import { CloseIcon } from './icons';
 import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
@@ -20,6 +21,7 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  const { t } = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -60,8 +62,8 @@ export function ConfirmModal({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar confirmação"
-            data-tooltip="Fechar confirmação"
+            aria-label={t('confirm.closeLabel')}
+            data-tooltip={t('confirm.closeLabel')}
             data-shortcut="dismiss"
             onClick={onCancel}
           >
@@ -73,7 +75,7 @@ export function ConfirmModal({
         </div>
         <div className="modal-footer">
           <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             ref={confirmRef}

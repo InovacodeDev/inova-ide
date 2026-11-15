@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import type { ComposerFormat } from './composer-format';
+import type { TranslationKey } from './i18n';
 import {
   BoldIcon,
   ChevronDownIcon,
@@ -15,55 +16,71 @@ import {
   StrikethroughIcon,
   UnderlineIcon,
 } from './icons';
+import { useI18n } from './I18nContext';
 import type { ShortcutId } from './shortcuts';
 
 interface ToolbarAction {
   format: ComposerFormat;
-  label: string;
+  labelKey: TranslationKey;
   shortcutId?: ShortcutId;
   icon: ReactNode;
 }
 
 const INLINE_ACTIONS: readonly ToolbarAction[] = [
-  { format: 'bold', label: 'Negrito', shortcutId: 'format-bold', icon: <BoldIcon /> },
-  { format: 'italic', label: 'Itálico', shortcutId: 'format-italic', icon: <ItalicIcon /> },
+  {
+    format: 'bold',
+    labelKey: 'composer.format.bold',
+    shortcutId: 'format-bold',
+    icon: <BoldIcon />,
+  },
+  {
+    format: 'italic',
+    labelKey: 'composer.format.italic',
+    shortcutId: 'format-italic',
+    icon: <ItalicIcon />,
+  },
   {
     format: 'underline',
-    label: 'Sublinhado',
+    labelKey: 'composer.format.underline',
     shortcutId: 'format-underline',
     icon: <UnderlineIcon />,
   },
   {
     format: 'strike',
-    label: 'Tachado',
+    labelKey: 'composer.format.strike',
     shortcutId: 'format-strike',
     icon: <StrikethroughIcon />,
   },
 ];
 
 const LIST_ACTIONS: readonly ToolbarAction[] = [
-  { format: 'link', label: 'Link', shortcutId: 'format-link', icon: <LinkIcon /> },
-  { format: 'ordered', label: 'Lista numerada', icon: <ListOrderedIcon /> },
-  { format: 'bullet', label: 'Lista com marcadores', icon: <ListBulletIcon /> },
+  {
+    format: 'link',
+    labelKey: 'composer.format.linkShort',
+    shortcutId: 'format-link',
+    icon: <LinkIcon />,
+  },
+  { format: 'ordered', labelKey: 'composer.format.ol', icon: <ListOrderedIcon /> },
+  { format: 'bullet', labelKey: 'composer.format.ul', icon: <ListBulletIcon /> },
 ];
 
 const BLOCK_ACTIONS: readonly ToolbarAction[] = [
-  { format: 'quote', label: 'Citação', icon: <QuoteIcon /> },
+  { format: 'quote', labelKey: 'composer.format.blockquote', icon: <QuoteIcon /> },
   {
     format: 'code',
-    label: 'Código inline',
+    labelKey: 'composer.format.code',
     shortcutId: 'format-code',
     icon: <InlineCodeIcon />,
   },
-  { format: 'codeblock', label: 'Bloco de código', icon: <CodeBlockIcon /> },
-  { format: 'divider', label: 'Divisor', icon: <DividerIcon /> },
+  { format: 'codeblock', labelKey: 'composer.format.codeBlock', icon: <CodeBlockIcon /> },
+  { format: 'divider', labelKey: 'composer.format.divider', icon: <DividerIcon /> },
 ];
 
-const PARAGRAPH_OPTIONS: readonly { format: ComposerFormat; label: string }[] = [
-  { format: 'paragraph', label: 'Texto normal' },
-  { format: 'heading1', label: 'Título 1' },
-  { format: 'heading2', label: 'Título 2' },
-  { format: 'heading3', label: 'Título 3' },
+const PARAGRAPH_OPTIONS: readonly { format: ComposerFormat; labelKey: TranslationKey }[] = [
+  { format: 'paragraph', labelKey: 'composer.format.normalText' },
+  { format: 'heading1', labelKey: 'composer.format.heading1' },
+  { format: 'heading2', labelKey: 'composer.format.heading2' },
+  { format: 'heading3', labelKey: 'composer.format.heading3' },
 ];
 
 export interface ComposerToolbarProps {
@@ -78,28 +95,33 @@ function ToolbarGroup({
   active,
   onFormat,
 }: ComposerToolbarProps & { actions: readonly ToolbarAction[] }) {
+  const { t } = useI18n();
   return (
     <>
-      {actions.map((action) => (
-        <button
-          key={action.format}
-          type="button"
-          className="chat-format-btn"
-          aria-label={action.label}
-          aria-pressed={active.has(action.format)}
-          data-tooltip={action.label}
-          data-shortcut={action.shortcutId}
-          onMouseDown={keepSelection}
-          onClick={() => onFormat(action.format)}
-        >
-          {action.icon}
-        </button>
-      ))}
+      {actions.map((action) => {
+        const label = t(action.labelKey);
+        return (
+          <button
+            key={action.format}
+            type="button"
+            className="chat-format-btn"
+            aria-label={label}
+            aria-pressed={active.has(action.format)}
+            data-tooltip={label}
+            data-shortcut={action.shortcutId}
+            onMouseDown={keepSelection}
+            onClick={() => onFormat(action.format)}
+          >
+            {action.icon}
+          </button>
+        );
+      })}
     </>
   );
 }
 
 function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active' | 'onFormat'>) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -122,14 +144,15 @@ function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active'
     };
   }, [open]);
 
+  const menuLabel = t('composer.format.paragraphMenu');
   return (
     <div className="chat-format-menu" ref={containerRef}>
       <button
         type="button"
         className="chat-format-btn chat-format-btn-wide"
         aria-pressed={PARAGRAPH_OPTIONS.some((option) => active.has(option.format))}
-        aria-label="Estilo do parágrafo"
-        data-tooltip="Estilo do parágrafo"
+        aria-label={menuLabel}
+        data-tooltip={menuLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         onMouseDown={keepSelection}
@@ -153,7 +176,7 @@ function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active'
                 setOpen(false);
               }}
             >
-              {option.label}
+              {t(option.labelKey)}
             </button>
           ))}
         </div>
@@ -163,8 +186,9 @@ function ParagraphMenu({ active, onFormat }: Pick<ComposerToolbarProps, 'active'
 }
 
 export function ComposerToolbar({ active, onFormat }: ComposerToolbarProps) {
+  const { t } = useI18n();
   return (
-    <div className="chat-format-toolbar" role="toolbar" aria-label="Formatação da mensagem">
+    <div className="chat-format-toolbar" role="toolbar" aria-label={t('composer.toolbarAria')}>
       <ToolbarGroup actions={INLINE_ACTIONS} active={active} onFormat={onFormat} />
       <ParagraphMenu active={active} onFormat={onFormat} />
       <span className="chat-format-sep" aria-hidden="true" />

@@ -1,18 +1,17 @@
 import type { CapabilityItem, CapabilityListing } from '../shared/api';
 import { applyModeLabel } from './capabilities-state';
+import { useI18n } from './I18nContext';
 import { Switch } from './settings-controls';
 import { formatTokens } from './token-format';
 import { capabilityKey } from './useCapabilities';
 import './capabilities.css';
 
-const TOKENS_TOOLTIP =
-  'Tamanho das definições. Com a busca de ferramentas, só os nomes entram em cada mensagem.';
-
 export function CostSummary({ cost }: { cost: NonNullable<CapabilityListing['cost']> }) {
+  const { t } = useI18n();
   const rows = [
-    { label: 'Carregado em cada mensagem', value: cost.loadedTokens },
-    { label: 'Instruções dos servidores', value: cost.instructionTokens },
-    { label: 'Adiado (não conta por mensagem)', value: cost.deferredTokens },
+    { label: t('capabilities.costLoaded'), value: cost.loadedTokens },
+    { label: t('capabilities.costInstructions'), value: cost.instructionTokens },
+    { label: t('capabilities.costDeferred'), value: cost.deferredTokens },
   ];
   return (
     <div className="capabilities-cost">
@@ -34,11 +33,12 @@ export function CapabilityRow(props: {
   onToggle: (item: CapabilityItem, enabled: boolean) => void;
 }) {
   const { item, checked, pending, locked, onToggle } = props;
+  const { locale, t } = useI18n();
   const unsupported = item.applyMode === 'unsupported';
   const inputId = `capability-${capabilityKey(item)}`;
   const detail = [item.group, item.description].filter(Boolean).join(' · ');
   const tokenTooltip =
-    item.kind === 'mcp' || item.kind === 'connector' ? TOKENS_TOOLTIP : undefined;
+    item.kind === 'mcp' || item.kind === 'connector' ? t('capabilities.tokensTooltip') : undefined;
   return (
     <li className="capabilities-row">
       <label className="capabilities-name" htmlFor={inputId}>
@@ -48,7 +48,7 @@ export function CapabilityRow(props: {
           <span className="sr-only">{item.unsupportedReason}</span>
         ) : null}
       </label>
-      <span className="capabilities-mode">{applyModeLabel(item.applyMode)}</span>
+      <span className="capabilities-mode">{applyModeLabel(item.applyMode, locale)}</span>
       {item.tokens !== null ? (
         <span className="capabilities-tokens mono" data-tooltip={tokenTooltip}>
           {formatTokens(item.tokens)}

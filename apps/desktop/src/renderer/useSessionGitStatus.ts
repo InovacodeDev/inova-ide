@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WorktreeStatusView } from '../shared/api';
+import { translate, type SupportedLocale } from './i18n';
 
 export interface SessionGitStatusState {
   status: WorktreeStatusView | null;
@@ -12,8 +13,9 @@ export function useSessionGitStatus(input: {
   sessionId: string;
   running?: boolean;
   revision?: number;
+  locale?: SupportedLocale;
 }): SessionGitStatusState {
-  const { sessionId, running = false, revision = 0 } = input;
+  const { sessionId, running = false, revision = 0, locale = 'pt-BR' } = input;
   const [status, setStatus] = useState<WorktreeStatusView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -21,6 +23,8 @@ export function useSessionGitStatus(input: {
   const inflightRef = useRef(false);
   const pendingRef = useRef(false);
   const activeSessionRef = useRef(sessionId);
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -51,7 +55,7 @@ export function useSessionGitStatus(input: {
     } catch (failure: unknown) {
       if (!aliveRef.current || activeSessionRef.current !== requestedSessionId) return;
       console.error('inova: failed to load session git status', failure);
-      setError('Erro inesperado.');
+      setError(translate(localeRef.current, 'alerts.unexpected'));
     } finally {
       inflightRef.current = false;
       if (aliveRef.current) setLoading(false);

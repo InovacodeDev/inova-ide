@@ -3,9 +3,13 @@ import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/
 import { CloseIcon } from './icons';
 import { useI18n } from './I18nContext';
 import { openModalCount } from './modal-layers';
-import { SETTINGS_SECTIONS, moveSection, type SettingsSectionId } from './settings-sections';
 import {
-  AppearanceSection,
+  SETTINGS_SECTIONS,
+  moveSection,
+  settingsSectionLabel,
+  type SettingsSectionId,
+} from './settings-sections';
+import {
   GeneralSection,
   NotificationsSection,
   SessionsSection,
@@ -30,7 +34,7 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { settings, defaultModes, isMac, call, onUpdate, onSetDefaultMode, onClose } = props;
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [active, setActive] = useState<SettingsSectionId>('general');
   const cardRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -61,7 +65,7 @@ export function SettingsModal(props: SettingsModalProps) {
   };
 
   const panels: Record<SettingsSectionId, ReactNode> = {
-    general: <GeneralSection call={call} />,
+    general: <GeneralSection settings={settings} onUpdate={onUpdate} call={call} />,
     models: (
       <ModelsSection
         settings={settings}
@@ -70,7 +74,6 @@ export function SettingsModal(props: SettingsModalProps) {
         onSetDefaultMode={onSetDefaultMode}
       />
     ),
-    appearance: <AppearanceSection settings={settings} onUpdate={onUpdate} />,
     sessions: <SessionsSection settings={settings} onUpdate={onUpdate} />,
     notifications: <NotificationsSection settings={settings} onUpdate={onUpdate} call={call} />,
     voice: <VoiceSection settings={settings} onUpdate={onUpdate} call={call} />,
@@ -110,7 +113,7 @@ export function SettingsModal(props: SettingsModalProps) {
             className="settings-nav"
             role="tablist"
             aria-orientation="vertical"
-            aria-label="Seções das configurações"
+            aria-label={t('settings.navLabel')}
             onKeyDown={onNavKeyDown}
           >
             {SETTINGS_SECTIONS.map((section) => (
@@ -129,7 +132,7 @@ export function SettingsModal(props: SettingsModalProps) {
                 }
                 onClick={() => setActive(section.id)}
               >
-                {section.label}
+                {settingsSectionLabel(section.id, locale)}
               </button>
             ))}
           </div>
@@ -142,7 +145,7 @@ export function SettingsModal(props: SettingsModalProps) {
               className="settings-panel"
               hidden={section.id !== active}
             >
-              <h3 className="settings-panel-title">{section.label}</h3>
+              <h3 className="settings-panel-title">{settingsSectionLabel(section.id, locale)}</h3>
               {panels[section.id]}
             </div>
           ))}

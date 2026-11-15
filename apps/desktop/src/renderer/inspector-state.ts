@@ -1,4 +1,6 @@
 import type { SubagentSnapshot } from '@inova/core/chat-types';
+import type { SupportedLocale } from '@inova/core/types';
+import { translate } from './i18n';
 
 export type InspectorTabId = 'context' | 'changes' | 'subagents' | 'session';
 
@@ -42,7 +44,9 @@ export function inspectorTabs(input: {
   subagents?: readonly SubagentSnapshot[];
   worktreeBranch?: string | null;
   changedFilesCount?: number;
+  locale?: SupportedLocale;
 }): InspectorTabMeta[] {
+  const locale = input.locale ?? 'pt-BR';
   const counts = subagentSummaryCounts(input.subagents ?? []);
   const subagentBadge =
     counts.total === 0
@@ -52,13 +56,17 @@ export function inspectorTabs(input: {
         : String(counts.total);
   const changesCount = input.changedFilesCount ?? 0;
   return [
-    { id: 'context', label: 'Contexto', badge: null },
+    { id: 'context', label: translate(locale, 'details.tab.context'), badge: null },
     {
       id: 'changes',
-      label: 'Git',
+      label: translate(locale, 'details.tab.changes'),
       badge: changesCount > 0 ? String(changesCount) : null,
     },
-    { id: 'subagents', label: 'Subagentes', badge: subagentBadge },
-    { id: 'session', label: 'Sessão', badge: input.worktreeBranch ? 'wt' : null },
+    { id: 'subagents', label: translate(locale, 'details.tab.subagents'), badge: subagentBadge },
+    {
+      id: 'session',
+      label: translate(locale, 'details.tab.session'),
+      badge: input.worktreeBranch ? 'wt' : null,
+    },
   ];
 }

@@ -1,4 +1,4 @@
-import type { Settings, VoiceModelId } from '@inova/core/types';
+import type { Settings, SupportedLocale, VoiceModelId } from '@inova/core/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DICTATION_INTERIM_MS,
@@ -7,6 +7,7 @@ import {
   encodePcm16,
   resolveDictationLanguage,
 } from './dictation';
+import { translate } from './i18n';
 
 export type DictationPhase =
   'idle' | 'checking' | 'needs-model' | 'downloading' | 'recording' | 'transcribing';
@@ -33,14 +34,13 @@ interface Capture {
   maxTimer: ReturnType<typeof setTimeout>;
 }
 
-const MIC_DENIED = 'Acesso ao microfone negado. Libere o microfone nas configurações do sistema.';
-const MIC_FAILED = 'Não foi possível abrir o microfone.';
 const BUFFER_SIZE = 4096;
 export const ANALYSER_FFT_SIZE = 512;
 
 export function useDictation(input: {
   hints: readonly string[];
   language?: Settings['voice']['language'];
+  locale?: SupportedLocale;
   onText: (text: string) => void;
 }): Dictation {
   const [phase, setPhaseState] = useState<DictationPhase>('idle');
@@ -105,7 +105,8 @@ export function useDictation(input: {
       });
     } catch (cause: unknown) {
       const denied = cause instanceof DOMException && cause.name === 'NotAllowedError';
-      setError(denied ? MIC_DENIED : MIC_FAILED);
+      const locale = inputRef.current.locale ?? 'pt-BR';
+      setError(translate(locale, denied ? 'dictation.micDenied' : 'dictation.micFailed'));
       setPhase('idle');
       return;
     }
@@ -151,7 +152,7 @@ export function useDictation(input: {
       return;
     }
     if (!status.value.binary) {
-      setError('Transcrição indisponível: whisper-cli não encontrado nesta instalação.');
+      setError(translate(inputRef.current.locale ?? 'pt-BR', 'dictation.whisperMissing'));
       setPhase('idle');
       return;
     }

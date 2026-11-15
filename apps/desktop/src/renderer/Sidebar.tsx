@@ -30,7 +30,7 @@ import {
 import { ProviderBadge } from './ProviderBadge';
 import { unreadInboxCount } from './inbox-state';
 import { relativeTime } from './relative-time';
-import { STATUS_LABEL, type SessionStatus } from './session-status';
+import { sessionStatusLabel, type SessionStatus } from './session-status';
 import {
   SESSION_LIMIT,
   buildSessionTree,
@@ -222,6 +222,7 @@ interface TitleEditorProps {
 }
 
 function TitleEditor({ initial, onSave, onCancel }: TitleEditorProps) {
+  const { t } = useI18n();
   const [value, setValue] = useState(initial);
   const settled = useRef(false);
 
@@ -236,7 +237,7 @@ function TitleEditor({ initial, onSave, onCancel }: TitleEditorProps) {
   return (
     <input
       className="session-rename"
-      aria-label="Renomear sessão"
+      aria-label={t('sidebar.renameInputLabel')}
       value={value}
       autoFocus
       onChange={(e) => setValue(e.target.value)}
@@ -254,12 +255,13 @@ function folderName(path: string): string {
 }
 
 function StatusLine({ status }: { status: SessionStatus }) {
+  const { locale } = useI18n();
   if (status === 'idle') return null;
   if (status === 'done') {
     return (
       <span className="session-status session-status-done">
         <CheckIcon size={12} />
-        {STATUS_LABEL.done}
+        {sessionStatusLabel('done', locale)}
       </span>
     );
   }
@@ -267,7 +269,7 @@ function StatusLine({ status }: { status: SessionStatus }) {
   return (
     <span className={`session-status session-status-${status}`}>
       <span className={running ? 'dot pulse' : 'dot'} />
-      {STATUS_LABEL[status]}
+      {sessionStatusLabel(status, locale)}
     </span>
   );
 }
@@ -365,7 +367,9 @@ function SessionRow(props: SessionRowProps) {
           >
             <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
             <span className="session-text">
-              {isSubsession ? <span className="session-kind-sub">Subsessão</span> : null}
+              {isSubsession ? (
+                <span className="session-kind-sub">{t('sidebar.subsessionBadge')}</span>
+              ) : null}
               <span className="session-title">{session.title}</span>
               <StatusLine status={statusOf(session.id)} />
             </span>
@@ -595,10 +599,11 @@ export function Sidebar(props: SidebarProps) {
   );
 
   const unreadCount = unreadInboxCount(inboxItems);
+  const unreadUnit = unreadCount === 1 ? t('sidebar.unreadSingular') : t('sidebar.unreadPlural');
 
   if (collapsed) {
     return (
-      <nav className="sidebar-rail" aria-label="Principal">
+      <nav className="sidebar-rail" aria-label={t('sidebar.ariaLabel')}>
         <button
           type="button"
           className="sidebar-rail-item"
@@ -629,8 +634,8 @@ export function Sidebar(props: SidebarProps) {
           <button
             type="button"
             className="sidebar-rail-item sidebar-rail-inbox"
-            aria-label={`Caixa de entrada (${unreadCount} não ${unreadCount === 1 ? 'lida' : 'lidas'})`}
-            data-tooltip={`Caixa de entrada: ${unreadCount} não ${unreadCount === 1 ? 'lida' : 'lidas'}`}
+            aria-label={t('sidebar.inboxUnreadAria', { count: unreadCount, unit: unreadUnit })}
+            data-tooltip={t('sidebar.inboxUnreadTooltip', { count: unreadCount, unit: unreadUnit })}
             onClick={onToggleCollapsed}
           >
             <InboxIcon size={16} />
@@ -640,8 +645,8 @@ export function Sidebar(props: SidebarProps) {
         <button
           type="button"
           className="sidebar-rail-item"
-          aria-label="Expandir barra lateral"
-          data-tooltip="Expandir barra lateral"
+          aria-label={t('sidebar.expand')}
+          data-tooltip={t('sidebar.expand')}
           onClick={onToggleCollapsed}
         >
           <SidebarExpandIcon size={16} />
@@ -652,7 +657,7 @@ export function Sidebar(props: SidebarProps) {
 
   return (
     <>
-      <nav className="sidebar" aria-label="Principal">
+      <nav className="sidebar" aria-label={t('sidebar.ariaLabel')}>
         <div className="sidebar-top">
           <button
             className="btn btn-primary sidebar-new"
@@ -666,8 +671,8 @@ export function Sidebar(props: SidebarProps) {
           <button
             type="button"
             className="sidebar-collapse"
-            aria-label="Recolher barra lateral"
-            data-tooltip="Recolher barra lateral"
+            aria-label={t('sidebar.collapse')}
+            data-tooltip={t('sidebar.collapse')}
             onClick={onToggleCollapsed}
           >
             <SidebarCollapseIcon size={16} />
@@ -696,9 +701,7 @@ export function Sidebar(props: SidebarProps) {
           />
         ) : null}
         <div className="sidebar-projects">
-          {projects.length === 0 && (
-            <p className="session-empty">Nenhum projeto vinculado. Crie uma sessão para começar.</p>
-          )}
+          {projects.length === 0 && <p className="session-empty">{t('sidebar.noProjects')}</p>}
           {projects.map((project) => (
             <ProjectSection
               key={project.id}
@@ -730,14 +733,21 @@ export function Sidebar(props: SidebarProps) {
       </nav>
       {pendingConfirm?.kind === 'delete-session' && (
         <ConfirmModal
-          title={pendingConfirm.session.parentId !== null ? 'Excluir subsessão' : 'Excluir sessão'}
-          description={
+          title={
             pendingConfirm.session.parentId !== null
-              ? `Excluir a subsessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas?`
-              : `Excluir a sessão "${pendingConfirm.session.title}" e todas as subsessões vinculadas?`
+              ? t('sidebar.deleteSubsessionTitle')
+              : t('sidebar.deleteSessionTitle')
           }
+          description={t(
+            pendingConfirm.session.parentId !== null
+              ? 'sidebar.deleteSubsessionDesc'
+              : 'sidebar.deleteSessionDesc',
+            { title: pendingConfirm.session.title },
+          )}
           confirmLabel={
-            pendingConfirm.session.parentId !== null ? 'Excluir subsessão' : 'Excluir sessão'
+            pendingConfirm.session.parentId !== null
+              ? t('sidebar.deleteSubsessionTitle')
+              : t('sidebar.deleteSessionTitle')
           }
           danger
           onCancel={() => setPendingConfirm(null)}

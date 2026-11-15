@@ -1,15 +1,24 @@
+import type { SupportedLocale } from '@inova/core/types';
+import { translate } from './i18n';
+
 export type SettingsSectionId =
-  'general' | 'models' | 'appearance' | 'sessions' | 'notifications' | 'voice' | 'shortcuts';
+  'general' | 'models' | 'sessions' | 'notifications' | 'voice' | 'shortcuts';
 
 export const SETTINGS_SECTIONS: readonly { id: SettingsSectionId; label: string }[] = [
   { id: 'general', label: 'Geral' },
   { id: 'models', label: 'Modelos' },
-  { id: 'appearance', label: 'Aparência' },
   { id: 'sessions', label: 'Sessões' },
   { id: 'notifications', label: 'Notificações' },
   { id: 'voice', label: 'Voz' },
   { id: 'shortcuts', label: 'Atalhos' },
 ];
+
+export function settingsSectionLabel(
+  id: SettingsSectionId,
+  locale: SupportedLocale = 'pt-BR',
+): string {
+  return translate(locale, `settings.section.${id}`);
+}
 
 export function moveSection(input: {
   current: SettingsSectionId;

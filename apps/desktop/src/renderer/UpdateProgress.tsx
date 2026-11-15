@@ -1,4 +1,5 @@
 import type { UpdateInstallStage } from '../shared/api';
+import { useI18n } from './I18nContext';
 import { installStageView } from './update-state';
 import './update.css';
 
@@ -8,8 +9,12 @@ interface UpdateProgressProps {
 }
 
 export function UpdateProgress({ latest, stage }: UpdateProgressProps) {
-  const { label, percent } = installStageView(stage);
-  const title = latest === null ? 'Instalando atualização' : `Instalando a versão v${latest}`;
+  const { locale, t } = useI18n();
+  const { label, percent } = installStageView(stage, locale);
+  const title =
+    latest === null
+      ? t('update.installingGeneric')
+      : t('update.installingVersion', { version: latest });
 
   return (
     <div className="update-toast update-progress" role="status" aria-live="polite">
@@ -28,9 +33,7 @@ export function UpdateProgress({ latest, stage }: UpdateProgressProps) {
       >
         <div className="update-progress-fill" style={{ width: `${percent}%` }} />
       </div>
-      <span className="update-progress-hint">
-        O app reinicia sozinho quando a instalação terminar.
-      </span>
+      <span className="update-progress-hint">{t('update.restartHint')}</span>
     </div>
   );
 }

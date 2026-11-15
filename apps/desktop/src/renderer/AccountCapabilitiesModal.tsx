@@ -5,6 +5,7 @@ import { CapabilityRow, CostSummary } from './CapabilityRow';
 import { CapabilityTabs } from './CapabilityTabs';
 import { ConfirmModal } from './ConfirmModal';
 import { CloseIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { capabilityKey, useCapabilities } from './useCapabilities';
 import { useDialogFocus } from './useDialogFocus';
@@ -12,16 +13,13 @@ import type { WarningCall } from './useWarning';
 import './modal.css';
 import './capabilities.css';
 
-const CONNECTORS_WARNING =
-  'As instruções de um conector só saem do contexto quando todos os conectores estão desligados.';
-const GLOBAL_CONFIRM = 'Esta mudança afeta todas as contas OpenCode e o OpenCode fora do Inova.';
-
 export function AccountCapabilitiesModal(props: {
   account: AccountView;
   call: WarningCall;
   onClose: () => void;
 }) {
   const { account, call, onClose } = props;
+  const { t } = useI18n();
   const { listing, loading, pendingKey, toggle } = useCapabilities({
     accountLabel: account.label,
     call,
@@ -73,15 +71,20 @@ export function AccountCapabilitiesModal(props: {
         <div className="modal-header">
           <div className="modal-title-group">
             <h2 id="capabilities-title" className="modal-title">
-              Configurar conta · {accountDisplayName(account)} ({PROVIDER_NAME[account.provider]})
+              {t('capabilities.title', {
+                label: accountDisplayName(account),
+                provider: PROVIDER_NAME[account.provider],
+              })}
             </h2>
-            {loading && listing ? <span className="modal-subtitle">Atualizando…</span> : null}
+            {loading && listing ? (
+              <span className="modal-subtitle">{t('common.updating')}</span>
+            ) : null}
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar"
-            data-tooltip="Fechar"
+            aria-label={t('capabilities.close')}
+            data-tooltip={t('common.close')}
             onClick={onClose}
           >
             <CloseIcon size={15} />
@@ -90,10 +93,10 @@ export function AccountCapabilitiesModal(props: {
         <div className="capabilities-body">
           {!listing ? (
             <p className="capabilities-empty">
-              {loading ? 'Carregando…' : 'Não foi possível carregar os itens.'}
+              {loading ? t('common.loading') : t('capabilities.loadFailed')}
             </p>
           ) : activeKind === null ? (
-            <p className="capabilities-empty">Este provider não expõe itens configuráveis.</p>
+            <p className="capabilities-empty">{t('capabilities.noItems')}</p>
           ) : (
             <>
               <CapabilityTabs
@@ -106,7 +109,7 @@ export function AccountCapabilitiesModal(props: {
               />
               {showCost && listing.cost ? <CostSummary cost={listing.cost} /> : null}
               {activeKind === 'connector' ? (
-                <p className="capabilities-warning">{CONNECTORS_WARNING}</p>
+                <p className="capabilities-warning">{t('capabilities.connectorsWarning')}</p>
               ) : null}
               {category?.error ? <p className="capabilities-error">{category.error}</p> : null}
               <ul className="capabilities-list">
@@ -124,15 +127,13 @@ export function AccountCapabilitiesModal(props: {
             </>
           )}
         </div>
-        <div className="modal-footer capabilities-footer">
-          As mudanças valem a partir da próxima mensagem.
-        </div>
+        <div className="modal-footer capabilities-footer">{t('capabilities.footerNote')}</div>
       </div>
       {confirming ? (
         <ConfirmModal
-          title="Mudança global"
-          description={GLOBAL_CONFIRM}
-          confirmLabel="Confirmar"
+          title={t('capabilities.confirmGlobalTitle')}
+          description={t('capabilities.confirmGlobal')}
+          confirmLabel={t('common.confirm')}
           onCancel={() => setConfirming(null)}
           onConfirm={() => {
             const { item, enabled } = confirming;

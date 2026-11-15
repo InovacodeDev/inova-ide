@@ -1,6 +1,7 @@
 import type { UsageWindow } from '@inova/core/chat-types';
-import type { ProviderId } from '@inova/core/types';
+import type { ProviderId, SupportedLocale } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
+import { translate } from './i18n';
 
 export interface ProviderGroup {
   provider: ProviderId;
@@ -86,12 +87,16 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-export function formatResetIn(input: { resetsAt: string | null; now: Date }): string | null {
+export function formatResetIn(input: {
+  resetsAt: string | null;
+  now: Date;
+  locale?: SupportedLocale;
+}): string | null {
   if (input.resetsAt === null) return null;
   const target = Date.parse(input.resetsAt);
   if (Number.isNaN(target)) return null;
   const totalMinutes = Math.floor((target - input.now.getTime()) / 60_000);
-  if (totalMinutes <= 0) return 'agora';
+  if (totalMinutes <= 0) return translate(input.locale ?? 'pt-BR', 'accounts.resetNow');
   const days = Math.floor(totalMinutes / (24 * 60));
   const restMinutes = totalMinutes % (24 * 60);
   const hours = Math.floor(restMinutes / 60);

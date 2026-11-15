@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import { PlusIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
-import { STATUS_LABEL, type SessionStatus } from './session-status';
+import { sessionStatusLabel, type SessionStatus } from './session-status';
 import './views.css';
 
 export interface AgentCardData {
@@ -23,15 +24,9 @@ export interface AgentsViewProps {
 
 type Filter = 'all' | SessionStatus;
 
-const STATUS_FILTERS: { id: SessionStatus; label: string }[] = [
-  { id: 'running', label: 'Executando' },
-  { id: 'done', label: 'Concluídos' },
-  { id: 'error', label: 'Erro' },
-  { id: 'idle', label: 'Ociosos' },
-];
-
 export function AgentsView(props: AgentsViewProps) {
   const { agents, onOpen, onNewSession } = props;
+  const { locale, t } = useI18n();
   const [filter, setFilter] = useState<Filter>('all');
 
   if (agents.length === 0) {
@@ -39,9 +34,9 @@ export function AgentsView(props: AgentsViewProps) {
       <div className="view-scroll">
         <div className="agents-view">
           <div className="agents-empty">
-            <p>Nenhuma sessão aberta.</p>
+            <p>{t('agents.emptyOpen')}</p>
             <button type="button" className="btn btn-primary" onClick={onNewSession}>
-              Nova sessão
+              {t('palette.newSessionItem')}
             </button>
           </div>
         </div>
@@ -50,9 +45,15 @@ export function AgentsView(props: AgentsViewProps) {
   }
 
   const countOf = (status: SessionStatus) => agents.filter((a) => a.status === status).length;
+  const statusFilters: { id: SessionStatus; label: string }[] = [
+    { id: 'running', label: t('status.running') },
+    { id: 'done', label: t('agents.filterDone') },
+    { id: 'error', label: t('status.error') },
+    { id: 'idle', label: t('agents.filterIdle') },
+  ];
   const filters = [
-    { id: 'all' as const, label: 'Todos', count: agents.length },
-    ...STATUS_FILTERS.map((f) => ({ ...f, count: countOf(f.id) })).filter((f) => f.count > 0),
+    { id: 'all' as const, label: t('agents.filterAll'), count: agents.length },
+    ...statusFilters.map((f) => ({ ...f, count: countOf(f.id) })).filter((f) => f.count > 0),
   ];
   const visible = filter === 'all' ? agents : agents.filter((a) => a.status === filter);
 
@@ -61,17 +62,15 @@ export function AgentsView(props: AgentsViewProps) {
       <div className="agents-view">
         <header className="agents-header">
           <div className="agents-heading">
-            <h1 className="agents-title">Agentes em paralelo</h1>
-            <p className="agents-subtitle">
-              Cada card é uma sessão aberta. Abra uma para conversar.
-            </p>
+            <h1 className="agents-title">{t('agents.title')}</h1>
+            <p className="agents-subtitle">{t('agents.subtitleCards')}</p>
           </div>
           <button type="button" className="btn" onClick={onNewSession}>
             <PlusIcon size={14} />
-            Iniciar agente
+            {t('agents.startAgent')}
           </button>
         </header>
-        <div className="agents-filters" role="group" aria-label="Filtrar por status">
+        <div className="agents-filters" role="group" aria-label={t('agents.filterGroupAria')}>
           {filters.map((f) => (
             <button
               key={f.id}
@@ -98,12 +97,12 @@ export function AgentsView(props: AgentsViewProps) {
                 </div>
                 <span className={`pill pill-${agent.status}`}>
                   <span className={`dot${agent.status === 'running' ? ' pulse' : ''}`} />
-                  {STATUS_LABEL[agent.status]}
+                  {sessionStatusLabel(agent.status, locale)}
                 </span>
               </div>
               <div className="agent-tail mono">
                 {agent.tail === '' ? (
-                  <span className="agent-tail-empty">sem atividade</span>
+                  <span className="agent-tail-empty">{t('agents.noActivity')}</span>
                 ) : (
                   agent.tail
                 )}
@@ -115,7 +114,7 @@ export function AgentsView(props: AgentsViewProps) {
                   className="btn btn-sm"
                   onClick={() => onOpen(agent.sessionId)}
                 >
-                  Abrir
+                  {t('agents.openBtn')}
                 </button>
               </div>
             </article>

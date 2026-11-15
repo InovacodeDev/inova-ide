@@ -3,6 +3,8 @@ import type { Settings, SettingsPatch, VoiceModelId } from '@inova/core/types';
 import type { VoiceModelInfo, VoiceStatus } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
 import { formatMegabytes } from './dictation';
+import { useI18n } from './I18nContext';
+import type { TranslationKey } from './i18n';
 import { Segmented, SettingGroup, SettingRow } from './settings-controls';
 import { downloadPercent, voiceModelState, type VoiceModelState } from './voice-model-state';
 import type { WarningCall } from './useWarning';
@@ -13,17 +15,17 @@ interface SettingsVoiceProps {
   call: WarningCall;
 }
 
-const LANGUAGE_OPTIONS: { value: Settings['voice']['language']; label: string }[] = [
-  { value: 'auto', label: 'Automático' },
-  { value: 'pt', label: 'Português' },
-  { value: 'en', label: 'Inglês' },
-  { value: 'es', label: 'Espanhol' },
+const LANGUAGE_OPTIONS: { value: Settings['voice']['language']; labelKey: TranslationKey }[] = [
+  { value: 'auto', labelKey: 'settings.voice.lang.auto' },
+  { value: 'pt', labelKey: 'settings.voice.lang.pt' },
+  { value: 'en', labelKey: 'settings.voice.lang.en' },
+  { value: 'es', labelKey: 'settings.voice.lang.es' },
 ];
 
-const STATE_LABEL: Record<Exclude<VoiceModelState, 'downloading'>, string> = {
-  'in-use': 'Em uso',
-  installed: 'Instalado',
-  missing: 'Não instalado',
+const STATE_KEY: Record<Exclude<VoiceModelState, 'downloading'>, TranslationKey> = {
+  'in-use': 'settings.voice.state.inUse',
+  installed: 'settings.voice.state.installed',
+  missing: 'settings.voice.state.missing',
 };
 
 type Downloads = Partial<Record<VoiceModelId, number>>;
@@ -38,6 +40,7 @@ function ModelRow(props: {
   onRemove: () => void;
 }) {
   const { model, state, percent, downloadBusy, onDownload, onUse, onRemove } = props;
+  const { t } = useI18n();
   return (
     <li className="voice-model">
       <div className="voice-model-info">
@@ -45,22 +48,24 @@ function ModelRow(props: {
         <span className="voice-model-size">{formatMegabytes(model.bytes)}</span>
       </div>
       <span className={`voice-model-state voice-model-state-${state}`}>
-        {state === 'downloading' ? `Baixando ${percent}%` : STATE_LABEL[state]}
+        {state === 'downloading'
+          ? t('settings.voice.downloading', { percent })
+          : t(STATE_KEY[state])}
       </span>
       <div className="voice-model-actions">
         {state === 'missing' ? (
           <button type="button" className="btn btn-sm" disabled={downloadBusy} onClick={onDownload}>
-            Baixar
+            {t('settings.voice.download')}
           </button>
         ) : null}
         {state === 'installed' ? (
           <button type="button" className="btn btn-sm" onClick={onUse}>
-            Usar
+            {t('common.use')}
           </button>
         ) : null}
         {state === 'installed' || state === 'in-use' ? (
           <button type="button" className="btn btn-sm" onClick={onRemove}>
-            Remover
+            {t('common.remove')}
           </button>
         ) : null}
       </div>
@@ -68,7 +73,7 @@ function ModelRow(props: {
         <div
           className="usage-track voice-model-progress"
           role="progressbar"
-          aria-label={`Download do modelo ${model.label}`}
+          aria-label={t('settings.voice.downloadProgressAria', { label: model.label })}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percent}
@@ -81,6 +86,7 @@ function ModelRow(props: {
 }
 
 export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
+  const { t } = useI18n();
   const [status, setStatus] = useState<VoiceStatus | null>(null);
   const [downloads, setDownloads] = useState<Downloads>({});
   const [pendingRemove, setPendingRemove] = useState<VoiceModelInfo | null>(null);
@@ -124,19 +130,19 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
   return (
     <>
       <SettingGroup
-        title="Modelos de transcrição"
-        description="A transcrição roda neste computador e o áudio não sai dele."
+        title={t('settings.voice.modelsTitle')}
+        description={t('settings.voice.modelsDesc')}
       >
         {status === null ? (
-          <p className="setting-group-desc">Carregando…</p>
+          <p className="setting-group-desc">{t('common.loading')}</p>
         ) : (
           <>
             <SettingRow
               title="whisper-cli"
               description={
                 status.binary
-                  ? 'Programa de transcrição encontrado nesta instalação.'
-                  : 'Transcrição indisponível: whisper-cli não encontrado nesta instalação.'
+                  ? t('settings.voice.binaryFoundDesc')
+                  : t('settings.voice.binaryMissingDesc')
               }
             >
               <span
@@ -144,7 +150,7 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
                   status.binary ? 'voice-model-state voice-model-state-in-use' : 'voice-model-state'
                 }
               >
-                {status.binary ? 'Encontrado' : 'Não encontrado'}
+                {status.binary ? t('settings.voice.found') : t('settings.voice.notFound')}
               </span>
             </SettingRow>
             <ul className="voice-models">
@@ -169,26 +175,29 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
           </>
         )}
       </SettingGroup>
-      <SettingGroup title="Idioma do ditado">
-        <SettingRow title="Idioma" description="Automático usa o idioma do sistema.">
+      <SettingGroup title={t('settings.voice.dictationLangGroup')}>
+        <SettingRow
+          title={t('settings.voice.dictationLangTitle')}
+          description={t('settings.voice.dictationLangDesc')}
+        >
           <Segmented
             name="dictation-language"
-            label="Idioma do ditado"
+            label={t('settings.voice.dictationLangGroup')}
             value={settings.voice.language}
-            options={LANGUAGE_OPTIONS}
+            options={LANGUAGE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
             onChange={(language) => onUpdate({ voice: { language } })}
           />
         </SettingRow>
       </SettingGroup>
       {pendingRemove ? (
         <ConfirmModal
-          title="Remover modelo de voz"
+          title={t('settings.voice.removeTitle')}
           description={
             pendingRemove.id === activeId
-              ? `Remover o modelo "${pendingRemove.label}"? Ele está em uso: o ditado vai pedir o download de novo na próxima gravação.`
-              : `Remover o modelo "${pendingRemove.label}"? Será preciso baixar de novo para usá-lo.`
+              ? t('settings.voice.removeInUseDesc', { label: pendingRemove.label })
+              : t('settings.voice.removeUnusedDesc', { label: pendingRemove.label })
           }
-          confirmLabel="Remover modelo"
+          confirmLabel={t('settings.voice.removeConfirm')}
           danger
           onCancel={() => setPendingRemove(null)}
           onConfirm={() => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContextBreakdown } from '@inova/core/chat-types';
+import { translate, type SupportedLocale } from './i18n';
 
 const AUTO_REFRESH_DEBOUNCE_MS = 1500;
 
@@ -13,8 +14,9 @@ export interface ContextBreakdownState {
 export function useContextBreakdown(input: {
   sessionId: string;
   usedTokens: number | null;
+  locale?: SupportedLocale;
 }): ContextBreakdownState {
-  const { sessionId, usedTokens } = input;
+  const { sessionId, usedTokens, locale = 'pt-BR' } = input;
   const [breakdown, setBreakdown] = useState<ContextBreakdown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -22,6 +24,8 @@ export function useContextBreakdown(input: {
   const inflightRef = useRef(false);
   const pendingRef = useRef(false);
   const loadedRef = useRef(false);
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
@@ -44,7 +48,7 @@ export function useContextBreakdown(input: {
     } catch (failure: unknown) {
       if (!aliveRef.current) return;
       console.error('inova: failed to load context breakdown', failure);
-      setError('Erro inesperado.');
+      setError(translate(localeRef.current, 'alerts.unexpected'));
     } finally {
       inflightRef.current = false;
       if (aliveRef.current) setLoading(false);

@@ -1,3 +1,6 @@
+import type { SupportedLocale } from '@inova/core/types';
+import { translate } from './i18n';
+
 export type ShortcutId =
   | 'open-settings'
   | 'open-command-palette'
@@ -235,4 +238,15 @@ export function formatBinding(binding: string, isMac: boolean): string {
     return KEY_LABELS[part] ?? part.toUpperCase();
   });
   return labels.join(isMac ? '' : '+');
+}
+
+export function shortcutGroupLabel(
+  group: ShortcutGroup,
+  locale: SupportedLocale = 'pt-BR',
+): string {
+  return translate(locale, `shortcuts.group.${group}`);
+}
+
+export function shortcutLabel(id: ShortcutId, locale: SupportedLocale = 'pt-BR'): string {
+  return translate(locale, `shortcuts.item.${id}`);
 }

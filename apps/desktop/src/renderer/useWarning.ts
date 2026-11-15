@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { SupportedLocale } from '@inova/core/types';
 import type { Result } from '../shared/api';
+import { translate } from './i18n';
 
 const WARNING_MS = 6000;
 export const WARNING_HISTORY_LIMIT = 20;
@@ -21,10 +23,12 @@ export type WarningCall = <T>(
   action: () => Promise<Result<T>>,
 ) => Promise<{ value: T } | undefined>;
 
-export function useWarning() {
+export function useWarning(locale: SupportedLocale = 'pt-BR') {
   const [current, setCurrent] = useState<{ id: number; message: string } | null>(null);
   const [history, setHistory] = useState<WarningEntry[]>([]);
   const nextId = useRef(0);
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
 
   const setWarning = useCallback((message: string | null) => {
     if (message === null) {
@@ -53,7 +57,7 @@ export function useWarning() {
         return await action();
       } catch (error: unknown) {
         console.error('inova: unexpected renderer error', error);
-        setWarning('Erro inesperado.');
+        setWarning(translate(localeRef.current, 'alerts.unexpected'));
         return undefined;
       }
     },
@@ -75,12 +79,16 @@ export function useWarning() {
 
   const dismiss = useCallback(() => setWarning(null), [setWarning]);
   const clearHistory = useCallback(() => setHistory([]), []);
+  const setLocale = useCallback((next: SupportedLocale) => {
+    localeRef.current = next;
+  }, []);
 
   return {
     warning: current?.message ?? null,
     history,
     dismiss,
     clearHistory,
+    setLocale,
     guard,
     call,
     warn: setWarning,

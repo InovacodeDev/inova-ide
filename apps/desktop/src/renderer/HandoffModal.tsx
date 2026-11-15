@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
 import { CloseIcon, SwitchIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
@@ -23,6 +24,7 @@ export function HandoffModal({
   onConfirm,
   onCancel,
 }: HandoffModalProps) {
+  const { t } = useI18n();
   const alternatives = accounts.filter((account) => account.id !== sourceAccount?.id);
   const [targetAccountId, setTargetAccountId] = useState(alternatives[0]?.id ?? '');
   const [createWorktree, setCreateWorktree] = useState(false);
@@ -62,15 +64,15 @@ export function HandoffModal({
           <SwitchIcon size={17} />
           <div className="modal-title-group">
             <h2 id="handoff-modal-title" className="modal-title">
-              Transferir sessão (Handoff)
+              {t('handoff.title')}
             </h2>
             <span className="modal-subtitle">{session.title}</span>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar transferência"
-            data-tooltip="Fechar transferência"
+            aria-label={t('handoff.close')}
+            data-tooltip={t('handoff.close')}
             data-shortcut="dismiss"
             onClick={onCancel}
           >
@@ -79,38 +81,33 @@ export function HandoffModal({
         </div>
         <div className="modal-body">
           {alternatives.length === 0 ? (
-            <p className="modal-description">
-              Adicione outra conta ou provedor em Contas e providers antes de transferir.
-            </p>
+            <p className="modal-description">{t('handoff.noAccounts')}</p>
           ) : (
             <>
               <div className="modal-field">
-                <span className="modal-field-label">Conta de destino</span>
+                <span className="modal-field-label">{t('handoff.targetLabel')}</span>
                 <PlatformSelect
-                  ariaLabel="Conta de destino para handoff"
+                  ariaLabel={t('handoff.targetAria')}
                   value={targetAccountId}
                   options={options}
                   onChange={setTargetAccountId}
                 />
               </div>
-              <p className="modal-description">
-                Cria uma nova sessão com resumo estruturado dos últimos turnos e dos arquivos
-                alterados para continuar sem perda de contexto.
-              </p>
+              <p className="modal-description">{t('handoff.desc')}</p>
               <label className="modal-check">
                 <input
                   type="checkbox"
                   checked={createWorktree}
                   onChange={(event) => setCreateWorktree(event.target.checked)}
                 />
-                <span>Criar novo Git worktree isolado</span>
+                <span>{t('handoff.worktree')}</span>
               </label>
             </>
           )}
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -118,7 +115,7 @@ export function HandoffModal({
             disabled={targetAccountId === '' || alternatives.length === 0}
             onClick={() => onConfirm({ targetAccountId, createWorktree })}
           >
-            Gerar handoff e abrir
+            {t('handoff.submit')}
           </button>
         </div>
       </div>

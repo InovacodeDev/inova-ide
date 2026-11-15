@@ -33,7 +33,7 @@ describe('model-picker-state', () => {
     expect(withKnown[0]).toEqual({
       id: '',
       label: 'Auto',
-      description: 'Usar padrão do provedor',
+      description: 'Usar padrão do provider',
     });
     expect(withKnown.some((item) => item.description === 'Modelo customizado')).toBe(false);
 

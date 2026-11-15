@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { EFFORT_LABEL, type ProviderModels } from '@inova/core/models';
+import { type ProviderModels } from '@inova/core/models';
 import type { EffortLevel } from '@inova/core/types';
 import { CheckIcon, ChevronDownIcon } from './icons';
+import { useI18n } from './I18nContext';
 import {
+  effortLabel,
   formatPickerLabel,
   normalizeCustomModelInput,
   resolveModelOptions,
@@ -25,6 +27,7 @@ export function ModelEffortPicker({
   openRequest = 0,
   onChange,
 }: ModelEffortPickerProps) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [customDraft, setCustomDraft] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,8 +59,8 @@ export function ModelEffortPicker({
     };
   }, [isOpen]);
 
-  const triggerLabel = formatPickerLabel({ model, effort, catalog });
-  const modelOptions = resolveModelOptions({ model, catalog });
+  const triggerLabel = formatPickerLabel({ model, effort, catalog, locale });
+  const modelOptions = resolveModelOptions({ model, catalog, locale });
   const normalizedCustom = normalizeCustomModelInput(customDraft);
 
   const selectModel = (nextModel: string | null) => {
@@ -86,8 +89,8 @@ export function ModelEffortPicker({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
-        aria-label="Selecionar modelo e nível de esforço"
-        data-tooltip="Escolher modelo e nível de esforço"
+        aria-label={t('picker.selectAria')}
+        data-tooltip={t('picker.selectTooltip')}
         onClick={() => setOpen((current) => !current)}
       >
         <span className="chat-picker-chevron">
@@ -97,10 +100,10 @@ export function ModelEffortPicker({
       </button>
 
       {isOpen ? (
-        <div className="chat-picker-popover" role="dialog" aria-label="Modelo e nível de esforço">
+        <div className="chat-picker-popover" role="dialog" aria-label={t('picker.dialogAria')}>
           <div className="chat-picker-section">
-            <div className="chat-picker-title">Nível de esforço</div>
-            <div className="chat-effort-group" role="group" aria-label="Nível de esforço">
+            <div className="chat-picker-title">{t('picker.effortTitle')}</div>
+            <div className="chat-effort-group" role="group" aria-label={t('picker.effortTitle')}>
               {catalog.efforts.map((level) => {
                 const active = effort === level;
                 return (
@@ -111,7 +114,7 @@ export function ModelEffortPicker({
                     aria-pressed={active}
                     onClick={() => onChange({ effort: level })}
                   >
-                    {EFFORT_LABEL[level]}
+                    {effortLabel(level, locale)}
                   </button>
                 );
               })}
@@ -119,8 +122,12 @@ export function ModelEffortPicker({
           </div>
 
           <div className="chat-picker-section">
-            <div className="chat-picker-title">Modelo</div>
-            <div className="chat-model-list" role="listbox" aria-label="Modelos disponíveis">
+            <div className="chat-picker-title">{t('picker.modelGroupHeading')}</div>
+            <div
+              className="chat-model-list"
+              role="listbox"
+              aria-label={t('picker.availableModelsAria')}
+            >
               {modelOptions.map((option) => {
                 const optionValue = option.id === '' ? null : option.id;
                 const selected = model === optionValue;
@@ -154,8 +161,8 @@ export function ModelEffortPicker({
             <input
               type="text"
               className="chat-model-custom-input"
-              placeholder="ID do modelo customizado…"
-              aria-label="Modelo customizado"
+              placeholder={t('picker.customModelIdPlaceholder')}
+              aria-label={t('picker.customModel')}
               value={customDraft}
               onChange={(event) => setCustomDraft(event.target.value)}
               onKeyDown={onCustomKeyDown}
@@ -166,7 +173,7 @@ export function ModelEffortPicker({
               disabled={normalizedCustom === null}
               onClick={applyCustomModel}
             >
-              Usar
+              {t('picker.customModelUse')}
             </button>
           </div>
         </div>

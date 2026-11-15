@@ -1,34 +1,39 @@
 import type { ContextSection, ContextSectionRow } from '@inova/core/chat-types';
+import type { SupportedLocale } from '@inova/core/types';
+import type { TranslationKey } from './i18n';
+import { translate } from './i18n';
 
-const CATEGORY_LABELS: Record<string, string> = {
-  'System prompt': 'Prompt de sistema',
-  'System tools': 'Ferramentas do sistema',
-  'System tools (deferred)': 'Ferramentas do sistema (sob demanda)',
-  'MCP tools': 'Ferramentas MCP',
-  'MCP tools (deferred)': 'Ferramentas MCP (sob demanda)',
-  'Custom agents': 'Agentes',
-  'Memory files': 'Arquivos de memória',
-  Skills: 'Skills',
-  Messages: 'Mensagens',
-  'Free space': 'Espaço livre',
-  'Autocompact buffer': 'Reserva de autocompactação',
+const CATEGORY_KEYS: Record<string, TranslationKey> = {
+  'System prompt': 'details.category.systemPrompt',
+  'System tools': 'details.category.systemTools',
+  'System tools (deferred)': 'details.category.systemToolsDeferred',
+  'MCP tools': 'details.category.mcpTools',
+  'MCP tools (deferred)': 'details.category.mcpToolsDeferred',
+  'Custom agents': 'details.category.customAgents',
+  'Memory files': 'details.category.memoryFiles',
+  Skills: 'details.category.skills',
+  Messages: 'details.category.messages',
+  'Free space': 'details.category.freeSpace',
+  'Autocompact buffer': 'details.category.autocompactBuffer',
 };
 
-const SECTION_LABELS: Record<string, string> = {
-  'MCP Tools': 'Ferramentas MCP',
-  'Custom Agents': 'Agentes',
-  'Memory Files': 'Arquivos de memória',
-  Skills: 'Skills',
+const SECTION_KEYS: Record<string, TranslationKey> = {
+  'MCP Tools': 'details.section.mcpTools',
+  'Custom Agents': 'details.section.customAgents',
+  'Memory Files': 'details.section.memoryFiles',
+  Skills: 'details.section.skills',
 };
 
 const RESERVED_CATEGORIES: ReadonlySet<string> = new Set(['Free space', 'Autocompact buffer']);
 
-export function categoryLabel(name: string): string {
-  return CATEGORY_LABELS[name] ?? name;
+export function categoryLabel(name: string, locale: SupportedLocale = 'pt-BR'): string {
+  const key = CATEGORY_KEYS[name];
+  return key ? translate(locale, key) : name;
 }
 
-export function sectionLabel(title: string): string {
-  return SECTION_LABELS[title] ?? title;
+export function sectionLabel(title: string, locale: SupportedLocale = 'pt-BR'): string {
+  const key = SECTION_KEYS[title];
+  return key ? translate(locale, key) : title;
 }
 
 export function isReservedCategory(name: string): boolean {

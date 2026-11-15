@@ -1,5 +1,6 @@
-import type { ProviderId } from '@inova/core/types';
+import type { ProviderId, SupportedLocale } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
+import { translate } from './i18n';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
 
 export interface FailoverNotice {
@@ -30,45 +31,76 @@ export function buildFailoverNotice(input: {
   fromAccount: AccountView | undefined;
   toAccount: AccountView | undefined;
   rollbackLastTurn: boolean;
+  locale?: SupportedLocale;
 }): FailoverNotice {
   const { fromAccount, toAccount, rollbackLastTurn } = input;
+  const locale = input.locale ?? 'pt-BR';
   return {
     fromAccountId: fromAccount?.id ?? null,
     fromProvider: fromAccount?.provider ?? null,
     fromLabel: fromAccount ? accountDisplayName(fromAccount) : null,
-    fromDisplay: formatAccountBadge(fromAccount, 'a conta anterior'),
+    fromDisplay: formatAccountBadge(fromAccount, translate(locale, 'failover.prevAccountFallback')),
     toAccountId: toAccount?.id ?? null,
     toProvider: toAccount?.provider ?? null,
-    toDisplay: formatAccountBadge(toAccount, 'a nova conta'),
+    toDisplay: formatAccountBadge(toAccount, translate(locale, 'failover.nextAccountFallback')),
     rollbackLastTurn,
   };
 }
 
-export function describeFailoverBanner(notice: FailoverNotice): FailoverBannerCopy {
+export function describeFailoverBanner(
+  notice: FailoverNotice,
+  locale: SupportedLocale = 'pt-BR',
+): FailoverBannerCopy {
   const providerChanged =
     notice.fromProvider !== null &&
     notice.toProvider !== null &&
     notice.fromProvider !== notice.toProvider;
-  const turnSuffix = notice.rollbackLastTurn ? ' e o turno atual foi retomado nela' : '';
+  const turnSuffix = notice.rollbackLastTurn ? translate(locale, 'failover.rollbackSuffix') : '';
 
   if (providerChanged && notice.fromProvider !== null && notice.toProvider !== null) {
     const fromName = PROVIDER_NAME[notice.fromProvider];
     const toName = PROVIDER_NAME[notice.toProvider];
     return {
-      message: `Limite atingido em ${notice.fromDisplay}. A sessão migrou automaticamente para ${notice.toDisplay}${turnSuffix}.`,
-      acceptLabel: `Continuar com ${toName}`,
-      acceptTooltip: `Manter a sessão usando ${notice.toDisplay}`,
-      revertLabel: notice.fromAccountId ? `Voltar para ${fromName}` : null,
-      revertTooltip: notice.fromAccountId ? `Retornar a sessão para ${notice.fromDisplay}` : null,
+      message: translate(locale, 'failover.providerMsg', {
+        fromDisplay: notice.fromDisplay,
+        toDisplay: notice.toDisplay,
+        turnSuffix,
+      }),
+      acceptLabel: translate(locale, 'failover.acceptProviderBtn', { provider: toName }),
+      acceptTooltip: translate(locale, 'failover.acceptAccountTooltip', {
+        toDisplay: notice.toDisplay,
+      }),
+      revertLabel: notice.fromAccountId
+        ? translate(locale, 'failover.returnAccountBtn', { label: fromName })
+        : null,
+      revertTooltip: notice.fromAccountId
+        ? translate(locale, 'failover.returnTooltip', {
+            from: '',
+            fromAccount: notice.fromDisplay,
+          }).trim()
+        : null,
     };
   }
 
   return {
-    message: `Limite atingido em ${notice.fromDisplay}. A sessão mudou para ${notice.toDisplay}${turnSuffix}.`,
-    acceptLabel: 'Continuar nesta conta',
-    acceptTooltip: `Manter a sessão usando ${notice.toDisplay}`,
+    message: translate(locale, 'failover.accountMsg', {
+      fromDisplay: notice.fromDisplay,
+      toDisplay: notice.toDisplay,
+      turnSuffix,
+    }),
+    acceptLabel: translate(locale, 'failover.acceptAccountBtn'),
+    acceptTooltip: translate(locale, 'failover.acceptAccountTooltip', {
+      toDisplay: notice.toDisplay,
+    }),
     revertLabel:
-      notice.fromAccountId && notice.fromLabel ? `Voltar para ${notice.fromLabel}` : null,
-    revertTooltip: notice.fromAccountId ? `Retornar a sessão para ${notice.fromDisplay}` : null,
+      notice.fromAccountId && notice.fromLabel
+        ? translate(locale, 'failover.returnAccountBtn', { label: notice.fromLabel })
+        : null,
+    revertTooltip: notice.fromAccountId
+      ? translate(locale, 'failover.returnTooltip', {
+          from: '',
+          fromAccount: notice.fromDisplay,
+        }).trim()
+      : null,
   };
 }

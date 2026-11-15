@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Alterado
+
+- Seletor de idioma e opções gerais movidos para a aba `Geral` nas configurações.
+- Tradução completa da interface do renderer (`pt-BR` e `en-US`), incluindo feedbacks, alertas, modais, tooltips, inspetor, comandos e telas de sessão, preservando termos técnicos em inglês (`handoff`, `worktree`, `workspace`, `provider`, `prompt`, `tokens`, `diff`, `MCP`, `CLI`, `skills`, `plugins`, `sandbox`, `circuit breaker`, `failover`).
+
 ## [0.8.0] - 2026-11-15
 
 ### Adicionado

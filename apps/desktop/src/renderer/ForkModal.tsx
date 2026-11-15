@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
 import { CloseIcon, GitForkIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
@@ -27,6 +28,7 @@ export function ForkModal({
   onConfirm,
   onCancel,
 }: ForkModalProps) {
+  const { t } = useI18n();
   const defaultAccountId = sourceAccount?.id ?? accounts[0]?.id ?? '';
   const [targetAccountId, setTargetAccountId] = useState(defaultAccountId);
   const [copyWorktreeFiles, setCopyWorktreeFiles] = useState(true);
@@ -69,17 +71,17 @@ export function ForkModal({
           <GitForkIcon size={17} />
           <div className="modal-title-group">
             <h2 id="fork-modal-title" className="modal-title">
-              Bifurcar sessão
+              {t('fork.title')}
             </h2>
             <span className="modal-subtitle">
-              {session.title} · turno {turnIndex + 1}
+              {t('fork.subtitle', { title: session.title, turn: turnIndex + 1 })}
             </span>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar bifurcação"
-            data-tooltip="Fechar bifurcação"
+            aria-label={t('fork.close')}
+            data-tooltip={t('fork.close')}
             data-shortcut="dismiss"
             onClick={onCancel}
           >
@@ -88,18 +90,16 @@ export function ForkModal({
         </div>
         <div className="modal-body">
           <div className="modal-field">
-            <span className="modal-field-label">Conta e provedor de destino</span>
+            <span className="modal-field-label">{t('fork.targetLabel')}</span>
             <PlatformSelect
-              ariaLabel="Conta de destino para bifurcação"
+              ariaLabel={t('fork.targetAria')}
               value={targetAccountId}
               options={options}
               onChange={setTargetAccountId}
             />
           </div>
           <p className="modal-description">
-            {usesNativeFork
-              ? 'Usa ramificação nativa do Claude (--fork-session) a partir do último turno.'
-              : 'Gera resumo estruturado até o turno selecionado e inicia nova thread.'}
+            {usesNativeFork ? t('fork.nativeDesc') : t('fork.summaryDesc')}
           </p>
           <label className="modal-check">
             <input
@@ -107,12 +107,12 @@ export function ForkModal({
               checked={copyWorktreeFiles}
               onChange={(event) => setCopyWorktreeFiles(event.target.checked)}
             />
-            <span>Isolar alterações deste turno em Git worktree</span>
+            <span>{t('fork.worktree')}</span>
           </label>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onCancel}>
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             type="button"
@@ -127,7 +127,7 @@ export function ForkModal({
               })
             }
           >
-            Criar bifurcação
+            {t('fork.submit')}
           </button>
         </div>
       </div>

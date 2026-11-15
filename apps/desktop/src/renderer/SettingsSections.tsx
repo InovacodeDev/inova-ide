@@ -1,8 +1,15 @@
 import { useState } from 'react';
 import type { Settings, SettingsPatch } from '@inova/core/types';
+import type { TranslationKey } from './i18n';
 import { useI18n } from './I18nContext';
 import { Segmented, SettingGroup, SettingRow, Switch } from './settings-controls';
-import { SHORTCUTS, formatBinding, groupShortcuts } from './shortcuts';
+import {
+  SHORTCUTS,
+  formatBinding,
+  groupShortcuts,
+  shortcutGroupLabel,
+  shortcutLabel,
+} from './shortcuts';
 import type { WarningCall } from './useWarning';
 
 interface SettingsSectionProps {
@@ -10,26 +17,11 @@ interface SettingsSectionProps {
   onUpdate: (patch: SettingsPatch) => void;
 }
 
-export function GeneralSection({ call }: { call: WarningCall }) {
-  return (
-    <SettingGroup title="Dados">
-      <SettingRow
-        title="Pasta de dados"
-        description="Onde o InovaIDE guarda contas, sessões e configurações."
-      >
-        <button
-          type="button"
-          className="btn"
-          onClick={() => void call(() => window.inova.openDataFolder())}
-        >
-          Abrir pasta de dados
-        </button>
-      </SettingRow>
-    </SettingGroup>
-  );
-}
-
-export function AppearanceSection({ settings, onUpdate }: SettingsSectionProps) {
+export function GeneralSection({
+  settings,
+  onUpdate,
+  call,
+}: SettingsSectionProps & { call: WarningCall }) {
   const { t } = useI18n();
   const themeOptions: { value: Settings['appearance']['theme']; label: string }[] = [
     { value: 'system', label: t('settings.theme.system') },
@@ -42,68 +34,91 @@ export function AppearanceSection({ settings, onUpdate }: SettingsSectionProps) 
     { value: 'en-US', label: t('settings.locale.enUS') },
   ];
   return (
-    <SettingGroup>
-      <SettingRow title={t('settings.theme.title')} description={t('settings.theme.desc')}>
-        <Segmented
-          name="theme"
-          label={t('settings.theme.title')}
-          value={settings.appearance.theme}
-          options={themeOptions}
-          onChange={(theme) => onUpdate({ appearance: { theme } })}
-        />
-      </SettingRow>
-      <SettingRow title={t('settings.locale.title')} description={t('settings.locale.desc')}>
-        <Segmented
-          name="locale"
-          label={t('settings.locale.title')}
-          value={settings.appearance.locale}
-          options={localeOptions}
-          onChange={(locale) => onUpdate({ appearance: { locale } })}
-        />
-      </SettingRow>
-    </SettingGroup>
+    <>
+      <SettingGroup title={t('settings.appearance.title')}>
+        <SettingRow title={t('settings.theme.title')} description={t('settings.theme.desc')}>
+          <Segmented
+            name="theme"
+            label={t('settings.theme.title')}
+            value={settings.appearance.theme}
+            options={themeOptions}
+            onChange={(theme) => onUpdate({ appearance: { theme } })}
+          />
+        </SettingRow>
+        <SettingRow title={t('settings.locale.title')} description={t('settings.locale.desc')}>
+          <Segmented
+            name="locale"
+            label={t('settings.locale.title')}
+            value={settings.appearance.locale}
+            options={localeOptions}
+            onChange={(locale) => onUpdate({ appearance: { locale } })}
+          />
+        </SettingRow>
+      </SettingGroup>
+      <SettingGroup title={t('settings.data.title')}>
+        <SettingRow
+          title={t('settings.data.folderTitle')}
+          description={t('settings.data.folderDesc')}
+        >
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void call(() => window.inova.openDataFolder())}
+          >
+            {t('settings.data.openFolder')}
+          </button>
+        </SettingRow>
+      </SettingGroup>
+    </>
   );
 }
 
-const ARCHIVE_OPTIONS: { value: Settings['sessions']['autoArchiveDays']; label: string }[] = [
-  { value: 0, label: 'Nunca' },
-  { value: 1, label: '1 dia' },
-  { value: 3, label: '3 dias' },
-  { value: 7, label: '7 dias' },
-  { value: 30, label: '30 dias' },
+const ARCHIVE_OPTIONS: {
+  value: Settings['sessions']['autoArchiveDays'];
+  labelKey: TranslationKey;
+}[] = [
+  { value: 0, labelKey: 'settings.sessions.archive.0' },
+  { value: 1, labelKey: 'settings.sessions.archive.1' },
+  { value: 3, labelKey: 'settings.sessions.archive.3' },
+  { value: 7, labelKey: 'settings.sessions.archive.7' },
+  { value: 30, labelKey: 'settings.sessions.archive.30' },
 ];
 
-const FAILOVER_OPTIONS: { value: Settings['sessions']['rateLimitFailover']; label: string }[] = [
-  { value: 'off', label: 'Desativado' },
-  { value: 'same-provider', label: 'Mesmo provedor' },
-  { value: 'any-provider', label: 'Qualquer provedor' },
+const FAILOVER_OPTIONS: {
+  value: Settings['sessions']['rateLimitFailover'];
+  labelKey: TranslationKey;
+}[] = [
+  { value: 'off', labelKey: 'settings.sessions.failover.off' },
+  { value: 'same-provider', labelKey: 'settings.sessions.failover.same' },
+  { value: 'any-provider', labelKey: 'settings.sessions.failover.any' },
 ];
 
 const TOOL_ERROR_OPTIONS: {
   value: Settings['sessions']['maxConsecutiveToolErrors'];
-  label: string;
+  labelKey: TranslationKey;
 }[] = [
-  { value: 0, label: 'Desativado' },
-  { value: 3, label: '3 erros' },
-  { value: 5, label: '5 erros' },
-  { value: 10, label: '10 erros' },
+  { value: 0, labelKey: 'settings.sessions.toolErrors.0' },
+  { value: 3, labelKey: 'settings.sessions.toolErrors.3' },
+  { value: 5, labelKey: 'settings.sessions.toolErrors.5' },
+  { value: 10, labelKey: 'settings.sessions.toolErrors.10' },
 ];
 
 const VERIFICATION_FAILURE_OPTIONS: {
   value: Settings['sessions']['maxConsecutiveVerificationFailures'];
-  label: string;
+  labelKey: TranslationKey;
 }[] = [
-  { value: 0, label: 'Desativado' },
-  { value: 2, label: '2 falhas' },
-  { value: 3, label: '3 falhas' },
-  { value: 5, label: '5 falhas' },
+  { value: 0, labelKey: 'settings.sessions.verifyFailures.0' },
+  { value: 2, labelKey: 'settings.sessions.verifyFailures.2' },
+  { value: 3, labelKey: 'settings.sessions.verifyFailures.3' },
+  { value: 5, labelKey: 'settings.sessions.verifyFailures.5' },
 ];
 
 const SESSION_COST_OPTIONS: {
   value: Settings['sessions']['maxSessionCostUsd'];
-  label: string;
+  labelKey?: TranslationKey;
+  label?: string;
 }[] = [
-  { value: 0, label: 'Sem limite' },
+  { value: 0, labelKey: 'settings.sessions.costCap.0' },
   { value: 1, label: '$1' },
   { value: 5, label: '$5' },
   { value: 10, label: '$10' },
@@ -112,34 +127,36 @@ const SESSION_COST_OPTIONS: {
 
 const CONTEXT_PERCENT_OPTIONS: {
   value: Settings['sessions']['maxContextPercent'];
-  label: string;
+  labelKey?: TranslationKey;
+  label?: string;
 }[] = [
-  { value: 0, label: 'Desativado' },
+  { value: 0, labelKey: 'settings.sessions.contextCap.0' },
   { value: 80, label: '80%' },
   { value: 90, label: '90%' },
   { value: 95, label: '95%' },
 ];
 
 export function SessionsSection({ settings, onUpdate }: SettingsSectionProps) {
+  const { t } = useI18n();
   return (
     <>
       <SettingGroup>
         <SettingRow
-          title="Arquivar sessões automaticamente"
-          description="Arquiva sessões sem atividade pelo tempo escolhido. Sessões em execução, abertas em aba ou com item não lido na caixa de entrada não são arquivadas."
+          title={t('settings.sessions.archiveTitle')}
+          description={t('settings.sessions.archiveDesc')}
         >
           <Segmented
             name="auto-archive"
-            label="Arquivar sessões automaticamente"
+            label={t('settings.sessions.archiveTitle')}
             value={settings.sessions.autoArchiveDays}
-            options={ARCHIVE_OPTIONS}
+            options={ARCHIVE_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
             onChange={(autoArchiveDays) => onUpdate({ sessions: { autoArchiveDays } })}
           />
         </SettingRow>
         <SettingRow
           htmlFor="collapse-finished-turns"
-          title="Recolher turnos concluídos"
-          description="Esconde as ferramentas e os passos intermediários de turnos já terminados e mostra só a resposta final."
+          title={t('settings.sessions.collapseTurnsTitle')}
+          description={t('settings.sessions.collapseTurnsDesc')}
         >
           <Switch
             id="collapse-finished-turns"
@@ -148,71 +165,83 @@ export function SessionsSection({ settings, onUpdate }: SettingsSectionProps) {
           />
         </SettingRow>
         <SettingRow
-          title="Failover automático por limite"
-          description="Quando uma conta atinge o limite de uso, troca automaticamente para outra conta elegível e retoma o turno sem pausar o fluxo."
+          title={t('settings.sessions.failoverTitle')}
+          description={t('settings.sessions.failoverDesc')}
         >
           <Segmented
             name="rate-limit-failover"
-            label="Failover automático por limite"
+            label={t('settings.sessions.failoverTitle')}
             value={settings.sessions.rateLimitFailover}
-            options={FAILOVER_OPTIONS}
+            options={FAILOVER_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))}
             onChange={(rateLimitFailover) => onUpdate({ sessions: { rateLimitFailover } })}
           />
         </SettingRow>
       </SettingGroup>
       <SettingGroup
-        title="Proteção contra falhas em loop (Circuit Breaker)"
-        description="Interrompe loops de erro e pausa a fila automaticamente antes de consumir sua quota."
+        title={t('settings.sessions.cbTitle')}
+        description={t('settings.sessions.cbDesc')}
       >
         <SettingRow
-          title="Erros seguidos de ferramenta"
-          description="Cancela o turno atual se ferramentas falharem repetidamente em sequência."
+          title={t('settings.sessions.toolErrorsTitle')}
+          description={t('settings.sessions.toolErrorsDesc')}
         >
           <Segmented
             name="max-consecutive-tool-errors"
-            label="Erros seguidos de ferramenta"
+            label={t('settings.sessions.toolErrorsTitle')}
             value={settings.sessions.maxConsecutiveToolErrors}
-            options={TOOL_ERROR_OPTIONS}
+            options={TOOL_ERROR_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: t(opt.labelKey),
+            }))}
             onChange={(maxConsecutiveToolErrors) =>
               onUpdate({ sessions: { maxConsecutiveToolErrors } })
             }
           />
         </SettingRow>
         <SettingRow
-          title="Falhas seguidas de verificação"
-          description="Pausa a sessão na primeira falha pós-turno e dispara alerta após falhas consecutivas."
+          title={t('settings.sessions.verifyFailuresTitle')}
+          description={t('settings.sessions.verifyFailuresDesc')}
         >
           <Segmented
             name="max-consecutive-verification-failures"
-            label="Falhas seguidas de verificação"
+            label={t('settings.sessions.verifyFailuresTitle')}
             value={settings.sessions.maxConsecutiveVerificationFailures}
-            options={VERIFICATION_FAILURE_OPTIONS}
+            options={VERIFICATION_FAILURE_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: t(opt.labelKey),
+            }))}
             onChange={(maxConsecutiveVerificationFailures) =>
               onUpdate({ sessions: { maxConsecutiveVerificationFailures } })
             }
           />
         </SettingRow>
         <SettingRow
-          title="Teto de custo por sessão"
-          description="Pausa a fila ao atingir o valor acumulado na sessão."
+          title={t('settings.sessions.costCapTitle')}
+          description={t('settings.sessions.costCapDesc')}
         >
           <Segmented
             name="max-session-cost-usd"
-            label="Teto de custo por sessão"
+            label={t('settings.sessions.costCapTitle')}
             value={settings.sessions.maxSessionCostUsd}
-            options={SESSION_COST_OPTIONS}
+            options={SESSION_COST_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: opt.labelKey ? t(opt.labelKey) : (opt.label ?? ''),
+            }))}
             onChange={(maxSessionCostUsd) => onUpdate({ sessions: { maxSessionCostUsd } })}
           />
         </SettingRow>
         <SettingRow
-          title="Teto de uso de contexto"
-          description="Pausa a fila automaticamente quando a janela de contexto atingir o percentual."
+          title={t('settings.sessions.contextCapTitle')}
+          description={t('settings.sessions.contextCapDesc')}
         >
           <Segmented
             name="max-context-percent"
-            label="Teto de uso de contexto"
+            label={t('settings.sessions.contextCapTitle')}
             value={settings.sessions.maxContextPercent}
-            options={CONTEXT_PERCENT_OPTIONS}
+            options={CONTEXT_PERCENT_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: opt.labelKey ? t(opt.labelKey) : (opt.label ?? ''),
+            }))}
             onChange={(maxContextPercent) => onUpdate({ sessions: { maxContextPercent } })}
           />
         </SettingRow>
@@ -223,33 +252,34 @@ export function SessionsSection({ settings, onUpdate }: SettingsSectionProps) {
 
 const NOTIFICATION_ROWS: {
   key: keyof Settings['notifications'];
-  title: string;
-  description: string;
+  titleKey: TranslationKey;
+  descKey: TranslationKey;
 }[] = [
   {
     key: 'waitingInput',
-    title: 'Agente aguarda sua ação',
-    description: 'Avisa quando uma sessão pede uma aprovação ou uma resposta.',
+    titleKey: 'settings.notifications.waitingInputTitle',
+    descKey: 'settings.notifications.waitingInputDesc',
   },
   {
     key: 'failed',
-    title: 'Agente falhou',
-    description: 'Avisa quando um turno termina com erro.',
+    titleKey: 'settings.notifications.failedTitle',
+    descKey: 'settings.notifications.failedDesc',
   },
   {
     key: 'completed',
-    title: 'Agente terminou',
-    description: 'Avisa quando um turno termina sem erro.',
+    titleKey: 'settings.notifications.completedTitle',
+    descKey: 'settings.notifications.completedDesc',
   },
   {
     key: 'onlyWhenUnfocused',
-    title: 'Só notificar com a janela sem foco',
-    description: 'Não avisa enquanto você está usando o app.',
+    titleKey: 'settings.notifications.onlyUnfocusedTitle',
+    descKey: 'settings.notifications.onlyUnfocusedDesc',
   },
 ];
 
 export function NotificationsSection(props: SettingsSectionProps & { call: WarningCall }) {
   const { settings, onUpdate, call } = props;
+  const { t } = useI18n();
   const [blocked, setBlocked] = useState<string | null>(null);
 
   // NOTE: the operating system only asks for notification permission when the app posts its
@@ -269,14 +299,19 @@ export function NotificationsSection(props: SettingsSectionProps & { call: Warni
             className="btn btn-sm"
             onClick={() => void call(() => window.inova.openNotificationSettings())}
           >
-            Abrir ajustes de notificação
+            {t('settings.notifications.openSystemSettings')}
           </button>
         </div>
       )}
       {NOTIFICATION_ROWS.map((row) => {
         const id = `notification-${row.key}`;
         return (
-          <SettingRow key={row.key} htmlFor={id} title={row.title} description={row.description}>
+          <SettingRow
+            key={row.key}
+            htmlFor={id}
+            title={t(row.titleKey)}
+            description={t(row.descKey)}
+          >
             <Switch
               id={id}
               checked={settings.notifications[row.key]}
@@ -289,11 +324,11 @@ export function NotificationsSection(props: SettingsSectionProps & { call: Warni
         );
       })}
       <SettingRow
-        title="Notificação de teste"
-        description="Mostra uma notificação para conferir se o sistema a exibe."
+        title={t('settings.notifications.testTitle')}
+        description={t('settings.notifications.testDesc')}
       >
         <button type="button" className="btn" onClick={() => void requestPermission()}>
-          Enviar notificação de teste
+          {t('settings.notifications.testBtn')}
         </button>
       </SettingRow>
     </SettingGroup>
@@ -301,24 +336,31 @@ export function NotificationsSection(props: SettingsSectionProps & { call: Warni
 }
 
 export function ShortcutsSection({ isMac }: { isMac: boolean }) {
+  const { locale, t } = useI18n();
   return (
     <>
-      {groupShortcuts(SHORTCUTS).map(({ group, items }) => (
-        <SettingGroup key={group} title={group}>
-          <table className="shortcut-table" aria-label={`Atalhos: ${group}`}>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <th scope="row">{item.label}</th>
-                  <td>
-                    <kbd>{formatBinding(item.binding, isMac)}</kbd>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </SettingGroup>
-      ))}
+      {groupShortcuts(SHORTCUTS).map(({ group, items }) => {
+        const groupTitle = shortcutGroupLabel(group, locale);
+        return (
+          <SettingGroup key={group} title={groupTitle}>
+            <table
+              className="shortcut-table"
+              aria-label={t('settings.shortcuts.tableAria', { group: groupTitle })}
+            >
+              <tbody>
+                {items.map((item) => (
+                  <tr key={item.id}>
+                    <th scope="row">{shortcutLabel(item.id, locale)}</th>
+                    <td>
+                      <kbd>{formatBinding(item.binding, isMac)}</kbd>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </SettingGroup>
+        );
+      })}
     </>
   );
 }

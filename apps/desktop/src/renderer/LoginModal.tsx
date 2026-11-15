@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { LoginStage } from '../shared/api';
 import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, ExternalLinkIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { useDialogFocus } from './useDialogFocus';
@@ -26,32 +27,39 @@ interface LoginModalProps {
   onSubmitCode: (input: { sessionId: string; code: string }) => Promise<boolean>;
 }
 
-const STAGE_COPY: Record<LoginStage, { title: string; description: string }> = {
-  starting: {
-    title: 'Iniciando autenticação…',
-    description: 'Preparando o fluxo de login em segundo plano.',
-  },
-  'waiting-auth': {
-    title: 'Aguardando login no navegador',
-    description: 'Conclua a autorização na página aberta para desbloquear a conta.',
-  },
-  verifying: {
-    title: 'Validando credenciais…',
-    description: 'Confirmando o acesso e atualizando o status da conta.',
-  },
-  succeeded: {
-    title: 'Conta conectada',
-    description: 'Autenticação concluída e validada com sucesso.',
-  },
-  failed: {
-    title: 'Falha na autenticação',
-    description: 'Não foi possível concluir o login desta conta.',
-  },
-  canceled: {
-    title: 'Autenticação cancelada',
-    description: 'O fluxo de login foi interrompido.',
-  },
-};
+type TranslateFn = ReturnType<typeof useI18n>['t'];
+
+function stageCopy(stage: LoginStage, t: TranslateFn): { title: string; description: string } {
+  switch (stage) {
+    case 'starting':
+      return {
+        title: t('login.stage.starting.title'),
+        description: t('login.stage.starting.desc'),
+      };
+    case 'waiting-auth':
+      return {
+        title: t('login.stage.waitingAuth.title'),
+        description: t('login.stage.waitingAuth.desc'),
+      };
+    case 'verifying':
+      return {
+        title: t('login.stage.verifying.title'),
+        description: t('login.stage.verifying.desc'),
+      };
+    case 'succeeded':
+      return {
+        title: t('login.stage.succeeded.title'),
+        description: t('login.stage.succeeded.desc'),
+      };
+    case 'failed':
+      return { title: t('login.stage.failed.title'), description: t('login.stage.failed.desc') };
+    case 'canceled':
+      return {
+        title: t('login.stage.canceled.title'),
+        description: t('login.stage.canceled.desc'),
+      };
+  }
+}
 
 function stepIndexOf(stage: LoginStage): number {
   switch (stage) {
@@ -70,6 +78,7 @@ function stepIndexOf(stage: LoginStage): number {
 }
 
 export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: LoginModalProps) {
+  const { t } = useI18n();
   const [code, setCode] = useState('');
   const [submittingCode, setSubmittingCode] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -79,9 +88,9 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
 
   const inProgress =
     state.stage === 'starting' || state.stage === 'waiting-auth' || state.stage === 'verifying';
-  const copy = STAGE_COPY[state.stage];
+  const copy = stageCopy(state.stage, t);
   const stepIndex = stepIndexOf(state.stage);
-  const steps = ['Preparar provedor', 'Autorizar no navegador', 'Validar credenciais'];
+  const steps = [t('login.step.prepare'), t('login.step.authorize'), t('login.step.validate')];
 
   const handleDismiss = () => {
     if (inProgress && state.sessionId !== null) onCancel(state.sessionId);
@@ -138,21 +147,22 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
           <ProviderBadge provider={state.provider} size={28} />
           <div className="modal-title-group">
             <h2 id="login-modal-title" className="modal-title">
-              Conectar {PROVIDER_NAME[state.provider]}
+              {t('login.title', { provider: PROVIDER_NAME[state.provider] })}
             </h2>
             <span className="modal-subtitle">
-              Conta ·{' '}
-              {accountDisplayName({
-                label: state.accountLabel,
-                email: state.accountEmail,
+              {t('login.accountSubtitle', {
+                label: accountDisplayName({
+                  label: state.accountLabel,
+                  email: state.accountEmail,
+                }),
               })}
             </span>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar janela de login"
-            data-tooltip="Fechar janela de login"
+            aria-label={t('login.close')}
+            data-tooltip={t('login.close')}
             data-shortcut="dismiss"
             onClick={handleDismiss}
           >
@@ -218,11 +228,11 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
                 }}
               >
                 <ExternalLinkIcon size={13} />
-                Abrir link no navegador
+                {t('login.openBrowser')}
               </button>
               <button type="button" className="btn btn-sm" onClick={() => void handleCopy()}>
                 <CopyIcon size={13} />
-                {copied ? 'Link copiado' : 'Copiar link'}
+                {copied ? t('login.copiedLink') : t('login.copyLink')}
               </button>
             </div>
           )}
@@ -230,7 +240,7 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
           {inProgress && state.codePrompt && state.sessionId !== null && (
             <form className="login-code-form" onSubmit={(event) => void handleCodeSubmit(event)}>
               <label htmlFor="login-auth-code" className="login-code-label">
-                Se o navegador exibir um código de autorização, cole abaixo:
+                {t('login.codePromptLabel')}
               </label>
               <div className="login-code-row">
                 <input
@@ -238,7 +248,7 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
                   type="text"
                   className="field login-code-input"
                   value={code}
-                  placeholder="Cole o código aqui…"
+                  placeholder={t('login.codePlaceholder')}
                   disabled={submittingCode}
                   onChange={(event) => setCode(event.target.value)}
                 />
@@ -247,7 +257,7 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
                   className="btn btn-primary btn-sm"
                   disabled={code.trim() === '' || submittingCode}
                 >
-                  Confirmar
+                  {t('login.confirm')}
                 </button>
               </div>
             </form>
@@ -257,21 +267,21 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
         <div className="modal-footer">
           {inProgress && (
             <button type="button" className="btn" onClick={handleDismiss}>
-              Cancelar
+              {t('common.cancel')}
             </button>
           )}
           {state.stage === 'succeeded' && (
             <button type="button" className="btn btn-primary" onClick={onClose}>
-              Concluir
+              {t('login.done')}
             </button>
           )}
           {(state.stage === 'failed' || state.stage === 'canceled') && (
             <>
               <button type="button" className="btn" onClick={onClose}>
-                Fechar
+                {t('common.close')}
               </button>
               <button type="button" className="btn btn-primary" onClick={onRetry}>
-                Tentar novamente
+                {t('login.retry')}
               </button>
             </>
           )}

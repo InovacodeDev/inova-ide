@@ -1,4 +1,6 @@
+import type { SupportedLocale } from '@inova/core/types';
 import type { UpdateInfo, UpdateInstallStage } from '../shared/api';
+import { translate } from './i18n';
 
 export const UPDATE_DISMISSED_KEY = 'inova.update.dismissed';
 export const LAST_SEEN_VERSION_KEY = 'inova.lastSeenVersion';
@@ -9,16 +11,23 @@ export interface InstallStageView {
   percent: number;
 }
 
-const INSTALL_STAGES: Record<UpdateInstallStage, InstallStageView> = {
-  preparing: { label: 'Preparando a atualização…', percent: 5 },
-  fetching: { label: 'Atualizando o Homebrew…', percent: 15 },
-  downloading: { label: 'Baixando e instalando a versão nova…', percent: 35 },
-  finalizing: { label: 'Finalizando a instalação…', percent: 90 },
-  restarting: { label: 'Reiniciando o Inova…', percent: 100 },
+const INSTALL_STAGES_PERCENT: Record<UpdateInstallStage, number> = {
+  preparing: 5,
+  fetching: 15,
+  downloading: 35,
+  finalizing: 90,
+  restarting: 100,
 };
 
-export function installStageView(stage: UpdateInstallStage | null): InstallStageView {
-  return stage === null ? { label: 'Iniciando…', percent: 0 } : INSTALL_STAGES[stage];
+export function installStageView(
+  stage: UpdateInstallStage | null,
+  locale: SupportedLocale = 'pt-BR',
+): InstallStageView {
+  if (stage === null) return { label: translate(locale, 'update.stage.init'), percent: 0 };
+  return {
+    label: translate(locale, `update.stage.${stage}`),
+    percent: INSTALL_STAGES_PERCENT[stage],
+  };
 }
 
 export function isUpdateDismissed(input: { dismissed: string | null; latest: string | null }) {
@@ -53,8 +62,13 @@ export function publishedChangelog(source: string): string {
   return `${kept.join('\n').trimEnd()}\n`;
 }
 
-export function changelogTitle(input: { whatsNew: boolean; version: string | null }): string {
+export function changelogTitle(input: {
+  whatsNew: boolean;
+  version: string | null;
+  locale?: SupportedLocale;
+}): string {
+  const locale = input.locale ?? 'pt-BR';
   return input.whatsNew && input.version !== null
-    ? `Novidades da versão ${input.version}`
-    : 'Novidades';
+    ? translate(locale, 'changelog.titleVersion', { version: input.version })
+    : translate(locale, 'changelog.title');
 }

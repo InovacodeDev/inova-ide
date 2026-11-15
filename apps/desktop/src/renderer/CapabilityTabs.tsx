@@ -1,5 +1,6 @@
 import type { CapabilityKind, CapabilityListing } from '../shared/api';
-import { CAPABILITY_TABS } from './capabilities-state';
+import { CAPABILITY_TABS, capabilityTabLabel } from './capabilities-state';
+import { useI18n } from './I18nContext';
 import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import './capabilities.css';
 
@@ -12,13 +13,14 @@ export function CapabilityTabs(props: {
   onQuery: (query: string) => void;
 }) {
   const { listing, tabs, active, query, onSelect, onQuery } = props;
+  const { locale, t } = useI18n();
   const visible = CAPABILITY_TABS.filter(({ kind }) => tabs.includes(kind));
   return (
     <div className="capabilities-toolbar">
       <div
         className="capabilities-tabs"
         role="tablist"
-        aria-label="Categorias"
+        aria-label={t('capabilities.tabsAria')}
         onKeyDown={(event) =>
           handleHorizontalTabListKeyDown({
             event,
@@ -28,7 +30,7 @@ export function CapabilityTabs(props: {
           })
         }
       >
-        {visible.map(({ kind, label }) => (
+        {visible.map(({ kind }) => (
           <button
             key={kind}
             type="button"
@@ -38,7 +40,7 @@ export function CapabilityTabs(props: {
             className="capabilities-tab"
             onClick={() => onSelect(kind)}
           >
-            <span>{label}</span>
+            <span>{capabilityTabLabel(kind, locale)}</span>
             <span className="capabilities-tab-count mono">
               {listing.categories.find((entry) => entry.kind === kind)?.items.length}
             </span>
@@ -49,8 +51,8 @@ export function CapabilityTabs(props: {
         className="field capabilities-filter"
         value={query}
         onChange={(event) => onQuery(event.target.value)}
-        placeholder="filtrar"
-        aria-label="Filtrar itens"
+        placeholder={t('capabilities.filterPlaceholder')}
+        aria-label={t('capabilities.filterAria')}
       />
     </div>
   );

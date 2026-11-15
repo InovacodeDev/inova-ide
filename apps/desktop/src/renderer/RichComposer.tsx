@@ -16,6 +16,7 @@ import {
   lineBreakCommand,
   type ComposerFormat,
 } from './composer-format';
+import { useI18n } from './I18nContext';
 import { escapeHtml, markdownToHtml, normalizeLinkUrl, serializeMarkdown } from './rich-markdown';
 import {
   flattenRichText,
@@ -279,6 +280,7 @@ export function RichComposer({
   onActiveFormatsChange,
   onKeyDown,
 }: RichComposerProps) {
+  const { t } = useI18n();
   const editorRef = useRef<HTMLDivElement>(null);
   const linkInputRef = useRef<HTMLInputElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -559,9 +561,9 @@ export function RichComposer({
             className="rich-link-input"
             type="text"
             inputMode="url"
-            aria-label="Endereço do link"
+            aria-label={t('composer.linkAddressAria')}
             aria-invalid={linkPrompt.invalid}
-            placeholder="https://exemplo.com"
+            placeholder={t('composer.linkPlaceholder')}
             value={linkPrompt.url}
             onChange={(event) =>
               setLinkPrompt({ ...linkPrompt, url: event.target.value, invalid: false })
@@ -575,14 +577,14 @@ export function RichComposer({
           />
           {linkPrompt.invalid ? (
             <span className="rich-link-error" role="alert">
-              Use um endereço http, https ou mailto.
+              {t('composer.linkError')}
             </span>
           ) : null}
           <button type="submit" className="btn btn-sm btn-primary">
-            Aplicar
+            {t('common.apply')}
           </button>
           <button type="button" className="btn btn-sm" onClick={closeLinkPrompt}>
-            Cancelar
+            {t('common.cancel')}
           </button>
         </form>
       ) : null}
@@ -591,7 +593,7 @@ export function RichComposer({
         className="chat-input rich-input"
         role="textbox"
         aria-multiline="true"
-        aria-label="Mensagem"
+        aria-label={t('composer.messageAria')}
         aria-readonly={readOnly}
         contentEditable={!readOnly}
         data-placeholder={placeholder}

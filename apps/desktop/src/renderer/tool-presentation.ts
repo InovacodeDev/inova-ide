@@ -1,4 +1,6 @@
+import type { SupportedLocale } from '@inova/core/types';
 import type { ChatItem } from './chat-reducer';
+import { translate } from './i18n';
 
 type ToolItemInput = Pick<
   Extract<ChatItem, { type: 'tool' }>,
@@ -121,7 +123,10 @@ export function parseInputRecord(input: string): Record<string, unknown> | null 
   }
 }
 
-export function toolSummary(item: Pick<ToolItemInput, 'input' | 'output' | 'isError'>): {
+export function toolSummary(
+  item: Pick<ToolItemInput, 'input' | 'output' | 'isError'>,
+  locale: SupportedLocale = 'pt-BR',
+): {
   title: string;
   result: string | null;
 } {
@@ -133,10 +138,13 @@ export function toolSummary(item: Pick<ToolItemInput, 'input' | 'output' | 'isEr
   const title = firstLine(described ?? item.input);
   if (item.output === null || item.isError) return { title, result: null };
   const output = item.output.trim();
+  const lineCount = output.split('\n').length;
   const result =
     output === ''
-      ? 'sem saída'
-      : plural({ count: output.split('\n').length, one: 'linha', many: 'linhas' });
+      ? translate(locale, 'tool.noOutput')
+      : translate(locale, lineCount === 1 ? 'tool.lineSingular' : 'tool.linePlural', {
+          count: lineCount,
+        });
   return { title, result };
 }
 
@@ -421,6 +429,7 @@ function presentLookupTool(
   normalizedName: string,
   record: Record<string, unknown> | null,
   item: ToolItemInput,
+  locale: SupportedLocale,
 ): PresentedLookupTool {
   const hasOutput = item.output !== null && !item.isError;
   const lines = countOutputLines(item.output);
@@ -429,12 +438,14 @@ function presentLookupTool(
     return {
       kind: 'lookup',
       category: 'read',
-      label: 'Leitura',
+      label: translate(locale, 'tool.lookup.read'),
       target: formatReadTarget(record, item.input),
       detail: hasOutput
         ? lines === 0
-          ? 'arquivo vazio'
-          : plural({ count: lines, one: 'linha', many: 'linhas' })
+          ? translate(locale, 'tool.lookup.emptyFile')
+          : translate(locale, lines === 1 ? 'tool.lineSingular' : 'tool.linePlural', {
+              count: lines,
+            })
         : null,
       output: item.output,
     };
@@ -443,16 +454,24 @@ function presentLookupTool(
   if (SEARCH_TOOLS.has(normalizedName)) {
     const pattern = pickNonEmptyStr(record, ['pattern', 'Pattern', 'Query', 'query']);
     const scope = pickNonEmptyStr(record, ['path', 'SearchPath', 'SearchDirectory']);
-    const target = pattern ? (scope ? `${pattern} em ${scope}` : pattern) : firstLine(item.input);
+    const target = pattern
+      ? scope
+        ? translate(locale, 'tool.lookup.searchIn', { pattern, scope })
+        : pattern
+      : firstLine(item.input);
     return {
       kind: 'lookup',
       category: 'search',
-      label: 'Busca',
+      label: translate(locale, 'tool.lookup.search'),
       target,
       detail: hasOutput
         ? lines === 0
-          ? 'sem resultados'
-          : plural({ count: lines, one: 'correspondência', many: 'correspondências' })
+          ? translate(locale, 'tool.lookup.noResults')
+          : translate(
+              locale,
+              lines === 1 ? 'tool.lookup.matchSingular' : 'tool.lookup.matchPlural',
+              { count: lines },
+            )
         : null,
       output: item.output,
     };
@@ -471,12 +490,14 @@ function presentLookupTool(
     return {
       kind: 'lookup',
       category: 'files',
-      label: 'Arquivos',
+      label: translate(locale, 'tool.lookup.files'),
       target,
       detail: hasOutput
         ? lines === 0
-          ? 'vazio'
-          : plural({ count: lines, one: 'item', many: 'itens' })
+          ? translate(locale, 'tool.lookup.empty')
+          : translate(locale, lines === 1 ? 'tool.itemSingular' : 'tool.itemPlural', {
+              count: lines,
+            })
         : null,
       output: item.output,
     };
@@ -485,12 +506,14 @@ function presentLookupTool(
   return {
     kind: 'lookup',
     category: 'web',
-    label: 'Web',
+    label: translate(locale, 'tool.lookup.web'),
     target: pickNonEmptyStr(record, ['query', 'url', 'Url']) ?? firstLine(item.input),
     detail: hasOutput
       ? lines === 0
-        ? 'sem saída'
-        : plural({ count: lines, one: 'linha', many: 'linhas' })
+        ? translate(locale, 'tool.noOutput')
+        : translate(locale, lines === 1 ? 'tool.lineSingular' : 'tool.linePlural', {
+            count: lines,
+          })
       : null,
     output: item.output,
   };
@@ -524,7 +547,7 @@ function formatEntryValue(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? '';
 }
 
-export function presentTool(item: ToolItemInput): PresentedTool {
+export function presentTool(item: ToolItemInput, locale: SupportedLocale = 'pt-BR'): PresentedTool {
   const normalizedName = item.name.trim().toLowerCase();
   const record = parseInputRecord(item.input);
 
@@ -553,7 +576,7 @@ export function presentTool(item: ToolItemInput): PresentedTool {
     FILES_TOOLS.has(normalizedName) ||
     WEB_TOOLS.has(normalizedName)
   ) {
-    return presentLookupTool(normalizedName, record, item);
+    return presentLookupTool(normalizedName, record, item, locale);
   }
 
   if (normalizedName === 'todowrite') {
@@ -561,7 +584,7 @@ export function presentTool(item: ToolItemInput): PresentedTool {
     if (todo) return todo;
   }
 
-  const summary = toolSummary(item);
+  const summary = toolSummary(item, locale);
   const entries = record
     ? Object.entries(record).map(([key, value]) => ({ key, value: formatEntryValue(value) }))
     : [];

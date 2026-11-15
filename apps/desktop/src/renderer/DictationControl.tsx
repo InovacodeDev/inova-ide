@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useI18n } from './I18nContext';
 import { MicIcon } from './icons';
 import { ANALYSER_FFT_SIZE, type Dictation } from './useDictation';
 import { barHeights, WAVEFORM_BARS } from './waveform';
@@ -73,8 +74,9 @@ function ListeningIcon() {
 }
 
 export function DictationControl({ dictation }: { dictation: Dictation }) {
+  const { t } = useI18n();
   const recording = dictation.phase === 'recording';
-  const label = recording ? 'Parar ditado e transcrever' : 'Ditar mensagem';
+  const label = recording ? t('dictation.stopAndTranscribe') : t('dictation.start');
   return (
     <>
       {recording ? <VoiceWaveform getLevels={dictation.getLevels} /> : null}

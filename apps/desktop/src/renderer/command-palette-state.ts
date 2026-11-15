@@ -1,4 +1,5 @@
-import type { ExecutionMode } from '@inova/core/types';
+import type { ExecutionMode, SupportedLocale } from '@inova/core/types';
+import { translate } from './i18n';
 import type { ShortcutId } from './shortcuts';
 
 export type CommandPaletteCategory = 'Ações' | 'Sessões' | 'Projetos' | 'Modelos' | 'Modos';
@@ -53,6 +54,14 @@ export interface BuildCommandPaletteInput {
     shortcutId?: ShortcutId;
     keywords?: readonly string[];
   }[];
+  readonly locale?: SupportedLocale;
+}
+
+export function paletteCategoryLabel(
+  category: CommandPaletteCategory,
+  locale: SupportedLocale = 'pt-BR',
+): string {
+  return translate(locale, `palette.cat.${category}`);
 }
 
 const CATEGORY_ORDER: readonly CommandPaletteCategory[] = [
@@ -70,6 +79,12 @@ function sessionRank(session: BuildCommandPaletteInput['sessions'][number]): num
 }
 
 export function buildCommandPaletteItems(input: BuildCommandPaletteInput): CommandPaletteItem[] {
+  const locale = input.locale ?? 'pt-BR';
+  const activeBadge = translate(locale, 'palette.activeBadge');
+  const archivedBadge = translate(locale, 'palette.archivedBadge');
+  const newSessionBadge = translate(locale, 'palette.newSessionItem');
+  const currentBadge = translate(locale, 'palette.currentBadge');
+
   const actionItems: CommandPaletteItem[] = input.actions.map((action) => ({
     id: action.id,
     category: 'Ações',
@@ -88,13 +103,13 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     subtitle: `${session.projectName} · ${session.providerLabel}${
       session.branch ? ` · ${session.branch}` : ''
     }`,
-    ...(session.active ? { badge: 'Ativa' } : session.archived ? { badge: 'Arquivada' } : {}),
+    ...(session.active ? { badge: activeBadge } : session.archived ? { badge: archivedBadge } : {}),
     active: session.active,
     keywords: [
       session.projectName,
       session.providerLabel,
       ...(session.branch ? [session.branch] : []),
-      ...(session.archived ? ['arquivada'] : []),
+      ...(session.archived ? ['arquivada', 'archived'] : []),
     ],
   }));
 
@@ -103,8 +118,15 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     category: 'Projetos',
     title: project.name,
     subtitle: `${project.accountLabel} · ${project.path}`,
-    badge: 'Nova sessão',
-    keywords: [project.path, project.accountLabel, 'projeto', 'nova sessão'],
+    badge: newSessionBadge,
+    keywords: [
+      project.path,
+      project.accountLabel,
+      'projeto',
+      'project',
+      'nova sessão',
+      'new session',
+    ],
   }));
 
   const modelItems: CommandPaletteItem[] = input.models.map((model) => ({
@@ -112,9 +134,9 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     category: 'Modelos',
     title: model.label,
     subtitle: model.id,
-    ...(model.active ? { badge: 'Atual' } : {}),
+    ...(model.active ? { badge: currentBadge } : {}),
     active: model.active,
-    keywords: [model.id, 'modelo'],
+    keywords: [model.id, 'modelo', 'model'],
   }));
 
   const modeItems: CommandPaletteItem[] = input.modes.map((mode) => ({
@@ -122,9 +144,9 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     category: 'Modos',
     title: mode.label,
     subtitle: mode.id,
-    ...(mode.active ? { badge: 'Atual' } : {}),
+    ...(mode.active ? { badge: currentBadge } : {}),
     active: mode.active,
-    keywords: [mode.id, 'modo'],
+    keywords: [mode.id, 'modo', 'mode'],
   }));
 
   return [...actionItems, ...sessionItems, ...projectItems, ...modelItems, ...modeItems];

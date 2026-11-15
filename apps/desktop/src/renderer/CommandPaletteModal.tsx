@@ -3,9 +3,11 @@ import {
   filterCommandPaletteItems,
   groupCommandPaletteItems,
   moveCommandPaletteIndex,
+  paletteCategoryLabel,
   type CommandPaletteItem,
 } from './command-palette-state';
 import { CloseIcon, SearchIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { formatShortcut } from './shortcuts';
 import { useDialogFocus } from './useDialogFocus';
 
@@ -17,6 +19,7 @@ interface CommandPaletteModalProps {
 }
 
 export function CommandPaletteModal({ items, isMac, onSelect, onClose }: CommandPaletteModalProps) {
+  const { locale, t } = useI18n();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -76,7 +79,7 @@ export function CommandPaletteModal({ items, isMac, onSelect, onClose }: Command
       className="modal-backdrop command-palette-backdrop"
       role="dialog"
       aria-modal="true"
-      aria-label="Paleta de comandos"
+      aria-label={t('palette.dialogAria')}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -100,29 +103,31 @@ export function CommandPaletteModal({ items, isMac, onSelect, onClose }: Command
               setQuery(event.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Buscar sessões, projetos, modelos, modos ou ações..."
-            aria-label="Buscar comandos"
+            placeholder={t('palette.searchPlaceholder')}
+            aria-label={t('palette.searchAria')}
             aria-activedescendant={selectedItem ? `cmd-item-${selectedItem.id}` : undefined}
           />
           <button
             type="button"
             className="icon-btn icon-btn-sm"
-            aria-label="Fechar paleta"
+            aria-label={t('palette.close')}
             data-shortcut="dismiss"
             onClick={onClose}
           >
             <CloseIcon size={14} />
           </button>
         </div>
-        <div className="command-palette-list" role="listbox" aria-label="Comandos disponíveis">
+        <div className="command-palette-list" role="listbox" aria-label={t('palette.listAria')}>
           {groups.length === 0 ? (
             <div className="command-palette-empty">
-              Nenhum comando encontrado para "{query.trim()}".
+              {t('palette.empty', { query: query.trim() })}
             </div>
           ) : (
             groups.map((group) => (
               <div key={group.category} className="command-palette-group">
-                <div className="command-palette-group-title">{group.category}</div>
+                <div className="command-palette-group-title">
+                  {paletteCategoryLabel(group.category, locale)}
+                </div>
                 {group.items.map((item) => {
                   const rowIndex = indexById.get(item.id) ?? -1;
                   const selected = rowIndex === activeIndex;
@@ -178,13 +183,13 @@ export function CommandPaletteModal({ items, isMac, onSelect, onClose }: Command
         </div>
         <div className="command-palette-footer">
           <span>
-            <kbd className="command-palette-kbd">↑↓</kbd> navegar
+            <kbd className="command-palette-kbd">↑↓</kbd> {t('palette.navHint')}
           </span>
           <span>
-            <kbd className="command-palette-kbd">↵</kbd> executar
+            <kbd className="command-palette-kbd">↵</kbd> {t('palette.execHint')}
           </span>
           <span>
-            <kbd className="command-palette-kbd">Esc</kbd> fechar
+            <kbd className="command-palette-kbd">Esc</kbd> {t('palette.closeHint')}
           </span>
         </div>
       </div>

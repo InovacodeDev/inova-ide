@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { VerificationCheck } from '@inova/core/types';
 import type { ProjectView } from '../shared/api';
 import { CloseIcon, SettingsIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { openModalCount } from './modal-layers';
 import { folderName } from './path-name';
 import { addCustomCheck, removeCheck, toggleCheck } from './project-checks';
@@ -29,6 +30,7 @@ interface ProjectSettingsModalProps {
 export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
   const { project, running, canRunVerification, onUpdate, onDetectChecks, onRunVerification } =
     props;
+  const { t } = useI18n();
   const [newCommand, setNewCommand] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(props.onClose);
@@ -73,7 +75,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
           <SettingsIcon size={17} />
           <div className="modal-title-group">
             <h2 id="project-settings-title" className="modal-title">
-              Configurações do projeto
+              {t('projectSettings.title')}
             </h2>
             <span className="modal-subtitle" title={project.path}>
               {folderName(project.path)}
@@ -82,8 +84,8 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar configurações do projeto"
-            data-tooltip="Fechar configurações do projeto"
+            aria-label={t('projectSettings.close')}
+            data-tooltip={t('projectSettings.close')}
             data-shortcut="dismiss"
             onClick={props.onClose}
           >
@@ -91,11 +93,11 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
           </button>
         </div>
         <div className="settings-panel project-settings-body">
-          <SettingGroup title="Automação">
+          <SettingGroup title={t('projectSettings.automationTitle')}>
             <SettingRow
               htmlFor="project-auto-worktree"
-              title="Criar worktree para cada nova sessão"
-              description="Isola cada sessão em uma worktree própria do repositório."
+              title={t('projectSettings.autoWorktreeTitle')}
+              description={t('projectSettings.autoWorktreeDesc')}
             >
               <Switch
                 id="project-auto-worktree"
@@ -105,8 +107,8 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
             </SettingRow>
             <SettingRow
               htmlFor="project-auto-verify"
-              title="Verificar após cada turno"
-              description="Executa os comandos de verificação ativos ao fim de cada turno."
+              title={t('projectSettings.autoVerifyTitle')}
+              description={t('projectSettings.autoVerifyDesc')}
             >
               <Switch
                 id="project-auto-verify"
@@ -115,10 +117,10 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
               />
             </SettingRow>
           </SettingGroup>
-          <SettingGroup title="Comandos de verificação">
+          <SettingGroup title={t('projectSettings.checksTitle')}>
             <div className="project-settings-actions">
               <button type="button" className="btn btn-sm" onClick={onDetectChecks}>
-                Detectar comandos
+                {t('projectSettings.detectChecks')}
               </button>
               {canRunVerification ? (
                 <button
@@ -127,7 +129,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
                   disabled={running || !checks.some((check) => check.enabled)}
                   onClick={onRunVerification}
                 >
-                  Executar verificação
+                  {t('projectSettings.runVerification')}
                 </button>
               ) : null}
             </div>
@@ -148,8 +150,8 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
                     <button
                       type="button"
                       className="btn btn-sm"
-                      aria-label={`Remover ${check.label}`}
-                      data-tooltip="Remover comando de verificação"
+                      aria-label={t('projectSettings.removeCheckAria', { label: check.label })}
+                      data-tooltip={t('projectSettings.removeCheckTooltip')}
                       onClick={() =>
                         onUpdate({ verificationChecks: removeCheck({ checks, id: check.id }) })
                       }
@@ -160,15 +162,15 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
                 ))}
               </ul>
             ) : (
-              <p className="setting-group-desc">Nenhum comando configurado.</p>
+              <p className="setting-group-desc">{t('projectSettings.noChecks')}</p>
             )}
             <div className="project-settings-add">
               <input
                 type="text"
                 className="field"
                 value={newCommand}
-                placeholder="Comando (ex: pnpm test)"
-                aria-label="Novo comando de verificação"
+                placeholder={t('projectSettings.newCheckPlaceholder')}
+                aria-label={t('projectSettings.newCheckAria')}
                 onChange={(event) => setNewCommand(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -183,7 +185,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
                 disabled={newCommand.trim() === ''}
                 onClick={submitCustomCheck}
               >
-                Adicionar
+                {t('projectSettings.add')}
               </button>
             </div>
           </SettingGroup>

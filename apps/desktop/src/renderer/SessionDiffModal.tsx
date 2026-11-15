@@ -1,14 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
 import type { WorktreeStatusView } from '../shared/api';
 import {
+  gitStatusTitle,
   parseUnifiedGitDiff,
   splitFilePath,
   STATUS_BADGE,
-  STATUS_TITLE,
   summarizeGitChanges,
   type GitDiffLine,
 } from './git-diff-presentation';
 import { CloseIcon, GitBranchIcon, RefreshIcon, RotateCcwIcon, ShieldCheckIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { useDialogFocus } from './useDialogFocus';
 
 interface SessionDiffModalProps {
@@ -46,6 +47,7 @@ export function SessionDiffModal({
   onReviewDiff,
   onRevertFiles,
 }: SessionDiffModalProps) {
+  const { locale, t } = useI18n();
   const files = useMemo(
     () => parseUnifiedGitDiff({ diff: status.diff, changedFiles: status.changedFiles }),
     [status.diff, status.changedFiles],
@@ -72,12 +74,13 @@ export function SessionDiffModal({
           <GitBranchIcon size={17} />
           <div className="modal-title-group">
             <h2 id="worktree-diff-title" className="modal-title">
-              Alterações do worktree ({status.branch || 'HEAD'})
+              {t('diff.titleBranch', { branch: status.branch || 'HEAD' })}
             </h2>
             {summary.fileCount > 0 ? (
               <div className="session-diff-header-meta mono">
                 <span>
-                  {summary.fileCount} {summary.fileCount === 1 ? 'arquivo' : 'arquivos'}
+                  {summary.fileCount}{' '}
+                  {summary.fileCount === 1 ? t('diff.fileSingular') : t('diff.filePlural')}
                 </span>
                 <span className="chat-diff-stat-add">+{summary.addedLines}</span>
                 <span className="chat-diff-stat-del">-{summary.removedLines}</span>
@@ -87,8 +90,8 @@ export function SessionDiffModal({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Atualizar diff"
-            data-tooltip="Atualizar diff"
+            aria-label={t('diff.refresh')}
+            data-tooltip={t('diff.refresh')}
             onClick={onRefresh}
           >
             <RefreshIcon size={15} />
@@ -96,8 +99,8 @@ export function SessionDiffModal({
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar diff do worktree"
-            data-tooltip="Fechar diff do worktree"
+            aria-label={t('diff.closeWorktree')}
+            data-tooltip={t('diff.closeWorktree')}
             data-shortcut="dismiss"
             onClick={onClose}
           >
@@ -106,10 +109,14 @@ export function SessionDiffModal({
         </div>
         <div className={files.length === 0 ? 'modal-body' : 'modal-body session-diff-body'}>
           {files.length === 0 ? (
-            <p className="modal-description">Nenhuma alteração pendente em relação à base.</p>
+            <p className="modal-description">{t('diff.emptyBase')}</p>
           ) : (
             <div className="session-diff-layout">
-              <div className="session-diff-sidebar" role="list" aria-label="Arquivos alterados">
+              <div
+                className="session-diff-sidebar"
+                role="list"
+                aria-label={t('diff.changedFilesAria')}
+              >
                 {files.map((file) => {
                   const { fileName, dirName } = splitFilePath(file.path);
                   const active = selectedFile?.path === file.path;
@@ -148,8 +155,8 @@ export function SessionDiffModal({
                       <button
                         type="button"
                         className="icon-btn session-diff-file-revert"
-                        aria-label={`Reverter ${file.path}`}
-                        data-tooltip="Reverter arquivo"
+                        aria-label={t('diff.revertFileAria', { path: file.path })}
+                        data-tooltip={t('diff.revertFile')}
                         disabled={busy}
                         onClick={() => void onRevertFiles([file.path])}
                       >
@@ -164,7 +171,7 @@ export function SessionDiffModal({
                   <div className="session-diff-file-header">
                     <div className="session-diff-file-title">
                       <span className="session-git-badge" data-status={selectedFile.status}>
-                        {STATUS_TITLE[selectedFile.status]}
+                        {gitStatusTitle(selectedFile.status, locale)}
                       </span>
                       <span className="session-diff-file-path mono">{selectedFile.path}</span>
                       {selectedFile.oldPath ? (
@@ -181,19 +188,15 @@ export function SessionDiffModal({
                         onClick={() => void onRevertFiles([selectedFile.path])}
                       >
                         <RotateCcwIcon size={13} />
-                        Reverter arquivo
+                        {t('diff.revertFile')}
                       </button>
                     </div>
                   </div>
                   <div className="session-diff-table-wrap">
                     {selectedFile.binary ? (
-                      <p className="session-details-empty">
-                        Arquivo binário alterado — visualização textual indisponível.
-                      </p>
+                      <p className="session-details-empty">{t('diff.binaryChanged')}</p>
                     ) : selectedFile.lines.length === 0 ? (
-                      <p className="session-details-empty">
-                        Sem linhas de diff textual para exibir.
-                      </p>
+                      <p className="session-details-empty">{t('diff.noHunks')}</p>
                     ) : (
                       <div className="chat-diff-view session-diff-view">
                         {selectedFile.lines.map((line, index) =>
@@ -223,7 +226,7 @@ export function SessionDiffModal({
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onClose}>
-            Fechar
+            {t('common.close')}
           </button>
           {files.length > 0 ? (
             <button
@@ -232,7 +235,7 @@ export function SessionDiffModal({
               disabled={busy}
               onClick={() => void onRevertFiles(files.map((file) => file.path))}
             >
-              Reverter tudo
+              {t('diff.revertAll')}
             </button>
           ) : null}
           {files.length > 0 && onReviewDiff ? (
@@ -243,7 +246,7 @@ export function SessionDiffModal({
               onClick={onReviewDiff}
             >
               <ShieldCheckIcon size={14} />
-              Revisar diff
+              {t('diff.reviewDiff')}
             </button>
           ) : null}
           {hasWorktree && files.length > 0 && onApplyWorktree ? (
@@ -253,7 +256,7 @@ export function SessionDiffModal({
               disabled={busy}
               onClick={onApplyWorktree}
             >
-              Aplicar no projeto principal
+              {t('diff.applyToMain')}
             </button>
           ) : null}
         </div>

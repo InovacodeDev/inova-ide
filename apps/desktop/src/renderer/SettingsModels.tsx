@@ -1,4 +1,4 @@
-import { EFFORT_LABEL, PROVIDER_MODELS } from '@inova/core/models';
+import { PROVIDER_MODELS } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type {
   EffortLevel,
@@ -7,8 +7,9 @@ import type {
   Settings,
   SettingsPatch,
 } from '@inova/core/types';
-import { effectiveModeForSession } from './mode-picker-state';
-import { resolveModelOptions } from './model-picker-state';
+import { useI18n } from './I18nContext';
+import { effectiveModeForSession, modeOptionText } from './mode-picker-state';
+import { effortLabel, resolveModelOptions } from './model-picker-state';
 import { PlatformSelect } from './PlatformSelect';
 import { PROVIDER_NAME } from './provider-meta';
 import { SettingGroup, SettingRow } from './settings-controls';
@@ -22,6 +23,7 @@ export function ModelsSection(props: {
   onSetDefaultMode: (provider: ProviderId, mode: ExecutionMode) => void;
 }) {
   const { settings, defaultModes, onUpdate, onSetDefaultMode } = props;
+  const { locale, t } = useI18n();
   return (
     <>
       {PROVIDERS.map((provider) => {
@@ -30,20 +32,21 @@ export function ModelsSection(props: {
         const current = settings.models[provider];
         const name = PROVIDER_NAME[provider];
         return (
-          <SettingGroup
-            key={provider}
-            title={name}
-            description="Padrões usados quando a sessão não escolhe outro valor."
-          >
-            <SettingRow title="Modelo" description="Modelo que inicia novas sessões.">
+          <SettingGroup key={provider} title={name} description={t('settings.models.providerDesc')}>
+            <SettingRow
+              title={t('settings.models.modelTitle')}
+              description={t('settings.models.modelDesc')}
+            >
               <PlatformSelect
-                ariaLabel={`Modelo padrão: ${name}`}
+                ariaLabel={t('settings.models.modelAria', { provider: name })}
                 value={current.model ?? ''}
-                options={resolveModelOptions({ model: current.model, catalog }).map((option) => ({
-                  value: option.id,
-                  label: option.label,
-                  ...(option.description ? { description: option.description } : {}),
-                }))}
+                options={resolveModelOptions({ model: current.model, catalog, locale }).map(
+                  (option) => ({
+                    value: option.id,
+                    label: option.label,
+                    ...(option.description ? { description: option.description } : {}),
+                  }),
+                )}
                 onChange={(value) =>
                   onUpdate({
                     models: { [provider]: { ...current, model: value === '' ? null : value } },
@@ -51,28 +54,37 @@ export function ModelsSection(props: {
                 }
               />
             </SettingRow>
-            <SettingRow title="Esforço" description="Quanto o modelo raciocina antes de responder.">
+            <SettingRow
+              title={t('settings.models.effortTitle')}
+              description={t('settings.models.effortDesc')}
+            >
               <PlatformSelect
-                ariaLabel={`Esforço padrão: ${name}`}
+                ariaLabel={t('settings.models.effortAria', { provider: name })}
                 value={current.effort}
                 options={catalog.efforts.map((level) => ({
                   value: level,
-                  label: EFFORT_LABEL[level],
+                  label: effortLabel(level, locale),
                 }))}
                 onChange={(value) =>
                   onUpdate({ models: { [provider]: { ...current, effort: value as EffortLevel } } })
                 }
               />
             </SettingRow>
-            <SettingRow title="Modo" description="Quanto o agente pode agir sem pedir aprovação.">
+            <SettingRow
+              title={t('settings.models.modeTitle')}
+              description={t('settings.models.modeDesc')}
+            >
               <PlatformSelect
-                ariaLabel={`Modo padrão: ${name}`}
+                ariaLabel={t('settings.models.modeAria', { provider: name })}
                 value={effectiveModeForSession({ provider, defaultModes })}
-                options={modes.options.map((option) => ({
-                  value: option.id,
-                  label: option.label,
-                  description: option.description,
-                }))}
+                options={modes.options.map((option) => {
+                  const text = modeOptionText(provider, option, locale);
+                  return {
+                    value: option.id,
+                    label: text.label,
+                    description: text.description,
+                  };
+                })}
                 onChange={(value) => {
                   const chosen = modes.options.find((option) => option.id === value);
                   if (chosen) onSetDefaultMode(provider, chosen.id);

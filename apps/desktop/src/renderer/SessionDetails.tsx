@@ -51,6 +51,7 @@ function PinnedMemoryField({
   disabled?: boolean;
   onSave: (value: string | null) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const initialValue = value ?? '';
   const [draft, setDraft] = useState(initialValue);
   const [saving, setSaving] = useState(false);
@@ -95,7 +96,7 @@ function PinnedMemoryField({
             }
           }}
         >
-          Limpar
+          {t('details.clearMemory')}
         </button>
         <button
           type="button"
@@ -103,7 +104,7 @@ function PinnedMemoryField({
           disabled={saving || disabled || !dirty}
           onClick={() => void commit(normalizedDraft === '' ? null : normalizedDraft)}
         >
-          {saving ? 'Salvando...' : 'Salvar'}
+          {saving ? t('common.saving') : t('common.save')}
         </button>
       </div>
     </div>
@@ -117,20 +118,25 @@ function ContextBreakdownPanel({
   sessionId: string;
   usedTokens: number | null;
 }) {
-  const { breakdown, error, loading, refresh } = useContextBreakdown({ sessionId, usedTokens });
+  const { t, locale } = useI18n();
+  const { breakdown, error, loading, refresh } = useContextBreakdown({
+    sessionId,
+    usedTokens,
+    locale,
+  });
   const maxTokens = Math.max(1, ...(breakdown?.categories.map((item) => item.tokens) ?? []));
 
   return (
     <div className="context-breakdown" aria-busy={loading}>
       <div className="context-breakdown-head">
         <span className="context-breakdown-status">
-          {loading ? 'Atualizando…' : breakdown ? 'Estimativa do Claude Code' : ''}
+          {loading ? t('common.updating') : breakdown ? t('details.contextStatusEstimate') : ''}
         </span>
         <button
           type="button"
           className="icon-btn context-breakdown-refresh"
-          aria-label="Atualizar detalhamento do contexto"
-          data-tooltip="Atualizar detalhamento do contexto"
+          aria-label={t('details.refreshContextAria')}
+          data-tooltip={t('details.refreshContextAria')}
           disabled={loading}
           onClick={refresh}
         >
@@ -139,7 +145,7 @@ function ContextBreakdownPanel({
       </div>
       {error !== null ? <p className="context-breakdown-error">{error}</p> : null}
       {breakdown === null && error === null && loading ? (
-        <p className="context-breakdown-empty">Lendo o contexto…</p>
+        <p className="context-breakdown-empty">{t('details.contextReading')}</p>
       ) : null}
       {breakdown !== null ? (
         <>
@@ -151,7 +157,9 @@ function ContextBreakdownPanel({
                 data-reserved={isReservedCategory(category.name)}
               >
                 <div className="context-breakdown-row">
-                  <span className="context-breakdown-name">{categoryLabel(category.name)}</span>
+                  <span className="context-breakdown-name">
+                    {categoryLabel(category.name, locale)}
+                  </span>
                   <span className="context-breakdown-tokens mono">
                     {formatTokens(category.tokens)}
                     {category.percent !== null ? ` · ${category.percent}%` : ''}
@@ -172,7 +180,10 @@ function ContextBreakdownPanel({
             <details key={`${sectionIndex}-${section.title}`} className="context-breakdown-section">
               <summary className="context-breakdown-row">
                 <span className="context-breakdown-name">
-                  {sectionLabel(section.title)} ({section.rows.length})
+                  {t('details.contextSectionCount', {
+                    label: sectionLabel(section.title, locale),
+                    count: section.rows.length,
+                  })}
                 </span>
                 <span className="context-breakdown-tokens mono">
                   {formatTokens(sectionTotal(section))}
@@ -208,11 +219,14 @@ function ContextBreakdownPanel({
   );
 }
 
-function formatUsageCost(totals: SessionUsageTotals | null | undefined): string {
+function formatUsageCost(
+  totals: SessionUsageTotals | null | undefined,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
   if (!totals || totals.turns === 0) return '$0.0000';
   if (totals.costTurns === 0) return '—';
   const base = formatCostUsd(totals.costUsd);
-  return totals.costTurns < totals.turns ? `${base} (parcial)` : base;
+  return totals.costTurns < totals.turns ? t('details.partialCost', { cost: base }) : base;
 }
 
 function SessionUsagePanel({
@@ -226,6 +240,7 @@ function SessionUsagePanel({
   projectSessionCount?: number;
   turnUsages?: readonly TurnUsageEntry[];
 }) {
+  const { t } = useI18n();
   const sessionTotals = sessionUsage ?? {
     costUsd: 0,
     costTurns: 0,
@@ -242,24 +257,24 @@ function SessionUsagePanel({
     <div className="session-usage-panel">
       <div className="session-usage-block">
         <div className="session-usage-head">
-          <span className="session-details-subhead">Custos e tokens (sessão)</span>
-          <span className="session-usage-cost mono">{formatUsageCost(sessionTotals)}</span>
+          <span className="session-details-subhead">{t('details.sessionCostsTitle')}</span>
+          <span className="session-usage-cost mono">{formatUsageCost(sessionTotals, t)}</span>
         </div>
         <dl className="session-usage-grid mono">
           <div>
-            <dt>Entrada</dt>
+            <dt>{t('details.inputLabel')}</dt>
             <dd>{formatTokens(sessionTotals.inputTokens)}</dd>
           </div>
           <div>
-            <dt>Saída</dt>
+            <dt>{t('details.outputLabel')}</dt>
             <dd>{formatTokens(sessionTotals.outputTokens)}</dd>
           </div>
           <div>
-            <dt>Cache leitura</dt>
+            <dt>{t('details.cacheReadLabel')}</dt>
             <dd>{formatTokens(sessionTotals.cacheReadTokens)}</dd>
           </div>
           <div>
-            <dt>Cache escrita</dt>
+            <dt>{t('details.cacheWriteLabel')}</dt>
             <dd>{formatTokens(sessionTotals.cacheWriteTokens)}</dd>
           </div>
         </dl>
@@ -267,14 +282,23 @@ function SessionUsagePanel({
       <div className="session-usage-block">
         <div className="session-usage-head">
           <span className="session-details-subhead">
-            Total do projeto ({projectSessionCount}{' '}
-            {projectSessionCount === 1 ? 'sessão' : 'sessões'})
+            {t('details.projectTotalTitle', {
+              count: projectSessionCount,
+              unit:
+                projectSessionCount === 1
+                  ? t('details.sessionSingular')
+                  : t('details.sessionPlural'),
+            })}
           </span>
-          <span className="session-usage-cost mono">{formatUsageCost(projectTotals)}</span>
+          <span className="session-usage-cost mono">{formatUsageCost(projectTotals, t)}</span>
         </div>
         <div className="session-usage-project-tokens mono">
-          <span>Ent: {formatTokens(projectTotals.inputTokens)}</span>
-          <span>Saí: {formatTokens(projectTotals.outputTokens)}</span>
+          <span>
+            {t('details.inShort')}: {formatTokens(projectTotals.inputTokens)}
+          </span>
+          <span>
+            {t('details.outShort')}: {formatTokens(projectTotals.outputTokens)}
+          </span>
           <span>
             Cache: {formatTokens(projectTotals.cacheReadTokens + projectTotals.cacheWriteTokens)}
           </span>
@@ -283,21 +307,29 @@ function SessionUsagePanel({
       {turnUsages.length > 0 ? (
         <details className="context-breakdown-section">
           <summary className="context-breakdown-row">
-            <span className="context-breakdown-name">Por turno ({turnUsages.length})</span>
-            <span className="context-breakdown-tokens mono">{sessionTotals.turns} turnos</span>
+            <span className="context-breakdown-name">
+              {t('details.byTurnTitle', { count: turnUsages.length })}
+            </span>
+            <span className="context-breakdown-tokens mono">
+              {t('details.turnsCount', { count: sessionTotals.turns })}
+            </span>
           </summary>
           <ul className="session-usage-turns">
             {turnUsages.map((turn, index) => (
               <li key={`${turn.turnIndex}-${index}`} className="session-usage-turn-row">
                 <div className="session-usage-turn-top">
                   <span className="session-usage-turn-title">
-                    #{index + 1} {turn.promptPreview || '(turno sem título)'}
+                    #{index + 1} {turn.promptPreview || t('details.untitledTurn')}
                   </span>
                   <span className="mono">{formatCostUsd(turn.costUsd)}</span>
                 </div>
                 <div className="session-usage-turn-meta mono">
-                  <span>Ent {formatTokens(turn.inputTokens)}</span>
-                  <span>Saí {formatTokens(turn.outputTokens)}</span>
+                  <span>
+                    {t('details.inShort')} {formatTokens(turn.inputTokens)}
+                  </span>
+                  <span>
+                    {t('details.outShort')} {formatTokens(turn.outputTokens)}
+                  </span>
                   <span>Cache {formatTokens(turn.cacheReadTokens + turn.cacheWriteTokens)}</span>
                 </div>
               </li>
@@ -341,12 +373,6 @@ interface SessionDetailsProps {
   onSaveSessionPinnedMemory?: (value: string | null) => Promise<void>;
 }
 
-const SUBAGENT_STATUS_TEXT: Record<SubagentStatus, string> = {
-  running: 'rodando',
-  done: 'concluído',
-  error: 'erro',
-};
-
 export function SessionDetails({
   sessionId,
   subagents = [],
@@ -378,7 +404,7 @@ export function SessionDetails({
   onSaveProjectPinnedMemory,
   onSaveSessionPinnedMemory,
 }: SessionDetailsProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const contextSummary = contextLabel(context);
   const hasPinnedMemory = Boolean(sessionPinnedMemory?.trim() || projectPinnedMemory?.trim());
   const [breakdownOpen, setBreakdownOpen] = useState(false);
@@ -388,6 +414,7 @@ export function SessionDetails({
     sessionId,
     running,
     revision: gitRevision,
+    locale,
   });
   const gitFiles = useMemo(
     () =>
@@ -405,19 +432,25 @@ export function SessionDetails({
     subagents,
     worktreeBranch,
     changedFilesCount: gitFiles.length,
+    locale,
   });
   const counts = subagentSummaryCounts(subagents);
   const hasActions = Boolean(
     (worktreeBranch && (onInspectWorktree || onApplyWorktree)) || onHandoff,
   );
+  const subagentStatusLabel = (status: SubagentStatus): string => {
+    if (status === 'running') return t('details.subagent.running');
+    if (status === 'done') return t('details.subagent.done');
+    return t('details.subagent.error');
+  };
 
   return (
-    <aside className="session-details" aria-label="Detalhes da sessão">
+    <aside className="session-details" aria-label={t('details.asideAria')}>
       <div className="session-details-top">
         <div
           className="session-details-tabs"
           role="tablist"
-          aria-label="Abas do inspetor"
+          aria-label={t('details.tabsAria')}
           onKeyDown={(event) =>
             handleHorizontalTabListKeyDown({
               event,
@@ -454,7 +487,7 @@ export function SessionDetails({
                 <div
                   className="session-details-meter"
                   role="progressbar"
-                  aria-label="Uso do contexto"
+                  aria-label={t('details.contextUsageAria')}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={contextSummary.percent}
@@ -474,8 +507,8 @@ export function SessionDetails({
               aria-expanded={breakdownOpen}
               onClick={() => setBreakdownOpen((open) => !open)}
             >
-              {breakdownOpen ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}O que
-              consumiu o contexto
+              {breakdownOpen ? <ChevronDownIcon size={13} /> : <ChevronRightIcon size={13} />}
+              {t('details.whatUsedContext')}
             </button>
             {breakdownOpen ? (
               <ContextBreakdownPanel
@@ -515,8 +548,8 @@ export function SessionDetails({
                     {onSaveSessionPinnedMemory ? (
                       <PinnedMemoryField
                         key={`session:${sessionId}:${sessionPinnedMemory ?? ''}`}
-                        title="Memória da sessão"
-                        placeholder="Regras ou notas fixadas para esta sessão (ou use /pin no chat)..."
+                        title={t('details.sessionMemoryTitle')}
+                        placeholder={t('details.sessionMemoryPlaceholder')}
                         value={sessionPinnedMemory}
                         disabled={pinnedMemoryDisabled}
                         onSave={onSaveSessionPinnedMemory}
@@ -525,8 +558,8 @@ export function SessionDetails({
                     {onSaveProjectPinnedMemory ? (
                       <PinnedMemoryField
                         key={`project:${path ?? ''}:${projectPinnedMemory ?? ''}`}
-                        title="Memória do projeto"
-                        placeholder="Convenções, arquitetura ou restrições aplicadas a todas as sessões deste projeto..."
+                        title={t('details.projectMemoryTitle')}
+                        placeholder={t('details.projectMemoryPlaceholder')}
                         value={projectPinnedMemory}
                         disabled={pinnedMemoryDisabled}
                         onSave={onSaveProjectPinnedMemory}
@@ -543,7 +576,8 @@ export function SessionDetails({
             <div className="session-git-head">
               <div className="session-git-summary mono">
                 <span>
-                  {gitSummary.fileCount} {gitSummary.fileCount === 1 ? 'arquivo' : 'arquivos'}
+                  {gitSummary.fileCount}{' '}
+                  {gitSummary.fileCount === 1 ? t('details.fileSingular') : t('details.filePlural')}
                 </span>
                 {gitSummary.addedLines > 0 ? (
                   <span className="chat-diff-stat-add">+{gitSummary.addedLines}</span>
@@ -556,8 +590,8 @@ export function SessionDetails({
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="Atualizar alterações Git"
-                  data-tooltip="Atualizar alterações Git"
+                  aria-label={t('details.refreshGitAria')}
+                  data-tooltip={t('details.refreshGitAria')}
                   disabled={gitStatus.loading}
                   onClick={gitStatus.refresh}
                 >
@@ -569,7 +603,7 @@ export function SessionDetails({
               <div className="session-git-actions-bar">
                 {onInspectWorktree ? (
                   <button type="button" className="btn btn-sm" onClick={() => onInspectWorktree()}>
-                    Ver diff
+                    {t('details.inspectWorktreeBtn')}
                   </button>
                 ) : null}
                 {onReviewDiff ? (
@@ -580,7 +614,7 @@ export function SessionDetails({
                     onClick={onReviewDiff}
                   >
                     <ShieldCheckIcon size={12} />
-                    {reviewBusy ? 'Iniciando...' : 'Revisar diff'}
+                    {reviewBusy ? t('details.reviewStarting') : t('details.reviewWithAi')}
                   </button>
                 ) : null}
                 {onRevertFiles ? (
@@ -591,7 +625,7 @@ export function SessionDetails({
                     onClick={() => void onRevertFiles(gitFiles.map((file) => file.path))}
                   >
                     <RotateCcwIcon size={12} />
-                    Reverter tudo
+                    {t('details.revertAllBtn')}
                   </button>
                 ) : null}
               </div>
@@ -599,7 +633,7 @@ export function SessionDetails({
             {gitStatus.error ? <p className="context-breakdown-error">{gitStatus.error}</p> : null}
             {gitFiles.length === 0 ? (
               <p className="session-details-empty">
-                {gitStatus.loading ? 'Lendo alterações Git…' : 'Nenhuma alteração Git na sessão.'}
+                {gitStatus.loading ? t('details.readingGit') : t('details.noGitChanges')}
               </p>
             ) : (
               <ul className="session-git-list">
@@ -635,8 +669,8 @@ export function SessionDetails({
                         <button
                           type="button"
                           className="icon-btn session-git-item-revert"
-                          aria-label={`Reverter ${file.path}`}
-                          data-tooltip="Reverter arquivo"
+                          aria-label={t('details.revertFileAria', { path: file.path })}
+                          data-tooltip={t('details.revertFileTooltip')}
                           disabled={worktreeBusy}
                           onClick={() => void onRevertFiles([file.path])}
                         >
@@ -653,12 +687,13 @@ export function SessionDetails({
         {activeTab === 'subagents' ? (
           <section className="session-details-section">
             {subagents.length === 0 ? (
-              <p className="session-details-empty">Nenhum subagente acionado nesta sessão.</p>
+              <p className="session-details-empty">{t('details.noSubagents')}</p>
             ) : (
               <>
                 <div className="session-details-summary mono">
-                  {counts.total} {counts.total === 1 ? 'subagente' : 'subagentes'} ·{' '}
-                  {formatTokens(counts.totalTokens)} total
+                  {counts.total}{' '}
+                  {counts.total === 1 ? t('details.subagentSingular') : t('details.subagentPlural')}{' '}
+                  · {formatTokens(counts.totalTokens)} {t('details.totalShort')}
                 </div>
                 <ul className="session-details-subagents">
                   {subagents.map((agent) => (
@@ -671,14 +706,18 @@ export function SessionDetails({
                           className="session-details-subagent-status"
                           data-status={agent.status}
                         >
-                          {SUBAGENT_STATUS_TEXT[agent.status]}
+                          {subagentStatusLabel(agent.status)}
                         </span>
                       </div>
                       <div className="session-details-subagent-meta mono">
                         {[agent.agentType, agent.model].filter(Boolean).join(' · ') || '—'}
                       </div>
                       <div className="session-details-subagent-meta mono">
-                        {`${formatTokens(agent.inputTokens)} entrada · ${formatTokens(agent.outputTokens)} saída · ${formatTokens(agent.totalTokens)} total`}
+                        {t('details.subagentMetaTokens', {
+                          inCount: formatTokens(agent.inputTokens),
+                          outCount: formatTokens(agent.outputTokens),
+                          totalCount: formatTokens(agent.totalTokens),
+                        })}
                       </div>
                     </li>
                   ))}
@@ -691,19 +730,21 @@ export function SessionDetails({
           <section className="session-details-section">
             <dl className="session-details-kv">
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Tipo</dt>
+                <dt className="session-details-kv-label">{t('details.metaType')}</dt>
                 <dd className="session-details-kv-value">
-                  {kind === 'subsession' ? 'Subsessão' : 'Sessão principal'}
+                  {kind === 'subsession'
+                    ? t('details.metaTypeSubsession')
+                    : t('details.metaTypeSession')}
                 </dd>
               </div>
               {parentTitle ? (
                 <div className="session-details-kv-row">
-                  <dt className="session-details-kv-label">Sessão pai</dt>
+                  <dt className="session-details-kv-label">{t('details.metaParent')}</dt>
                   <dd className="session-details-kv-value">{parentTitle}</dd>
                 </div>
               ) : null}
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Provedor</dt>
+                <dt className="session-details-kv-label">{t('details.metaProvider')}</dt>
                 <dd className="session-details-kv-value">
                   {provider ? (
                     <span className="session-details-provider">
@@ -716,15 +757,15 @@ export function SessionDetails({
                 </dd>
               </div>
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Conta</dt>
+                <dt className="session-details-kv-label">{t('details.metaAccount')}</dt>
                 <dd className="session-details-kv-value">{accountDisplay ?? '—'}</dd>
               </div>
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Seção</dt>
+                <dt className="session-details-kv-label">{t('details.metaSection')}</dt>
                 <dd className="session-details-kv-value">{sectionName ?? '—'}</dd>
               </div>
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Diretório</dt>
+                <dt className="session-details-kv-label">{t('details.metaDirectory')}</dt>
                 <dd className="session-details-kv-value" title={path ?? undefined}>
                   {path ? (
                     <span className="session-details-provider mono">
@@ -737,7 +778,7 @@ export function SessionDetails({
                 </dd>
               </div>
               <div className="session-details-kv-row">
-                <dt className="session-details-kv-label">Worktree</dt>
+                <dt className="session-details-kv-label">{t('details.metaWorktree')}</dt>
                 <dd className="session-details-kv-value">
                   {worktreeBranch ? (
                     <span className="session-details-provider mono" title={worktreeBranch}>
@@ -745,7 +786,7 @@ export function SessionDetails({
                       <span>{worktreeBranch}</span>
                     </span>
                   ) : (
-                    'Diretório principal'
+                    t('details.metaMainDir')
                   )}
                 </dd>
               </div>
@@ -756,32 +797,32 @@ export function SessionDetails({
                   <button
                     type="button"
                     className="btn btn-sm"
-                    data-tooltip="Ver as alterações do worktree desta sessão"
+                    data-tooltip={t('details.inspectWorktreeDiffTooltip')}
                     onClick={() => onInspectWorktree()}
                   >
-                    Ver diff
+                    {t('details.inspectWorktreeBtn')}
                   </button>
                 ) : null}
                 {worktreeBranch && onApplyWorktree ? (
                   <button
                     type="button"
                     className="btn btn-sm"
-                    data-tooltip="Aplicar as alterações do worktree ao projeto"
+                    data-tooltip={t('details.applyWorktreeBtn')}
                     disabled={worktreeBusy}
                     onClick={onApplyWorktree}
                   >
-                    Aplicar
+                    {t('common.apply')}
                   </button>
                 ) : null}
                 {onHandoff ? (
                   <button
                     type="button"
                     className="btn btn-sm"
-                    data-tooltip="Transferir sessão para outra conta ou provedor"
+                    data-tooltip={t('details.handoffBtn')}
                     onClick={onHandoff}
                   >
                     <SwitchIcon size={13} />
-                    Transferir
+                    {t('details.handoff')}
                   </button>
                 ) : null}
               </div>

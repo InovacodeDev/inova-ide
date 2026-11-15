@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ProviderId } from '@inova/core/types';
+import type { ProviderId, SupportedLocale } from '@inova/core/types';
 import type { UsageWindow } from '@inova/core/chat-types';
 import type { AccountView } from '../shared/api';
 import {
@@ -12,12 +12,13 @@ import {
   usageWindowKey,
   usageWindowLabel,
 } from './footer-state';
+import { translate } from './i18n';
 import { useI18n } from './I18nContext';
 import { BellIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { formatMessageTime } from './relative-time';
-import { STATUS_TEXT, type UsageState } from './UsageBar';
+import { accountStatusText, type UsageState } from './UsageBar';
 import type { WarningEntry } from './useWarning';
 import './footer.css';
 import './update.css';
@@ -37,18 +38,6 @@ export interface FooterProps {
   onOpenChangelog?: () => void;
 }
 
-const WINDOW_LABEL: Record<UsageWindow['kind'], string> = {
-  session: 'Sessão',
-  weekly: 'Semana',
-  monthly: 'Mês',
-};
-
-const POPOVER_WINDOW_LABEL: Record<UsageWindow['kind'], string> = {
-  session: 'Sessão (5h)',
-  weekly: 'Semanal',
-  monthly: 'Mensal',
-};
-
 const POPOVER_WIDTH_PX = 360;
 const POPOVER_EDGE_GAP_PX = 12;
 const COUNTDOWN_TICK_MS = 15_000;
@@ -58,21 +47,33 @@ function readyWindows(state: UsageState | undefined): UsageWindow[] {
   return orderedUsageWindows(state.snapshot.windows);
 }
 
-function formatResetSummary(resetsAt: string | null, nowMs: number): string {
-  const countdown = formatResetIn({ resetsAt, now: new Date(nowMs) });
-  if (!countdown) return 'Sem data de reset';
-  const prefix = countdown === 'agora' ? 'Reseta agora' : `Reseta em ${countdown}`;
+function formatResetSummary(
+  resetsAt: string | null,
+  nowMs: number,
+  locale: SupportedLocale,
+): string {
+  const countdown = formatResetIn({ resetsAt, now: new Date(nowMs), locale });
+  if (!countdown) return translate(locale, 'footer.noResetDate');
+  const nowToken = translate(locale, 'accounts.resetNow');
+  const prefix =
+    countdown === nowToken
+      ? translate(locale, 'footer.resetsPrefixNow')
+      : translate(locale, 'footer.resetsPrefixIn', { time: countdown });
   const exact = formatResetDateTime(resetsAt);
   return exact ? `${prefix} · ${exact}` : prefix;
 }
 
-function FooterMeter(props: { window: UsageWindow; provider: ProviderId }) {
-  const { window: usageWindow, provider } = props;
+function FooterMeter(props: {
+  window: UsageWindow;
+  provider: ProviderId;
+  labels: Record<UsageWindow['kind'], string>;
+}) {
+  const { window: usageWindow, provider, labels } = props;
   const percent = Math.max(0, Math.min(100, usageWindow.usedPercent));
   const color = usageLevel(percent) === 'critical' ? 'var(--error)' : `var(--${provider})`;
   return (
     <span className="footer-meter">
-      <span>{WINDOW_LABEL[usageWindow.kind]}</span>
+      <span>{labels[usageWindow.kind]}</span>
       <span className="footer-track">
         <span className="footer-fill" style={{ width: `${percent}%`, background: color }} />
       </span>
@@ -86,8 +87,10 @@ function PopoverAccountCard(props: {
   active: boolean;
   usageState: UsageState | undefined;
   nowMs: number;
+  popoverLabels: Record<UsageWindow['kind'], string>;
 }) {
-  const { account, active, usageState, nowMs } = props;
+  const { account, active, usageState, nowMs, popoverLabels } = props;
+  const { locale, t } = useI18n();
   const windows = readyWindows(usageState);
 
   return (
@@ -99,22 +102,24 @@ function PopoverAccountCard(props: {
         {active ? (
           <span className="footer-popover-status footer-popover-status-active">
             <span className="footer-inuse-dot" />
-            em uso
+            {t('footer.inUse')}
           </span>
         ) : account.status === 'logged-in' ? (
-          <span className="footer-popover-status footer-popover-status-connected">conectada</span>
+          <span className="footer-popover-status footer-popover-status-connected">
+            {accountStatusText('logged-in', locale)}
+          </span>
         ) : (
-          <span className="footer-popover-status">{STATUS_TEXT[account.status]}</span>
+          <span className="footer-popover-status">{accountStatusText(account.status, locale)}</span>
         )}
       </div>
       {account.status !== 'logged-in' ? (
-        <p className="footer-popover-note">{STATUS_TEXT[account.status]}</p>
+        <p className="footer-popover-note">{accountStatusText(account.status, locale)}</p>
       ) : !usageState || usageState.status === 'loading' ? (
-        <p className="footer-popover-note">Carregando uso e resets…</p>
+        <p className="footer-popover-note">{t('footer.loadingUsage')}</p>
       ) : usageState.status === 'error' ? (
         <p className="footer-popover-note footer-popover-note-error">{usageState.message}</p>
       ) : windows.length === 0 ? (
-        <p className="footer-popover-note">Nenhum limite disponível para esta conta.</p>
+        <p className="footer-popover-note">{t('footer.noUsageLimit')}</p>
       ) : (
         <div className="footer-popover-windows">
           {windows.map((w) => {
@@ -125,7 +130,7 @@ function PopoverAccountCard(props: {
               <div key={usageWindowKey(w)} className="footer-popover-win">
                 <div className="footer-popover-win-head">
                   <span className="footer-popover-win-label">
-                    {usageWindowLabel({ window: w, labels: POPOVER_WINDOW_LABEL })}
+                    {usageWindowLabel({ window: w, labels: popoverLabels })}
                   </span>
                   <span className="mono footer-popover-win-percent">{Math.round(percent)}%</span>
                 </div>
@@ -136,7 +141,7 @@ function PopoverAccountCard(props: {
                   />
                 </div>
                 <span className="mono footer-popover-reset">
-                  {formatResetSummary(w.resetsAt, nowMs)}
+                  {formatResetSummary(w.resetsAt, nowMs, locale)}
                 </span>
               </div>
             );
@@ -151,7 +156,17 @@ export function Footer(props: FooterProps) {
   const { accounts, focusedAccountLabel, usage, onLoadUsage, onManageAccounts } = props;
   const { warningHistory = [], onClearWarningHistory } = props;
   const { version = null, updateAvailable = false, onOpenChangelog } = props;
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
+  const windowLabels: Record<UsageWindow['kind'], string> = {
+    session: t('footer.window.session'),
+    weekly: t('footer.window.weekly'),
+    monthly: t('footer.window.monthly'),
+  };
+  const popoverWindowLabels: Record<UsageWindow['kind'], string> = {
+    session: t('accounts.window.session5h'),
+    weekly: t('accounts.window.weekly'),
+    monthly: t('accounts.window.monthly'),
+  };
   const loadRef = useRef(onLoadUsage);
   const [popover, setPopover] = useState<
     | { kind: 'provider'; provider: ProviderId; alignRight: boolean }
@@ -283,10 +298,17 @@ export function Footer(props: FooterProps) {
               ) : null}
               {account.status === 'logged-in' ? (
                 primaryUsageWindows(readyWindows(usage[account.label])).map((w) => (
-                  <FooterMeter key={usageWindowKey(w)} window={w} provider={group.provider} />
+                  <FooterMeter
+                    key={usageWindowKey(w)}
+                    window={w}
+                    provider={group.provider}
+                    labels={windowLabels}
+                  />
                 ))
               ) : (
-                <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>
+                <span className="footer-disconnected">
+                  {accountStatusText(account.status, locale)}
+                </span>
               )}
               {extra > 0 ? (
                 <span className="footer-extra">
@@ -299,7 +321,7 @@ export function Footer(props: FooterProps) {
                 className={
                   popover?.alignRight ? 'footer-popover footer-popover-right' : 'footer-popover'
                 }
-                aria-label={`Uso e reset das contas ${PROVIDER_NAME[group.provider]}`}
+                aria-label={t('footer.usageAria', { provider: PROVIDER_NAME[group.provider] })}
               >
                 <header className="footer-popover-head">
                   <span className="footer-popover-title">
@@ -307,8 +329,14 @@ export function Footer(props: FooterProps) {
                     {PROVIDER_NAME[group.provider]}
                   </span>
                   <span className="footer-popover-summary">
-                    {group.connected} {group.connected === 1 ? 'conectada' : 'conectadas'} ·{' '}
-                    {group.accounts.length} {group.accounts.length === 1 ? 'conta' : 'contas'}
+                    {group.connected}{' '}
+                    {group.connected === 1
+                      ? t('footer.connectedSingular')
+                      : t('footer.connectedPlural')}{' '}
+                    · {group.accounts.length}{' '}
+                    {group.accounts.length === 1
+                      ? t('footer.accountSingular')
+                      : t('footer.accountPlural')}
                   </span>
                 </header>
                 <div className="footer-popover-list">
@@ -319,6 +347,7 @@ export function Footer(props: FooterProps) {
                       active={item.label === focusedAccountLabel}
                       usageState={usage[item.label]}
                       nowMs={nowMs}
+                      popoverLabels={popoverWindowLabels}
                     />
                   ))}
                 </div>
@@ -405,9 +434,13 @@ export function Footer(props: FooterProps) {
         <button
           type="button"
           className="footer-version mono"
-          data-tooltip={updateAvailable ? 'Atualização disponível: ver novidades' : 'Ver novidades'}
+          data-tooltip={
+            updateAvailable ? t('footer.versionAvailableTooltip') : t('footer.versionTooltip')
+          }
           aria-label={
-            updateAvailable ? `Versão ${version}, atualização disponível` : `Versão ${version}`
+            updateAvailable
+              ? t('footer.versionAvailableAria', { version })
+              : t('footer.versionAria', { version })
           }
           onClick={onOpenChangelog}
         >

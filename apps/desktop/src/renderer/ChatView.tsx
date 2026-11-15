@@ -23,7 +23,7 @@ import type {
 } from '@inova/core/types';
 import type { AccountView, AttachmentKind, ProjectCommandView } from '../shared/api';
 import { AttachMenu } from './AttachMenu';
-import type { ChatItem, ChatState } from './chat-reducer';
+import { INTERRUPTED_MESSAGE, type ChatItem, type ChatState } from './chat-reducer';
 import { composerPrimaryAction } from './composer-action';
 import type { ComposerFormat } from './composer-format';
 import { RichComposer, type RichComposerHandle } from './RichComposer';
@@ -50,6 +50,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { DictationControl } from './DictationControl';
 import { appendDictation, formatMegabytes } from './dictation';
 import { describeFailoverBanner, type FailoverNotice } from './failover-notice';
+import { translate, type SupportedLocale } from './i18n';
 import { useI18n } from './I18nContext';
 import {
   AlertIcon,
@@ -74,6 +75,7 @@ import {
 import { copyToClipboard } from './clipboard';
 import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
+import { defaultModelLabel, localizeModelOption } from './model-picker-state';
 import { ModePicker } from './ModePicker';
 import { ProviderBadge } from './ProviderBadge';
 import { formatMessageTime } from './relative-time';
@@ -153,6 +155,7 @@ const NO_ACTIVE_FORMATS: ReadonlySet<ComposerFormat> = new Set();
 const FILE_SEARCH_DEBOUNCE_MS = 80;
 
 function ThinkingCard({ item }: { item: Extract<ChatItem, { type: 'thinking' }> }) {
+  const { t } = useI18n();
   const first =
     item.text
       .split('\n')
@@ -171,12 +174,12 @@ function ThinkingCard({ item }: { item: Extract<ChatItem, { type: 'thinking' }> 
         <span className="chat-tool-icon">
           <ZapIcon size={15} />
         </span>
-        <span className="chat-tool-name">Raciocínio</span>
+        <span className="chat-tool-name">{t('chat.thinking')}</span>
         {first ? <span className="chat-tool-preview chat-thinking-preview">{first}</span> : null}
         {item.streaming ? (
           <span className="chat-tool-status chat-tool-pending">
             <span className="dot pulse" aria-hidden="true" />
-            ativo
+            {t('chat.thinkingActive')}
           </span>
         ) : null}
       </summary>
@@ -231,27 +234,25 @@ function ChatEmptyState({
   hasReviewCommand: boolean;
   onPickSuggestion: (prompt: string) => void;
 }) {
+  const { t } = useI18n();
   const folder = directoryName(workingDir);
-  const providerLabel = provider ? PROVIDER_NAME[provider] : 'Agente';
+  const providerLabel = provider ? PROVIDER_NAME[provider] : t('chat.agentFallback');
   const suggestions = [
     {
-      label: 'Explorar arquitetura',
-      prompt:
-        'Explique a arquitetura principal deste projeto e os pontos de entrada mais importantes.',
+      label: t('chat.quick.exploreLabel'),
+      prompt: t('chat.quick.explorePrompt'),
     },
     {
-      label: 'Revisar alterações',
-      prompt: hasReviewCommand
-        ? '/review'
-        : 'Revise as alterações atuais no Git procurando bugs, riscos e pontos de melhoria.',
+      label: t('chat.quick.reviewLabel'),
+      prompt: hasReviewCommand ? '/review' : t('chat.quick.reviewGitPrompt'),
     },
     {
-      label: 'Executar testes',
-      prompt: 'Execute a suíte de testes relevante e resuma o que está passando ou falhando.',
+      label: t('chat.quick.testsLabel'),
+      prompt: t('chat.quick.testsPrompt'),
     },
     {
-      label: 'Planejar tarefa',
-      prompt: 'Ajude a planejar passo a passo a próxima alteração antes de editar arquivos.',
+      label: t('chat.quick.planLabel'),
+      prompt: t('chat.quick.planPrompt'),
     },
   ];
 
@@ -262,13 +263,11 @@ function ChatEmptyState({
         <div>
           <div className="chat-empty-title">
             {readOnly
-              ? 'Sessão arquivada sem mensagens'
-              : `Pronto para trabalhar com ${providerLabel}`}
+              ? t('chat.emptyArchived')
+              : t('chat.emptyReadyTitle', { provider: providerLabel })}
           </div>
           <div className="chat-empty-sub">
-            {readOnly
-              ? 'Esta conversa não recebeu mensagens antes de ser encerrada.'
-              : 'Envie uma instrução, arraste arquivos ou escolha um atalho abaixo.'}
+            {readOnly ? t('chat.emptyArchivedDesc') : t('chat.emptyActiveDesc')}
           </div>
         </div>
       </div>
@@ -283,7 +282,7 @@ function ChatEmptyState({
         {inWorktree ? (
           <span className="chat-empty-pill">
             <GitBranchIcon size={12} />
-            Worktree isolada
+            {t('chat.isolatedWorktree')}
           </span>
         ) : null}
       </div>
@@ -305,18 +304,24 @@ function ChatEmptyState({
   );
 }
 
-function buildVerificationRetryPrompt(item: Extract<ChatItem, { type: 'verification' }>): string {
+function buildVerificationRetryPrompt(
+  item: Extract<ChatItem, { type: 'verification' }>,
+  locale: SupportedLocale,
+): string {
   const failed = item.checks.filter((check) => !check.passed);
   const details = failed
     .map((check) => {
-      const exitLabel = check.exitCode === null ? 'sem código' : String(check.exitCode);
+      const exitLabel =
+        check.exitCode === null
+          ? translate(locale, 'chat.verifyExitMissing')
+          : String(check.exitCode);
       const output = check.output.trim();
       return output
-        ? `Comando: ${check.command} (exit ${exitLabel})\n\`\`\`\n${output}\n\`\`\``
-        : `Comando: ${check.command} (exit ${exitLabel})`;
+        ? `${check.command} (exit ${exitLabel})\n\`\`\`\n${output}\n\`\`\``
+        : `${check.command} (exit ${exitLabel})`;
     })
     .join('\n\n');
-  return `A verificação automática falhou. Corrija os erros abaixo:\n\n${details}`;
+  return translate(locale, 'chat.verifyAutoFixPrompt', { details });
 }
 
 function VerificationCard({
@@ -328,14 +333,15 @@ function VerificationCard({
   canFix: boolean;
   onFix: () => void;
 }) {
+  const { t } = useI18n();
   const statusLabel =
     item.status === 'running'
-      ? 'Executando verificações'
+      ? t('chat.verifyRunning')
       : item.status === 'passed'
-        ? 'Verificação aprovada'
+        ? t('chat.verifyPassed')
         : item.status === 'skipped'
-          ? 'Verificação cancelada'
-          : 'Verificação falhou';
+          ? t('chat.verifySkipped')
+          : t('chat.verifyFailed');
   return (
     <details
       className={`chat-verification chat-verification-${item.status}`}
@@ -350,7 +356,7 @@ function VerificationCard({
           {item.checks
             .map(
               (c) =>
-                `${c.passed ? 'OK' : item.status === 'running' ? '...' : item.status === 'skipped' ? '-' : 'ERRO'} ${c.label}`,
+                `${c.passed ? 'OK' : item.status === 'running' ? '...' : item.status === 'skipped' ? '-' : t('status.error')} ${c.label}`,
             )
             .join(' · ')}
         </span>
@@ -371,12 +377,14 @@ function VerificationCard({
                 }
               >
                 {item.status === 'running'
-                  ? 'executando'
+                  ? t('chat.verifyRunningCheck')
                   : item.status === 'skipped'
-                    ? 'cancelada'
+                    ? t('chat.verifyCancelledCheck')
                     : check.passed
-                      ? `ok (${check.durationMs}ms)`
-                      : `falhou (${check.exitCode ?? 'erro'})`}
+                      ? t('chat.verifyOkMs', { ms: check.durationMs })
+                      : t('chat.verifyFailedExit', {
+                          exit: check.exitCode ?? t('chat.verifyExitError'),
+                        })}
               </span>
             </div>
             {check.output.trim() !== '' ? (
@@ -387,7 +395,7 @@ function VerificationCard({
         {item.status === 'failed' && canFix ? (
           <div className="chat-verification-actions">
             <button type="button" className="btn btn-sm btn-primary" onClick={onFix}>
-              Corrigir falha com o agente
+              {t('chat.verifyFixBtn')}
             </button>
           </div>
         ) : null}
@@ -437,6 +445,7 @@ function AgentMeta({
   onRegenerate,
   onSendToParent,
 }: AgentMetaProps) {
+  const { t } = useI18n();
   const time = footer.at ? formatMessageTime(footer.at) : '';
   const vote = (value: 'up' | 'down') =>
     onFeedback?.({ turnIndex: footer.turnIndex, value: feedback === value ? null : value });
@@ -447,8 +456,8 @@ function AgentMeta({
       <button
         type="button"
         className="chat-meta-btn"
-        aria-label="Copiar resposta"
-        data-tooltip="Copiar resposta"
+        aria-label={t('chat.copyAnswer')}
+        data-tooltip={t('chat.copyAnswer')}
         onClick={() => onCopyText(footer.text)}
       >
         <CopyIcon size={12} />
@@ -458,9 +467,9 @@ function AgentMeta({
           <button
             type="button"
             className={`chat-meta-btn${feedback === 'up' ? ' chat-meta-btn-active' : ''}`}
-            aria-label="Gostei"
+            aria-label={t('chat.thumbsUp')}
             aria-pressed={feedback === 'up'}
-            data-tooltip="Gostei"
+            data-tooltip={t('chat.thumbsUp')}
             onClick={() => vote('up')}
           >
             <ThumbUpIcon size={12} />
@@ -468,9 +477,9 @@ function AgentMeta({
           <button
             type="button"
             className={`chat-meta-btn${feedback === 'down' ? ' chat-meta-btn-active' : ''}`}
-            aria-label="Não gostei"
+            aria-label={t('chat.thumbsDown')}
             aria-pressed={feedback === 'down'}
-            data-tooltip="Não gostei"
+            data-tooltip={t('chat.thumbsDown')}
             onClick={() => vote('down')}
           >
             <ThumbDownIcon size={12} />
@@ -481,9 +490,9 @@ function AgentMeta({
         <button
           type="button"
           className="chat-meta-btn"
-          aria-label="Regenerar"
+          aria-label={t('chat.regenerate')}
           disabled={busy}
-          data-tooltip="Regenerar: refaz este turno com a mesma mensagem"
+          data-tooltip={t('chat.regenerateTooltip')}
           onClick={onRegenerate}
         >
           <RefreshIcon size={12} />
@@ -493,11 +502,11 @@ function AgentMeta({
         <button
           type="button"
           className="chat-meta-btn chat-meta-btn-action"
-          data-tooltip="Enviar achados desta revisão para o rascunho da sessão pai"
+          data-tooltip={t('chat.sendToParentTooltip')}
           onClick={() => onSendToParent(footer.text)}
         >
           <SendIcon size={12} />
-          <span>Enviar para sessão pai</span>
+          <span>{t('chat.sendToParent')}</span>
         </button>
       ) : null}
       {model ? <span className="chat-meta-model">{model}</span> : null}
@@ -506,10 +515,11 @@ function AgentMeta({
 }
 
 function AgentLabel({ provider }: { provider: ProviderId | null }) {
+  const { t } = useI18n();
   return (
     <div className={`chat-label chat-label-agent chat-label-${provider ?? 'none'}`}>
       <ProviderBadge provider={provider} size={18} />
-      {provider ? PROVIDER_NAME[provider] : 'Agente'}
+      {provider ? PROVIDER_NAME[provider] : t('chat.agentFallback')}
     </div>
   );
 }
@@ -533,6 +543,7 @@ function Message({
   queuePaused = false,
   onResumeQueue,
 }: MessageProps) {
+  const { t, locale } = useI18n();
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
   const time = item.type === 'user' && item.at ? formatMessageTime(item.at) : '';
   switch (item.type) {
@@ -572,8 +583,8 @@ function Message({
             <button
               type="button"
               className="chat-meta-btn"
-              aria-label="Copiar mensagem"
-              data-tooltip="Copiar mensagem"
+              aria-label={t('chat.copyMessage')}
+              data-tooltip={t('chat.copyMessage')}
               onClick={() => onCopyText(item.text)}
             >
               <CopyIcon size={12} />
@@ -582,9 +593,9 @@ function Message({
               <button
                 type="button"
                 className="chat-meta-btn"
-                aria-label="Retroceder"
+                aria-label={t('chat.rewind')}
                 disabled={busy}
-                data-tooltip="Retroceder: desfaz este turno e os arquivos editados"
+                data-tooltip={t('chat.rewindTooltip')}
                 onClick={() => onRewindTurn(turnIndex)}
               >
                 <RotateCcwIcon size={12} />
@@ -594,9 +605,9 @@ function Message({
               <button
                 type="button"
                 className="chat-meta-btn"
-                aria-label="Bifurcar"
+                aria-label={t('chat.fork')}
                 disabled={busy}
-                data-tooltip="Bifurcar sessão a partir deste turno"
+                data-tooltip={t('chat.forkTooltip')}
                 onClick={() => onForkTurn(turnIndex)}
               >
                 <GitForkIcon size={12} />
@@ -637,10 +648,10 @@ function Message({
           <div className="chat-checkpoint">
             <span className="chat-checkpoint-info">
               <RotateCcwIcon size={13} />
-              <span>Checkpoint antes do turno</span>
+              <span>{t('chat.checkpointBeforeTurn')}</span>
               {item.skippedLargeFiles.length > 0 ? (
                 <span className="chat-checkpoint-warn" title={item.skippedLargeFiles.join(', ')}>
-                  {item.skippedLargeFiles.length} arquivo(s) &gt;10MB preservado(s)
+                  {t('chat.checkpointPreservedFiles', { count: item.skippedLargeFiles.length })}
                 </span>
               ) : null}
             </span>
@@ -649,7 +660,7 @@ function Message({
                 type="button"
                 className="btn btn-sm"
                 disabled={busy}
-                data-tooltip="Restaurar os arquivos para este checkpoint"
+                data-tooltip={t('chat.restoreTooltip')}
                 onClick={() =>
                   onRestoreCheckpoint({
                     ref: item.ref,
@@ -657,7 +668,7 @@ function Message({
                   })
                 }
               >
-                Restaurar
+                {t('chat.restore')}
               </button>
             ) : null}
           </div>
@@ -669,7 +680,7 @@ function Message({
           <VerificationCard
             item={item}
             canFix={!busy && Boolean(onFixVerification)}
-            onFix={() => onFixVerification?.(buildVerificationRetryPrompt(item))}
+            onFix={() => onFixVerification?.(buildVerificationRetryPrompt(item, locale))}
           />
         </div>
       );
@@ -678,19 +689,21 @@ function Message({
         isCircuitBreakerMessage(item.message) &&
         ((queuePaused && Boolean(onResumeQueue)) ||
           (Boolean(latestCheckpoint) && Boolean(onRestoreCheckpoint)));
+      const displayError =
+        item.message === INTERRUPTED_MESSAGE ? t('tool.interruptedMessage') : item.message;
       return (
         <div className="chat-row">
           <div className="chat-error" role="alert">
-            <div>{item.message}</div>
+            <div>{displayError}</div>
             {onOpenHandoff && isRateLimitMessage(item.message) ? (
               <div className="chat-error-actions">
                 <button
                   type="button"
                   className="btn btn-sm"
-                  data-tooltip="Abrir um resumo desta sessão em outra conta"
+                  data-tooltip={t('chat.handoffLinkTooltip')}
                   onClick={onOpenHandoff}
                 >
-                  Continuar com resumo em outra conta
+                  {t('chat.continueOtherAccount')}
                 </button>
               </div>
             ) : null}
@@ -703,7 +716,7 @@ function Message({
                     disabled={busy}
                     onClick={onResumeQueue}
                   >
-                    Retomar fila
+                    {t('chat.resumeQueue')}
                   </button>
                 ) : null}
                 {latestCheckpoint && onRestoreCheckpoint ? (
@@ -713,7 +726,7 @@ function Message({
                     disabled={busy}
                     onClick={() => onRestoreCheckpoint(latestCheckpoint)}
                   >
-                    Restaurar último checkpoint
+                    {t('chat.restoreLastCheckpoint')}
                   </button>
                 ) : null}
               </div>
@@ -734,6 +747,7 @@ function WorkGroup({
   label: ReactNode;
   renderEntry: (entry: ChatEntry) => ReactNode;
 }) {
+  const { t, locale } = useI18n();
   return (
     <div className="chat-row">
       {label}
@@ -742,8 +756,10 @@ function WorkGroup({
           <span className="chat-tool-icon">
             <ListTodoIcon size={16} />
           </span>
-          <span className="chat-tool-name">Trabalho do turno</span>
-          <span className="chat-tool-preview chat-work-preview">{summarizeWork(entries)}</span>
+          <span className="chat-tool-name">{t('chat.workTurnTitle')}</span>
+          <span className="chat-tool-preview chat-work-preview">
+            {summarizeWork(entries, locale)}
+          </span>
         </summary>
         <div className="chat-work-body">{entries.map((entry) => renderEntry(entry))}</div>
       </details>
@@ -754,19 +770,20 @@ function WorkGroup({
 function dropAccessDescription(input: {
   dropped: readonly DroppedPath[];
   provider: ProviderId | null;
+  locale: SupportedLocale;
 }): string {
-  const { dropped, provider } = input;
+  const { dropped, provider, locale } = input;
   const paths = dropped.map((item) => item.mention).join(', ');
   const dirs = [...new Set(dropped.flatMap((item) => item.grantDir ?? []))].join(', ');
-  const agent = provider ? PROVIDER_NAME[provider] : 'O agente';
-  const scope =
-    provider === 'claude'
-      ? `${agent} recebe acesso à pasta ${dirs} enquanto esta sessão estiver aberta.`
-      : `${agent} recebe o caminho no prompt. O acesso depende do modo de execução da sessão.`;
-  return `${paths} está fora da pasta do projeto. ${scope}`;
+  const agent = provider ? PROVIDER_NAME[provider] : translate(locale, 'chat.agentFallback');
+  if (provider === 'claude') {
+    return translate(locale, 'chat.externalDirNoticeWithGrant', { paths, agent, dirs });
+  }
+  return translate(locale, 'chat.externalDirNoticeNoGrant', { paths, agent });
 }
 
 function DictationStatus({ dictation }: { dictation: Dictation }) {
+  const { t } = useI18n();
   if (dictation.error !== null) {
     return (
       <div className="chat-dictation chat-dictation-error" role="alert">
@@ -774,8 +791,8 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
         <button
           type="button"
           className="chat-file-tag-remove"
-          aria-label="Fechar aviso do ditado"
-          data-tooltip="Fechar aviso do ditado"
+          aria-label={t('chat.dismissDictationError')}
+          data-tooltip={t('chat.dismissDictationError')}
           onClick={dictation.dismissError}
         >
           <CloseIcon size={12} />
@@ -786,12 +803,12 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
   const text =
     dictation.phase === 'recording'
       ? dictation.interim === ''
-        ? 'Ouvindo…'
+        ? t('chat.listening')
         : dictation.interim
       : dictation.phase === 'transcribing'
-        ? 'Transcrevendo…'
+        ? t('chat.transcribing')
         : dictation.phase === 'downloading'
-          ? `Baixando o modelo de voz… ${dictation.downloadPercent}%`
+          ? t('chat.downloadingVoiceInline', { percent: dictation.downloadPercent })
           : null;
   if (text === null) return null;
   return (
@@ -801,8 +818,8 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
       <button
         type="button"
         className="chat-file-tag-remove"
-        aria-label="Cancelar ditado"
-        data-tooltip="Cancelar ditado e descartar o áudio"
+        aria-label={t('chat.cancelDictation')}
+        data-tooltip={t('chat.cancelDictationTooltip')}
         onClick={dictation.cancel}
       >
         <CloseIcon size={12} />
@@ -812,7 +829,6 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
 }
 
 const NO_VOICE_HINTS: readonly string[] = [];
-const ARCHIVED_HINT = 'Sessão arquivada — desarquive para continuar.';
 
 export function ChatView({
   ref,
@@ -864,7 +880,7 @@ export function ChatView({
   onSend,
   onCancel,
 }: ChatViewProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [draft, setDraft] = useState('');
   const [activeFormats, setActiveFormats] = useState(NO_ACTIVE_FORMATS);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
@@ -877,6 +893,7 @@ export function ChatView({
   const dictation = useDictation({
     hints: voiceHints,
     language: dictationLanguage,
+    locale,
     onText: (text) => {
       const editor = editorRef.current;
       if (editor === null) return;
@@ -940,7 +957,11 @@ export function ChatView({
   }, [running, sessionId]);
   const matchedModel = model ? catalog.models.find((entry) => entry.id === model) : undefined;
   const resolvedModelLabel =
-    model === null ? catalog.defaultModelLabel : (matchedModel?.label ?? model);
+    model === null
+      ? defaultModelLabel(catalog, locale)
+      : matchedModel
+        ? localizeModelOption(matchedModel, locale).label
+        : model;
   const pickSuggestion = (prompt: string) => {
     editorRef.current?.setMarkdown(prompt);
     setDraft(prompt);
@@ -961,7 +982,7 @@ export function ChatView({
     return null;
   }, [items]);
   const copyText = (text: string) => {
-    void copyToClipboard({ text, onError: (message) => onWarn?.(message) });
+    void copyToClipboard({ text, locale, onError: (message) => onWarn?.(message) });
   };
 
   const toggleDictation = dictation.toggle;
@@ -1155,7 +1176,9 @@ export function ChatView({
     return {
       kind: 'command',
       items: filteredCommands,
-      nativeGroupLabel: provider ? `Comandos do ${PROVIDER_NAME[provider]}` : 'Comandos',
+      nativeGroupLabel: provider
+        ? t('chat.commandsForProvider', { provider: PROVIDER_NAME[provider] })
+        : t('chat.commandsGeneric'),
       loading: commandResults.loading,
       activeIndex: bounded,
       onSelect: applySelectedCommand,
@@ -1168,6 +1191,7 @@ export function ChatView({
     commandResults.loading,
     activeIndex,
     provider,
+    t,
   ]);
 
   useLayoutEffect(() => {
@@ -1304,7 +1328,7 @@ export function ChatView({
     const pinCommand = parsePinCommand(markdown);
     if (pinCommand !== null && attachedFiles.length === 0 && !readOnly) {
       if (pinCommand.note === '') {
-        onWarn?.('Digite o texto após /pin para fixar na memória da sessão.');
+        onWarn?.(t('chat.pinEmptyWarn'));
         return;
       }
       if (!onPinNote) return;
@@ -1382,9 +1406,9 @@ export function ChatView({
     >
       {confirmingClear ? (
         <ConfirmModal
-          title="Limpar a conversa?"
-          description="O histórico e a memória do agente nesta sessão serão apagados. Os arquivos não mudam."
-          confirmLabel="Limpar"
+          title={t('chat.clearConfirmTitle')}
+          description={t('chat.clearConfirmDesc')}
+          confirmLabel={t('chat.clearConfirmBtn')}
           danger
           onConfirm={() => {
             setConfirmingClear(false);
@@ -1395,18 +1419,20 @@ export function ChatView({
       ) : null}
       {pendingDrop ? (
         <ConfirmModal
-          title="Permitir acesso ao arquivo?"
-          description={dropAccessDescription({ dropped: pendingDrop, provider })}
-          confirmLabel="Permitir acesso"
+          title={t('chat.allowAccessTitle')}
+          description={dropAccessDescription({ dropped: pendingDrop, provider, locale })}
+          confirmLabel={t('chat.allowAccessConfirm')}
           onConfirm={confirmPendingDrop}
           onCancel={() => setPendingDrop(null)}
         />
       ) : null}
       {dictation.phase === 'needs-model' ? (
         <ConfirmModal
-          title="Baixar o modelo de voz?"
-          description={`A transcrição roda neste computador e o áudio não sai dele. O download tem ${formatMegabytes(dictation.modelBytes)} e acontece uma vez.`}
-          confirmLabel="Baixar modelo"
+          title={t('chat.downloadVoiceTitle')}
+          description={t('chat.downloadVoiceDesc', {
+            size: formatMegabytes(dictation.modelBytes),
+          })}
+          confirmLabel={t('chat.downloadVoiceConfirm')}
           onConfirm={dictation.confirmDownload}
           onCancel={dictation.cancel}
         />
@@ -1448,16 +1474,16 @@ export function ChatView({
                 <div className="chat-queued-head">
                   <span className="chat-queued-label">
                     <ClockIcon size={13} />
-                    {queuedCardLabel(queueWaitingForAccount)}
+                    {queuedCardLabel(queueWaitingForAccount, locale)}
                   </span>
                   {onCancelQueuedTurn ? (
                     <button
                       type="button"
                       className="btn btn-sm"
-                      data-tooltip="Remover este turno da fila"
+                      data-tooltip={t('chat.removeFromQueueTooltip')}
                       onClick={() => onCancelQueuedTurn(queued.turnId)}
                     >
-                      Cancelar
+                      {t('common.cancel')}
                     </button>
                   ) : null}
                 </div>
@@ -1466,7 +1492,7 @@ export function ChatView({
             </div>
           ))}
           {thinking ? (
-            <LiveTurnStatus activity={activeTurnActivity(items)} elapsedSec={elapsedSec} />
+            <LiveTurnStatus activity={activeTurnActivity(items, locale)} elapsedSec={elapsedSec} />
           ) : null}
         </div>
       </div>
@@ -1478,12 +1504,12 @@ export function ChatView({
             }
           >
             <span>
-              {queueCountLabel(queuedTurns.length)}
-              {queuePaused ? ' · Fila pausada' : ''}
+              {queueCountLabel(queuedTurns.length, locale)}
+              {queuePaused ? t('chat.queuePausedSuffix') : ''}
             </span>
             {queuePaused && onResumeQueue ? (
               <button type="button" className="btn btn-sm" onClick={onResumeQueue}>
-                Retomar fila
+                {t('chat.resumeQueue')}
               </button>
             ) : null}
           </div>
@@ -1492,18 +1518,18 @@ export function ChatView({
           <div className="chat-busy-banner" role="alert">
             <div className="chat-busy-text">
               {busyConflict.exhausted
-                ? (busyConflict.message ?? 'Esta conta atingiu o limite de uso.')
-                : 'Esta conta está ocupada em outra sessão.'}
+                ? (busyConflict.message ?? t('chat.accountLimitReached'))
+                : t('chat.accountBusyDefault')}
             </div>
             <div className="chat-busy-actions">
               {!busyConflict.exhausted && onEnqueuePrompt ? (
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
-                  data-tooltip="Enviar este turno quando a conta ficar livre"
+                  data-tooltip={t('chat.queueTurnTooltip')}
                   onClick={() => onEnqueuePrompt({ prompt: busyConflict.prompt })}
                 >
-                  Enfileirar turno
+                  {t('chat.queueTurnBtn')}
                 </button>
               ) : null}
               {onSwitchAccountAndRetry &&
@@ -1516,14 +1542,16 @@ export function ChatView({
                       onSwitchAccountAndRetry({ accountId: alt.id, prompt: busyConflict.prompt })
                     }
                   >
-                    Mover para {PROVIDER_NAME[alt.provider]} · {alt.label}
+                    {t('chat.moveToProvider', {
+                      target: `${PROVIDER_NAME[alt.provider]} · ${alt.label}`,
+                    })}
                   </button>
                 ))}
               {onOpenHandoff ? (
                 <button
                   type="button"
                   className="btn btn-sm"
-                  data-tooltip="Transferir a sessão para outra conta ou provedor"
+                  data-tooltip={t('chat.handoffSessionTooltip')}
                   onClick={onOpenHandoff}
                 >
                   {t('chat.handoff')}
@@ -1540,7 +1568,7 @@ export function ChatView({
                     onDismissBusyConflict();
                   }}
                 >
-                  Fechar
+                  {t('common.close')}
                 </button>
               ) : null}
             </div>
@@ -1548,7 +1576,7 @@ export function ChatView({
         ) : null}
         {failoverNotice
           ? (() => {
-              const failoverBanner = describeFailoverBanner(failoverNotice);
+              const failoverBanner = describeFailoverBanner(failoverNotice, locale);
               return (
                 <div className="chat-failover-banner" role="status" aria-live="polite">
                   <div className="chat-failover-head">
@@ -1575,7 +1603,7 @@ export function ChatView({
                         disabled={running}
                         data-tooltip={
                           running
-                            ? 'Aguarde o turno atual terminar para voltar'
+                            ? t('chat.waitTurnFinish')
                             : (failoverBanner.revertTooltip ?? undefined)
                         }
                         onClick={onRevertFailover}
@@ -1594,7 +1622,7 @@ export function ChatView({
             <ComposerToolbar active={activeFormats} onFormat={formatDraft} />
           ) : null}
           {attachedFiles.length > 0 ? (
-            <div className="chat-composer-files" aria-label="Arquivos anexados">
+            <div className="chat-composer-files" aria-label={t('chat.attachedFilesAria')}>
               {attachedFiles.map((filePath) => (
                 <span key={filePath} className="chat-file-tag" title={filePath}>
                   <FileIcon size={12} />
@@ -1602,8 +1630,8 @@ export function ChatView({
                   <button
                     type="button"
                     className="chat-file-tag-remove"
-                    aria-label={`Remover ${filePath}`}
-                    data-tooltip="Remover anexo"
+                    aria-label={t('chat.removeAttachmentAria', { path: filePath })}
+                    data-tooltip={t('chat.removeAttachmentTooltip')}
                     onClick={() =>
                       setAttachedFiles((current) => current.filter((item) => item !== filePath))
                     }
@@ -1619,7 +1647,7 @@ export function ChatView({
             ref={editorRef}
             isMac={IS_MAC}
             readOnly={readOnly}
-            placeholder={readOnly ? ARCHIVED_HINT : 'Responda ao agente… (@arquivo, /comando)'}
+            placeholder={readOnly ? t('chat.archivedHint') : t('chat.inputPlaceholder')}
             onChange={setDraft}
             onCaretChange={syncFromEditor}
             onActiveFormatsChange={setActiveFormats}
@@ -1632,10 +1660,12 @@ export function ChatView({
                 <button
                   type="button"
                   className="chat-format-btn chat-format-toggle"
-                  aria-label="Formatação de texto"
+                  aria-label={t('chat.formattingLabel')}
                   aria-expanded={showFormatToolbar}
                   aria-pressed={showFormatToolbar}
-                  data-tooltip={showFormatToolbar ? 'Ocultar formatação' : 'Formatação de texto'}
+                  data-tooltip={
+                    showFormatToolbar ? t('chat.hideFormatting') : t('chat.showFormatting')
+                  }
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => setShowFormatToolbar((open) => !open)}
                 >
@@ -1683,11 +1713,11 @@ export function ChatView({
               <button
                 type="button"
                 className="chat-send chat-send-stop"
-                aria-label="Parar"
+                aria-label={t('chat.stopAria')}
                 data-tooltip={
                   queuedTurns.length > 0
-                    ? 'Parar resposta e enviar o próximo da fila'
-                    : 'Parar resposta'
+                    ? t('chat.stopAndSendNextTooltip')
+                    : t('chat.stopResponseTooltip')
                 }
                 onClick={onCancel}
               >
@@ -1697,8 +1727,12 @@ export function ChatView({
               <button
                 type="button"
                 className="chat-send"
-                aria-label={primaryAction === 'enqueue' ? 'Adicionar à fila' : 'Enviar mensagem'}
-                data-tooltip={primaryAction === 'enqueue' ? 'Adicionar à fila' : 'Enviar mensagem'}
+                aria-label={
+                  primaryAction === 'enqueue' ? t('chat.enqueueAction') : t('chat.sendAction')
+                }
+                data-tooltip={
+                  primaryAction === 'enqueue' ? t('chat.enqueueAction') : t('chat.sendAction')
+                }
                 data-shortcut-text="Enter"
                 disabled={readOnly || !hasContent}
                 onClick={submit}
@@ -1708,7 +1742,7 @@ export function ChatView({
             )}
           </div>
         </div>
-        {readOnly ? <p className="chat-readonly-hint">{ARCHIVED_HINT}</p> : null}
+        {readOnly ? <p className="chat-readonly-hint">{t('chat.archivedHint')}</p> : null}
       </div>
     </section>
   );

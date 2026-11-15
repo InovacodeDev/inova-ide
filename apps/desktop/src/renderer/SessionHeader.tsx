@@ -8,9 +8,10 @@ import {
   PencilIcon,
   SwitchIcon,
 } from './icons';
+import { useI18n } from './I18nContext';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
-import { STATUS_LABEL, type SessionStatus } from './session-status';
+import { sessionStatusLabel, type SessionStatus } from './session-status';
 import './session.css';
 
 interface SessionHeaderProps {
@@ -55,6 +56,7 @@ export function SessionHeader(props: SessionHeaderProps) {
     onHandoff,
     onClose,
   } = props;
+  const { locale, t } = useI18n();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const settledRef = useRef(false);
@@ -78,7 +80,9 @@ export function SessionHeader(props: SessionHeaderProps) {
       <div className="session-header-main">
         {provider ? <ProviderBadge provider={provider} size={18} /> : null}
         {kind === 'subsession' ? (
-          <span className="session-kind-pill session-kind-pill-sub">Subsessão</span>
+          <span className="session-kind-pill session-kind-pill-sub">
+            {t('sessionHeader.subsessionBadge')}
+          </span>
         ) : null}
         {sectionName ? (
           <span className="session-header-crumb" title={path ?? undefined}>
@@ -93,7 +97,11 @@ export function SessionHeader(props: SessionHeaderProps) {
         {editing ? (
           <input
             className="session-header-rename"
-            aria-label={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
+            aria-label={
+              kind === 'subsession'
+                ? t('sessionHeader.renameSubsession')
+                : t('sessionHeader.renameSession')
+            }
             value={draft}
             autoFocus
             onChange={(event) => setDraft(event.target.value)}
@@ -108,7 +116,7 @@ export function SessionHeader(props: SessionHeaderProps) {
             <h1
               className="session-header-title"
               onDoubleClick={onRename ? startEdit : undefined}
-              title={onRename ? 'Clique duas vezes para renomear' : undefined}
+              title={onRename ? t('sessionHeader.doubleClickRename') : undefined}
             >
               {title}
             </h1>
@@ -116,8 +124,16 @@ export function SessionHeader(props: SessionHeaderProps) {
               <button
                 type="button"
                 className="session-header-edit"
-                aria-label={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
-                data-tooltip={kind === 'subsession' ? 'Renomear subsessão' : 'Renomear sessão'}
+                aria-label={
+                  kind === 'subsession'
+                    ? t('sessionHeader.renameSubsession')
+                    : t('sessionHeader.renameSession')
+                }
+                data-tooltip={
+                  kind === 'subsession'
+                    ? t('sessionHeader.renameSubsession')
+                    : t('sessionHeader.renameSession')
+                }
                 onClick={startEdit}
               >
                 <PencilIcon size={13} />
@@ -126,19 +142,22 @@ export function SessionHeader(props: SessionHeaderProps) {
           </div>
         )}
         {kind === 'subsession' && parentTitle ? (
-          <span className="session-header-parent" title={`Sessão pai: ${parentTitle}`}>
+          <span
+            className="session-header-parent"
+            title={`${t('sessionHeader.parentPrefix')} ${parentTitle}`}
+          >
             ↳ {parentTitle}
           </span>
         ) : null}
         {exited ? (
           <span className="pill pill-idle">
             <span className="dot" />
-            Encerrado
+            {t('sessionHeader.exitedBadge')}
           </span>
         ) : status !== null && status !== 'idle' ? (
           <span className={`pill pill-${status}`}>
             <span className={status === 'running' ? 'dot pulse' : 'dot'} />
-            {STATUS_LABEL[status]}
+            {sessionStatusLabel(status, locale)}
           </span>
         ) : null}
       </div>
@@ -159,21 +178,21 @@ export function SessionHeader(props: SessionHeaderProps) {
               <button
                 type="button"
                 className="btn btn-sm"
-                data-tooltip="Ver as alterações do worktree desta sessão"
+                data-tooltip={t('sessionHeader.diffTooltip')}
                 onClick={onInspectWorktree}
               >
-                Ver diff
+                {t('sessionHeader.diffBtn')}
               </button>
             ) : null}
             {onApplyWorktree ? (
               <button
                 type="button"
                 className="btn btn-sm"
-                data-tooltip="Aplicar as alterações do worktree ao projeto"
+                data-tooltip={t('sessionHeader.applyWorktreeTooltip')}
                 disabled={worktreeBusy}
                 onClick={onApplyWorktree}
               >
-                Aplicar
+                {t('sessionHeader.applyBtn')}
               </button>
             ) : null}
           </span>
@@ -182,11 +201,11 @@ export function SessionHeader(props: SessionHeaderProps) {
           <button
             type="button"
             className="btn btn-sm"
-            data-tooltip="Transferir sessão para outra conta ou provedor"
+            data-tooltip={t('sessionHeader.handoffTooltip')}
             onClick={onHandoff}
           >
             <SwitchIcon size={13} />
-            Transferir
+            {t('sessionHeader.handoffBtn')}
           </button>
         ) : null}
         {onToggleDetails ? (
@@ -194,11 +213,11 @@ export function SessionHeader(props: SessionHeaderProps) {
             type="button"
             className={detailsCollapsed ? 'icon-btn' : 'icon-btn icon-btn-active'}
             aria-label={
-              detailsCollapsed ? 'Mostrar detalhes da sessão' : 'Minimizar detalhes da sessão'
+              detailsCollapsed ? t('sessionHeader.showDetails') : t('sessionHeader.hideDetails')
             }
             aria-pressed={!detailsCollapsed}
             data-tooltip={
-              detailsCollapsed ? 'Mostrar detalhes da sessão' : 'Minimizar detalhes da sessão'
+              detailsCollapsed ? t('sessionHeader.showDetails') : t('sessionHeader.hideDetails')
             }
             onClick={onToggleDetails}
           >
@@ -212,8 +231,16 @@ export function SessionHeader(props: SessionHeaderProps) {
         <button
           type="button"
           className="icon-btn"
-          aria-label={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
-          data-tooltip={kind === 'subsession' ? 'Fechar subsessão' : 'Fechar sessão'}
+          aria-label={
+            kind === 'subsession'
+              ? t('sessionHeader.closeSubsession')
+              : t('sessionHeader.closeTabTooltip')
+          }
+          data-tooltip={
+            kind === 'subsession'
+              ? t('sessionHeader.closeSubsession')
+              : t('sessionHeader.closeTabTooltip')
+          }
           data-shortcut="close-tab"
           onClick={onClose}
         >

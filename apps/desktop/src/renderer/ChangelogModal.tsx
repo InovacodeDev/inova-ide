@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import changelogSource from '../../../../CHANGELOG.md?raw';
+import { useI18n } from './I18nContext';
 import { CloseIcon } from './icons';
 import { Markdown } from './Markdown';
 import { openModalCount } from './modal-layers';
@@ -17,6 +18,7 @@ interface ChangelogModalProps {
 }
 
 export function ChangelogModal({ version, whatsNew, onClose }: ChangelogModalProps) {
+  const { locale, t } = useI18n();
   const cardRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -47,14 +49,14 @@ export function ChangelogModal({ version, whatsNew, onClose }: ChangelogModalPro
         <div className="modal-header">
           <div className="modal-title-group">
             <h2 id="changelog-title" className="modal-title">
-              {changelogTitle({ whatsNew, version })}
+              {changelogTitle({ whatsNew, version, locale })}
             </h2>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar novidades"
-            data-tooltip="Fechar novidades"
+            aria-label={t('changelog.closeLabel')}
+            data-tooltip={t('changelog.closeLabel')}
             data-shortcut="dismiss"
             onClick={onClose}
           >
@@ -66,7 +68,7 @@ export function ChangelogModal({ version, whatsNew, onClose }: ChangelogModalPro
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-primary" onClick={onClose}>
-            Fechar
+            {t('common.close')}
           </button>
         </div>
       </div>

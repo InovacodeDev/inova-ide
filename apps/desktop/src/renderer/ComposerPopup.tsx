@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef } from 'react';
 import type { SlashSuggestion } from './composer-trigger';
 import { FileIcon, TerminalIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { PROVIDER_NAME } from './provider-meta';
 
 export type ComposerPopupModel =
@@ -21,8 +22,6 @@ export type ComposerPopupModel =
       onSelect: (suggestion: SlashSuggestion) => void;
     };
 
-const PROJECT_GROUP_LABEL = 'Comandos e skills do projeto';
-
 function suggestionKey(suggestion: SlashSuggestion): string {
   if (suggestion.kind === 'native') return `native:${suggestion.command.name}`;
   const { source, kind, name } = suggestion.command;
@@ -30,6 +29,7 @@ function suggestionKey(suggestion: SlashSuggestion): string {
 }
 
 export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
+  const { t } = useI18n();
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -41,16 +41,16 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
     <div
       className="composer-popup"
       role="listbox"
-      aria-label={model.kind === 'file' ? 'Arquivos do projeto' : 'Comandos e skills'}
+      aria-label={
+        model.kind === 'file' ? t('composer.filesAria') : t('composer.commandsAndSkillsAria')
+      }
       ref={listRef}
     >
       {model.loading && model.items.length === 0 ? (
-        <div className="composer-popup-empty">Carregando…</div>
+        <div className="composer-popup-empty">{t('common.loading')}</div>
       ) : model.items.length === 0 ? (
         <div className="composer-popup-empty">
-          {model.kind === 'file'
-            ? 'Nenhum arquivo encontrado.'
-            : 'Nenhum comando ou skill encontrado.'}
+          {model.kind === 'file' ? t('composer.noFilesFound') : t('composer.noCommandsOrSkills')}
         </div>
       ) : model.kind === 'file' ? (
         <>
@@ -81,7 +81,7 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
             );
           })}
           {model.truncated ? (
-            <div className="composer-popup-hint">Lista limitada para manter desempenho.</div>
+            <div className="composer-popup-hint">{t('composer.listTruncated')}</div>
           ) : null}
         </>
       ) : (
@@ -94,7 +94,7 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
               ? null
               : suggestion.kind === 'native'
                 ? model.nativeGroupLabel
-                : PROJECT_GROUP_LABEL;
+                : t('composer.projectGroupAll');
           return (
             <Fragment key={suggestionKey(suggestion)}>
               {heading === null ? null : <div className="composer-popup-group">{heading}</div>}

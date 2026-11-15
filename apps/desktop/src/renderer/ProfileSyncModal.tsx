@@ -9,6 +9,7 @@ import type {
   RulesStrategy,
 } from '../shared/api';
 import { CloseIcon, SlidersIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName } from './provider-meta';
@@ -36,24 +37,28 @@ interface ProfileSyncModalProps {
   onClose: () => void;
 }
 
-const STATUS_TEXT: Record<ProfileSyncStatus, string> = {
-  create: 'Novo',
-  update: 'Atualizar',
-  unchanged: 'Igual',
-  conflict: 'Conflito',
-  incompatible: 'Incompatível',
-};
-
 const RULES_OPTIONS: PlatformSelectOption[] = [
   { value: 'AGENTS.md', label: 'AGENTS.md' },
   { value: 'CLAUDE.md', label: 'CLAUDE.md' },
   { value: 'GEMINI.md', label: 'GEMINI.md' },
 ];
 
-const STRATEGY_OPTIONS: PlatformSelectOption[] = [
-  { value: 'copy', label: 'Cópia sincronizada' },
-  { value: 'symlink', label: 'Link simbólico (quando possível)' },
-];
+type TranslateFn = ReturnType<typeof useI18n>['t'];
+
+function profileSyncStatusText(status: ProfileSyncStatus, t: TranslateFn): string {
+  switch (status) {
+    case 'create':
+      return t('profileSync.status.create');
+    case 'update':
+      return t('profileSync.status.update');
+    case 'unchanged':
+      return t('profileSync.status.unchanged');
+    case 'conflict':
+      return t('profileSync.status.conflict');
+    case 'incompatible':
+      return t('profileSync.status.incompatible');
+  }
+}
 
 export function ProfileSyncModal({
   project,
@@ -62,6 +67,7 @@ export function ProfileSyncModal({
   onApply,
   onClose,
 }: ProfileSyncModalProps) {
+  const { t } = useI18n();
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>(() =>
     accounts.map((account) => account.id),
   );
@@ -172,8 +178,12 @@ export function ProfileSyncModal({
   };
 
   const activeRulesValue = rulesSource ?? preview?.rulesSource ?? 'AGENTS.md';
+  const strategyOptions: PlatformSelectOption[] = [
+    { value: 'copy', label: t('profileSync.strategy.copy') },
+    { value: 'symlink', label: t('profileSync.strategy.symlink') },
+  ];
   const importOptions: PlatformSelectOption[] = [
-    { value: '', label: 'Nenhum (.mcp.json do projeto)' },
+    { value: '', label: t('profileSync.noImportSource') },
     ...accounts.map((account) => ({
       value: account.id,
       label: accountDisplayName(account),
@@ -196,15 +206,15 @@ export function ProfileSyncModal({
           <SlidersIcon size={17} />
           <div className="modal-title-group">
             <h2 id="profile-sync-title" className="modal-title">
-              Perfil unificado de MCPs e regras
+              {t('profileSync.title')}
             </h2>
             <span className="modal-subtitle">{project.path}</span>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar sincronização"
-            data-tooltip="Fechar sincronização"
+            aria-label={t('profileSync.close')}
+            data-tooltip={t('profileSync.close')}
             data-shortcut="dismiss"
             onClick={onClose}
           >
@@ -214,28 +224,28 @@ export function ProfileSyncModal({
         <div className="modal-body sync-modal-body">
           <div className="sync-controls">
             <div className="modal-field">
-              <span className="modal-field-label">Arquivo-fonte de regras</span>
+              <span className="modal-field-label">{t('profileSync.rulesFileLabel')}</span>
               <PlatformSelect
-                ariaLabel="Arquivo-fonte de regras"
+                ariaLabel={t('profileSync.rulesFileLabel')}
                 value={activeRulesValue}
                 options={RULES_OPTIONS}
                 onChange={(value) => setRulesSource(value as RulesFile)}
               />
             </div>
             <div className="modal-field">
-              <span className="modal-field-label">Estratégia para regras</span>
+              <span className="modal-field-label">{t('profileSync.strategyLabel')}</span>
               <PlatformSelect
-                ariaLabel="Estratégia para regras"
+                ariaLabel={t('profileSync.strategyLabel')}
                 value={rulesStrategy}
-                options={STRATEGY_OPTIONS}
+                options={strategyOptions}
                 onChange={(value) => setRulesStrategy(value as RulesStrategy)}
               />
             </div>
             {preview && !preview.mcpSourceExists ? (
               <div className="modal-field">
-                <span className="modal-field-label">Importar MCPs de conta</span>
+                <span className="modal-field-label">{t('profileSync.importMcpLabel')}</span>
                 <PlatformSelect
-                  ariaLabel="Importar MCPs de conta"
+                  ariaLabel={t('profileSync.importMcpLabel')}
                   value={sourceAccountId ?? ''}
                   options={importOptions}
                   onChange={(value) => setSourceAccountId(value === '' ? null : value)}
@@ -245,7 +255,7 @@ export function ProfileSyncModal({
           </div>
 
           <div className="modal-field">
-            <span className="modal-field-label">Contas de destino</span>
+            <span className="modal-field-label">{t('profileSync.targetAccountsLabel')}</span>
             <div className="sync-accounts">
               {accounts.map((account) => (
                 <label key={account.id} className="modal-check">
@@ -262,21 +272,18 @@ export function ProfileSyncModal({
           </div>
 
           {loading ? (
-            <p className="hint">Analisando configurações e segredos mascarados…</p>
+            <p className="hint">{t('profileSync.analyzing')}</p>
           ) : previewFailed ? (
-            <p className="modal-description">
-              Não foi possível carregar a pré-visualização. Verifique se os arquivos JSON/TOML de
-              configuração são válidos.
-            </p>
+            <p className="modal-description">{t('profileSync.previewFailed')}</p>
           ) : preview ? (
             <>
               <p className="modal-description">
                 {preview.mcpSourceExists
-                  ? `.mcp.json encontrado (${preview.mcpServerCount} servidor(es) MCP). `
-                  : 'Nenhum .mcp.json encontrado na raiz do projeto. '}
+                  ? t('profileSync.mcpFound', { count: preview.mcpServerCount })
+                  : t('profileSync.mcpMissing')}
                 {preview.rulesSource
-                  ? `Regras base: ${preview.rulesSource}.`
-                  : 'Nenhum arquivo de regras encontrado.'}
+                  ? t('profileSync.rulesFound', { file: preview.rulesSource })
+                  : t('profileSync.rulesMissing')}
               </p>
               <div className="sync-items">
                 {preview.items.map((item) => {
@@ -291,20 +298,22 @@ export function ProfileSyncModal({
                               checked={approvedIds.includes(item.id)}
                               onChange={() => toggleApproved(item.id)}
                             />
-                            <span>Aprovar alteração</span>
+                            <span>{t('profileSync.approveChange')}</span>
                           </label>
                         ) : null}
                         <ProviderBadge provider={item.provider} size={16} />
                         <span className="mono">{item.targetPath}</span>
                         <span className={`sync-status-pill sync-status-${item.status}`}>
-                          {STATUS_TEXT[item.status]}
+                          {profileSyncStatusText(item.status, t)}
                         </span>
                       </div>
                       {item.reason ? <div className="hint">{item.reason}</div> : null}
                       {item.status !== 'unchanged' && item.status !== 'incompatible' ? (
                         <div className="sync-preview-grid">
                           <pre className="sync-preview-pre mono">
-                            {item.maskedBefore === '' ? '(vazio)' : item.maskedBefore}
+                            {item.maskedBefore === ''
+                              ? t('profileSync.emptyPreview')
+                              : item.maskedBefore}
                           </pre>
                           <pre className="sync-preview-pre mono">{item.maskedAfter}</pre>
                         </div>
@@ -318,14 +327,14 @@ export function ProfileSyncModal({
 
           {result ? (
             <p className="modal-description">
-              Sincronização concluída ({result.appliedIds.length} item(ns)). Backup salvo em{' '}
+              {t('profileSync.resultSuccess', { count: result.appliedIds.length })}
               <span className="mono">{result.backupDir}</span>.
             </p>
           ) : null}
         </div>
         <div className="modal-footer">
           <button type="button" className="btn" onClick={onClose}>
-            Fechar
+            {t('common.close')}
           </button>
           <button
             type="button"
@@ -333,7 +342,9 @@ export function ProfileSyncModal({
             disabled={applying || loading || applyableCount === 0}
             onClick={() => void submitApply()}
           >
-            {applying ? 'Aplicando…' : `Aplicar sincronização (${applyableCount})`}
+            {applying
+              ? t('profileSync.applying')
+              : t('profileSync.applyCount', { count: applyableCount })}
           </button>
         </div>
       </div>

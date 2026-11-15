@@ -1,9 +1,11 @@
+import type { SupportedLocale } from '@inova/core/types';
 import type {
   CapabilityApplyMode,
   CapabilityItem,
   CapabilityKind,
   CapabilityListing,
 } from '../shared/api';
+import { translate } from './i18n';
 
 export const CAPABILITY_TABS: readonly { kind: CapabilityKind; label: string }[] = [
   { kind: 'skill', label: 'Skills' },
@@ -12,15 +14,31 @@ export const CAPABILITY_TABS: readonly { kind: CapabilityKind; label: string }[]
   { kind: 'plugin', label: 'Plugins' },
 ];
 
-const APPLY_MODE_LABEL: Record<CapabilityApplyMode, string> = {
-  launch: 'Só no Inova',
-  'account-file': 'Na conta',
-  'global-file': 'Global',
-  unsupported: 'Não configurável',
+export function capabilityTabLabel(
+  kind: CapabilityKind,
+  locale: SupportedLocale = 'pt-BR',
+): string {
+  return translate(locale, `capabilities.tab.${kind}`);
+}
+
+const APPLY_MODE_KEY: Record<
+  CapabilityApplyMode,
+  | 'capabilities.apply.launch'
+  | 'capabilities.apply.accountFile'
+  | 'capabilities.apply.globalFile'
+  | 'capabilities.apply.unsupported'
+> = {
+  launch: 'capabilities.apply.launch',
+  'account-file': 'capabilities.apply.accountFile',
+  'global-file': 'capabilities.apply.globalFile',
+  unsupported: 'capabilities.apply.unsupported',
 };
 
-export function applyModeLabel(mode: CapabilityApplyMode): string {
-  return APPLY_MODE_LABEL[mode];
+export function applyModeLabel(
+  mode: CapabilityApplyMode,
+  locale: SupportedLocale = 'pt-BR',
+): string {
+  return translate(locale, APPLY_MODE_KEY[mode]);
 }
 
 export function visibleTabs(listing: CapabilityListing): CapabilityKind[] {

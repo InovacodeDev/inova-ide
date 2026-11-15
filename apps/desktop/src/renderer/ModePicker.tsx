@@ -12,10 +12,13 @@ import {
   ShieldCheckIcon,
   ShieldIcon,
 } from './icons';
+import { useI18n } from './I18nContext';
 import {
   effectiveModeForSession,
   findModeOption,
   isRiskyBypassMode,
+  modeCatalogTitle,
+  modeOptionText,
   optionByShortcutKey,
 } from './mode-picker-state';
 import { PROVIDER_NAME } from './provider-meta';
@@ -56,13 +59,16 @@ export function ModePicker({
   onChangeMode,
   onSetDefault,
 }: ModePickerProps) {
+  const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const isOpen = open && !disabled;
 
   const catalog = PROVIDER_MODES[provider];
+  const catalogTitle = modeCatalogTitle(provider, locale);
   const effectiveMode = effectiveModeForSession({ provider, sessionMode, defaultModes });
   const activeOption = findModeOption(provider, effectiveMode);
+  const activeCopy = modeOptionText(provider, activeOption, locale);
   const riskyBypass = isRiskyBypassMode(effectiveMode, inWorktree);
   const isAlreadyProviderDefault = defaultModes[provider] === effectiveMode;
 
@@ -109,16 +115,16 @@ export function ModePicker({
         disabled={disabled}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
-        aria-label="Selecionar modo de execução"
+        aria-label={t('picker.selectModeAria')}
         data-tooltip={
           riskyBypass
-            ? `${activeOption.label}: executando sem restrições fora de worktree isolado`
-            : activeOption.description
+            ? t('picker.riskyBypassLabelTooltip', { label: activeCopy.label })
+            : activeCopy.description
         }
         onClick={() => setOpen((current) => !current)}
       >
         <ModeOptionIcon mode={effectiveMode} risky={riskyBypass} />
-        <span className="chat-picker-trigger-label">{activeOption.label}</span>
+        <span className="chat-picker-trigger-label">{activeCopy.label}</span>
         <span className="chat-picker-chevron">
           <ChevronDownIcon size={12} />
         </span>
@@ -128,14 +134,15 @@ export function ModePicker({
         <div
           className="chat-picker-popover chat-mode-popover"
           role="dialog"
-          aria-label={catalog.title}
+          aria-label={catalogTitle}
         >
           <div className="chat-picker-section">
-            <div className="chat-picker-title">{catalog.title}</div>
+            <div className="chat-picker-title">{catalogTitle}</div>
             <div className="chat-mode-list">
               {catalog.options.map((option, index) => {
                 const selected = option.id === effectiveMode;
                 const optionRisky = isRiskyBypassMode(option.id, inWorktree);
+                const copy = modeOptionText(provider, option, locale);
                 return (
                   <button
                     key={option.id}
@@ -152,14 +159,12 @@ export function ModePicker({
                     </span>
                     <span className="chat-mode-copy">
                       <span className="chat-mode-head">
-                        <span className="chat-mode-label">{option.label}</span>
-                        {option.badge ? (
-                          <span className="chat-mode-badge">{option.badge}</span>
-                        ) : null}
+                        <span className="chat-mode-label">{copy.label}</span>
+                        {copy.badge ? <span className="chat-mode-badge">{copy.badge}</span> : null}
                       </span>
-                      <span className="chat-mode-desc">{option.description}</span>
-                      {option.headlessNote ? (
-                        <span className="chat-mode-note">{option.headlessNote}</span>
+                      <span className="chat-mode-desc">{copy.description}</span>
+                      {copy.headlessNote ? (
+                        <span className="chat-mode-note">{copy.headlessNote}</span>
                       ) : null}
                     </span>
                     <span className="chat-mode-meta">
@@ -182,8 +187,8 @@ export function ModePicker({
               }}
             >
               {isAlreadyProviderDefault
-                ? `Padrão salvo para ${PROVIDER_NAME[provider]}`
-                : `Definir como padrão para ${PROVIDER_NAME[provider]}`}
+                ? t('picker.defaultSavedForProvider', { provider: PROVIDER_NAME[provider] })
+                : t('picker.setDefaultForProvider', { provider: PROVIDER_NAME[provider] })}
             </button>
           </div>
         </div>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AttachmentKind } from '../shared/api';
+import type { TranslationKey } from './i18n';
+import { useI18n } from './I18nContext';
 import { FileTextIcon, FolderIcon, ImageIcon, PaperclipIcon } from './icons';
 
-const OPTIONS: readonly { kind: AttachmentKind; label: string; icon: ReactNode }[] = [
-  { kind: 'images', label: 'Fotos e imagens', icon: <ImageIcon /> },
-  { kind: 'documents', label: 'Documentos', icon: <FileTextIcon /> },
-  { kind: 'any', label: 'Arquivos ou pastas', icon: <FolderIcon /> },
+const OPTIONS: readonly { kind: AttachmentKind; labelKey: TranslationKey; icon: ReactNode }[] = [
+  { kind: 'images', labelKey: 'attach.photos', icon: <ImageIcon /> },
+  { kind: 'documents', labelKey: 'attach.documents', icon: <FileTextIcon /> },
+  { kind: 'any', labelKey: 'attach.filesOrFolders', icon: <FolderIcon /> },
 ];
 
 export interface AttachMenuProps {
@@ -13,6 +15,7 @@ export interface AttachMenuProps {
 }
 
 export function AttachMenu({ onPick }: AttachMenuProps) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -40,8 +43,8 @@ export function AttachMenu({ onPick }: AttachMenuProps) {
       <button
         type="button"
         className={open ? 'chat-attach-btn chat-attach-btn-open' : 'chat-attach-btn'}
-        aria-label="Anexar arquivos"
-        data-tooltip="Anexar arquivos ou imagens"
+        aria-label={t('attach.ariaLabel')}
+        data-tooltip={t('attach.tooltip')}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
@@ -49,7 +52,11 @@ export function AttachMenu({ onPick }: AttachMenuProps) {
         <PaperclipIcon size={16} />
       </button>
       {open ? (
-        <div className="chat-picker-popover chat-attach-popover" role="menu">
+        <div
+          className="chat-picker-popover chat-attach-popover"
+          role="menu"
+          aria-label={t('attach.menuAria')}
+        >
           {OPTIONS.map((option) => (
             <button
               key={option.kind}
@@ -62,7 +69,7 @@ export function AttachMenu({ onPick }: AttachMenuProps) {
               }}
             >
               {option.icon}
-              <span>{option.label}</span>
+              <span>{t(option.labelKey)}</span>
             </button>
           ))}
         </div>

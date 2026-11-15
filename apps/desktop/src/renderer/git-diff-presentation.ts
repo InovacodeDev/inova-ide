@@ -1,3 +1,6 @@
+import type { SupportedLocale } from '@inova/core/types';
+import { translate } from './i18n';
+
 export type GitFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
 export interface GitDiffLine {
@@ -36,6 +39,10 @@ export const STATUS_TITLE: Record<GitFileStatus, string> = {
   deleted: 'Removido',
   renamed: 'Renomeado',
 };
+
+export function gitStatusTitle(status: GitFileStatus, locale: SupportedLocale = 'pt-BR'): string {
+  return translate(locale, `details.gitStatus.${status}`);
+}
 
 const HUNK_PATTERN = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
