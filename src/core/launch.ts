@@ -1,3 +1,4 @@
+import { capabilityLaunchArgs } from './capabilities/index.js';
 import { resolveExecutionMode } from './modes.js';
 import { providers } from './providers.js';
 import type { Account, EffortLevel, ExecutionMode } from './types.js';
@@ -14,6 +15,7 @@ export interface TurnModelOptions {
   effort?: EffortLevel | null;
   executionMode?: ExecutionMode | null;
   extraDirs?: readonly string[] | undefined;
+  capabilityArgs?: readonly string[] | undefined;
 }
 
 export function isolatedEnv(account: Account, baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -71,6 +73,7 @@ function claudeTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOption
     ...(options.extraDirs?.length ? ['--add-dir', ...options.extraDirs] : []),
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['--effort', options.effort] : []),
+    ...(options.capabilityArgs ?? []),
   ];
   const tail = ['--', prompt];
   switch (turn.mode) {
@@ -144,6 +147,7 @@ function codexTurnArgs(prompt: string, turn: ChatTurn, options: TurnModelOptions
     '--skip-git-repo-check',
     ...(options.model ? ['--model', options.model] : []),
     ...(options.effort ? ['-c', `model_reasoning_effort="${options.effort}"`] : []),
+    ...(options.capabilityArgs ?? []),
     ...(prompt.startsWith('-') ? ['--'] : []),
     prompt,
   ];
@@ -293,6 +297,7 @@ export function buildChatTurn(ctx: {
     effort: ctx.effort,
     executionMode: ctx.executionMode,
     extraDirs: ctx.extraDirs,
+    capabilityArgs: capabilityLaunchArgs(ctx.account),
   };
   const args = argsForProvider(ctx.account.provider, ctx.prompt, ctx.turn, options);
   return buildLaunch({ account: ctx.account, cwd: ctx.cwd, args, baseEnv: ctx.baseEnv });
