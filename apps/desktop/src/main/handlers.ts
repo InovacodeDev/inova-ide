@@ -1227,6 +1227,7 @@ export function createHandlers(deps: HandlerDeps) {
           );
           const orphaned = sessionIdsOfProjects(store, projectIds);
           await removeAccount({ root: deps.root, label, force });
+          if (account) capabilityCache.delete(account.id);
           removeSessionsRuntimeState(orphaned);
           await removeTranscripts(orphaned);
           return ok(null);
