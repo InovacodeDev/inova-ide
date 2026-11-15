@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -58,6 +58,35 @@ describe('grokCapabilities mcp', () => {
     await withAccountDir(async (ctx) => {
       expect((await categoryOf(ctx, 'mcp'))?.error).toBe('O config.toml do Grok é inválido.');
     }, '[mcp_servers.broken\nenabled = false\n');
+  });
+
+  it('toggles enabled in the target table only', async () => {
+    await withAccountDir(async (ctx) => {
+      const file = join(ctx.account.homeDir, 'config.toml');
+      await grokCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'docs' }, enabled: false });
+      await grokCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'search' }, enabled: true });
+      const toml = await readFile(file, 'utf8');
+      expect(toml).toContain('[mcp_servers.docs]\nenabled = false\nurl');
+      expect(toml).toContain('command = "search-mcp"\nenabled = true');
+      expect(toml).toContain('[skills]\ndisabled = ["plan"]');
+    });
+  });
+
+  it('edits the [skills] and [plugins] disabled arrays and rejects other kinds', async () => {
+    await withAccountDir(async (ctx) => {
+      const file = join(ctx.account.homeDir, 'config.toml');
+      const set = (kind: 'skill' | 'plugin' | 'connector', id: string, enabled: boolean) =>
+        grokCapabilities.setEnabled({ ctx, ref: { kind, id }, enabled });
+      await set('skill', 'review', false);
+      await set('skill', 'plan', true);
+      await set('plugin', 'lint', false);
+      const toml = await readFile(file, 'utf8');
+      expect(toml).toContain('[skills]\ndisabled = ["review"]');
+      expect(toml).toContain('[plugins]\ndisabled = ["tidy", "lint"]');
+      await expect(set('connector', 'x', false)).rejects.toThrow(
+        'Grok não suporta desligar este item.',
+      );
+    });
   });
 
   it('has no launch args', () => {

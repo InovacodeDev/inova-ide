@@ -1,11 +1,19 @@
 import { join } from 'node:path';
-import { readIfExists } from './file-edit.js';
+import {
+  readIfExists,
+  serialize,
+  setTomlArrayMembership,
+  setTomlTableKey,
+  tomlTableHeader,
+  updateTomlFile,
+} from './file-edit.js';
 import { baseItem } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
   CapabilityContext,
   CapabilityListing,
+  SetEnabledInput,
 } from './types.js';
 
 const UNSUPPORTED_KIND_MESSAGE = 'Grok não suporta desligar este item.';
@@ -63,8 +71,23 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   return { categories: [mcpCategory(toml)], cost: null };
 }
 
-function setEnabled(): Promise<void> {
-  return Promise.reject(new Error(UNSUPPORTED_KIND_MESSAGE));
+function tomlUpdateFor(input: SetEnabledInput): ((toml: string) => string) | null {
+  const { ref, enabled } = input;
+  if (ref.kind === 'mcp') {
+    const table = tomlTableHeader(['mcp_servers', ref.id]);
+    return (toml) => setTomlTableKey({ toml, table, key: 'enabled', value: enabled });
+  }
+  if (ref.kind !== 'skill' && ref.kind !== 'plugin') return null;
+  const table = ref.kind === 'skill' ? 'skills' : 'plugins';
+  return (toml) =>
+    setTomlArrayMembership({ toml, table, key: 'disabled', member: ref.id, present: !enabled });
+}
+
+function setEnabled(input: SetEnabledInput): Promise<void> {
+  const update = tomlUpdateFor(input);
+  if (update === null) return Promise.reject(new Error(UNSUPPORTED_KIND_MESSAGE));
+  const file = configFile(input.ctx);
+  return serialize(file, () => updateTomlFile({ file, backupRoot: input.ctx.backupRoot, update }));
 }
 
 export const grokCapabilities: CapabilityAdapter = { list, launchArgs: () => [], setEnabled };

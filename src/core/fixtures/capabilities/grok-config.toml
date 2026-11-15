@@ -9,3 +9,9 @@ enabled = false
 
 [mcp_servers.search.env]
 KEY = "placeholder"
+
+[skills]
+disabled = ["plan"]
+
+[plugins]
+disabled = ["tidy"]
