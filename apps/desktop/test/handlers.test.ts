@@ -1392,6 +1392,17 @@ test('setCapabilityEnabled translates file errors without paths and survives a f
   expect(await toggle()).toEqual({ ok: false, message: `${prefix}formato não suportado` });
   setEnabled.mockRejectedValueOnce(new Error('Mensagem do adaptador'));
   expect(await toggle()).toEqual({ ok: false, message: 'Mensagem do adaptador' });
+  const eacces = Object.assign(
+    new Error("EACCES: permission denied, open '/home/u/.claude.json'"),
+    {
+      code: 'EACCES',
+    },
+  );
+  setEnabled.mockRejectedValueOnce(eacces);
+  expect(await toggle()).toEqual({
+    ok: false,
+    message: 'Não foi possível alterar o arquivo de configuração (EACCES).',
+  });
 
   setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/c.toml', 'invalid JSON'));
   list.mockRejectedValueOnce(new Error('re-list quebrou'));

@@ -214,7 +214,12 @@ const FILE_ERROR_REASONS: Record<string, string> = {
 };
 
 function fileErrorMessage(error: Error): string {
-  if (!(error instanceof CapabilityFileError)) return error.message;
+  if (!(error instanceof CapabilityFileError)) {
+    const code: unknown = 'code' in error ? error.code : undefined;
+    return typeof code === 'string'
+      ? `Não foi possível alterar o arquivo de configuração (${code}).`
+      : error.message;
+  }
   return `${FILE_ERROR_PREFIX}${FILE_ERROR_REASONS[error.reason] ?? 'formato não suportado'}`;
 }
 
