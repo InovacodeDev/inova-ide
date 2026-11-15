@@ -1331,6 +1331,75 @@ test('setCapabilityEnabled stores launch toggles and the connector wildcard', as
   });
 });
 
+test('listCapabilities prunes stored disabled refs whose items vanished from a successful category', async () => {
+  const skills = ['a', 'b'].map((id) => capabilityItem({ kind: 'skill', id }));
+  const connectors = ['c1', 'c2'].map((id) => capabilityItem({ kind: 'connector', id }));
+  const full = {
+    categories: [
+      { kind: 'skill' as const, items: skills, error: null },
+      { kind: 'connector' as const, items: connectors, error: null },
+    ],
+    cost: null,
+  };
+  const list = vi.fn<CapabilityAdapter['list']>(async () => full);
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({
+      list,
+      launchArgs: () => [],
+      setEnabled: vi.fn(async () => undefined),
+    }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = (kind: 'skill' | 'connector', id: string) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind, id, enabled: false });
+  for (const [kind, id] of [
+    ['skill', 'a'],
+    ['skill', 'b'],
+    ['connector', 'c1'],
+    ['connector', 'c2'],
+  ] as const) {
+    await toggle(kind, id);
+  }
+  const stored = async () => (await loadStore(root)).accounts[0]?.disabledCapabilities;
+  expect(await stored()).toContainEqual({ kind: 'connector', id: '*' });
+
+  list.mockResolvedValueOnce({
+    categories: [
+      { kind: 'skill', items: [capabilityItem({ kind: 'skill', id: 'b' })], error: null },
+      { kind: 'connector', items: [], error: 'falhou' },
+    ],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([
+    { kind: 'skill', id: 'b' },
+    { kind: 'connector', id: 'c1' },
+    { kind: 'connector', id: 'c2' },
+    { kind: 'connector', id: '*' },
+  ]);
+
+  list.mockResolvedValueOnce({
+    categories: [
+      { kind: 'skill', items: [capabilityItem({ kind: 'skill', id: 'b' })], error: null },
+      { kind: 'connector', items: [capabilityItem({ kind: 'connector', id: 'c2' })], error: null },
+    ],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([
+    { kind: 'skill', id: 'b' },
+    { kind: 'connector', id: 'c2' },
+    { kind: 'connector', id: '*' },
+  ]);
+
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'connector', items: [], error: null }],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'b' }]);
+});
+
 test('setCapabilityEnabled does not add the wildcard when a connector appeared after the last listing', async () => {
   const connector = (id: string) => capabilityItem({ kind: 'connector', id });
   const twoConnectors = {

@@ -371,6 +371,27 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  async function pruneStaleDisabled(accountId: string, listing: CapabilityListing): Promise<void> {
+    const knownIds = new Map(
+      listing.categories
+        .filter((category) => category.error === null)
+        .map((category) => [category.kind, new Set(category.items.map((item) => item.id))]),
+    );
+    const isStale = (ref: CapabilityRef): boolean => {
+      const ids = knownIds.get(ref.kind);
+      if (ids === undefined) return false;
+      return ref.kind === 'connector' && ref.id === '*' ? ids.size === 0 : !ids.has(ref.id);
+    };
+    await withStoreLock(deps.root, async () => {
+      const store = await loadStore(deps.root);
+      const account = store.accounts.find((item) => item.id === accountId);
+      const disabled = account?.disabledCapabilities ?? [];
+      if (!account || !disabled.some(isStale)) return;
+      account.disabledCapabilities = disabled.filter((ref) => !isStale(ref));
+      await saveStore(deps.root, store);
+    });
+  }
+
   async function listAccountCapabilities(input: {
     account: Account;
     backupRoot: string;
@@ -378,6 +399,7 @@ export function createHandlers(deps: HandlerDeps) {
     const { account, backupRoot } = input;
     const ctx = await capabilityContext({ account, backupRoot });
     const fresh = await capabilityAdapterOf(account).list(ctx);
+    await pruneStaleDisabled(account.id, fresh);
     const previous = capabilityCache.get(account.id);
     const merged: CapabilityListing = {
       ...fresh,
