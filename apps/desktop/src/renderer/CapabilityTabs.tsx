@@ -13,7 +13,7 @@ export function CapabilityTabs(props: {
   const { listing, tabs, active, query, onSelect, onQuery } = props;
   return (
     <div className="capabilities-toolbar">
-      <div className="capabilities-tabs" role="tablist">
+      <div className="capabilities-tabs" role="tablist" aria-label="Categorias">
         {CAPABILITY_TABS.filter(({ kind }) => tabs.includes(kind)).map(({ kind, label }) => (
           <button
             key={kind}

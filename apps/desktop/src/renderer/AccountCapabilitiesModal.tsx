@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AccountView, CapabilityItem, CapabilityKind } from '../shared/api';
 import { displayEnabled, filterItems, sortItems, visibleTabs } from './capabilities-state';
 import { CapabilityRow, CostSummary } from './CapabilityRow';
@@ -30,6 +30,16 @@ export function AccountCapabilitiesModal(props: {
   const [confirming, setConfirming] = useState<{ item: CapabilityItem; enabled: boolean } | null>(
     null,
   );
+
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement;
+    cardRef.current?.focus();
+    return () => {
+      if (previous instanceof HTMLElement) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
     if (confirming) return;
@@ -64,7 +74,7 @@ export function AccountCapabilitiesModal(props: {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card capabilities-card">
+      <div ref={cardRef} className="modal-card capabilities-card" tabIndex={-1}>
         <div className="modal-header">
           <div className="modal-title-group">
             <h2 id="capabilities-title" className="modal-title">
@@ -111,6 +121,7 @@ export function AccountCapabilitiesModal(props: {
                     item={item}
                     checked={displayEnabled({ item, plugins })}
                     pending={pendingKey === capabilityKey(item)}
+                    locked={pendingKey !== null}
                     onToggle={requestToggle}
                   />
                 ))}

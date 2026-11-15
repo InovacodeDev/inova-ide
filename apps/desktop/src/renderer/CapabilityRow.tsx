@@ -30,9 +30,10 @@ export function CapabilityRow(props: {
   item: CapabilityItem;
   checked: boolean;
   pending: boolean;
+  locked: boolean;
   onToggle: (item: CapabilityItem, enabled: boolean) => void;
 }) {
-  const { item, checked, pending, onToggle } = props;
+  const { item, checked, pending, locked, onToggle } = props;
   const unsupported = item.applyMode === 'unsupported';
   const inputId = `capability-${capabilityKey(item)}`;
   const detail = [item.group, item.description].filter(Boolean).join(' · ');
@@ -43,6 +44,9 @@ export function CapabilityRow(props: {
       <label className="capabilities-name" htmlFor={inputId}>
         <span className="capabilities-title">{item.name}</span>
         {detail ? <span className="capabilities-detail">{detail}</span> : null}
+        {unsupported && item.unsupportedReason ? (
+          <span className="sr-only">{item.unsupportedReason}</span>
+        ) : null}
       </label>
       <span className="capabilities-mode">{applyModeLabel(item.applyMode)}</span>
       {item.tokens !== null ? (
@@ -54,7 +58,7 @@ export function CapabilityRow(props: {
         <Switch
           id={inputId}
           checked={checked}
-          disabled={unsupported || pending}
+          disabled={unsupported || pending || locked}
           onChange={(enabled) => onToggle(item, enabled)}
         />
       </span>
