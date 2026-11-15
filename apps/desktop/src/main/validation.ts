@@ -572,14 +572,10 @@ export function parseCapabilityToggle(
   input: unknown,
 ): { accountLabel: string; kind: CapabilityKind; id: string; enabled: boolean } | undefined {
   if (!isRecord(input) || !isText(input['accountLabel'])) return undefined;
-  const { kind, id, enabled } = input;
-  if (!isCapabilityRef({ kind, id }) || typeof enabled !== 'boolean') return undefined;
-  return {
-    accountLabel: input['accountLabel'],
-    kind: kind as CapabilityKind,
-    id: id as string,
-    enabled,
-  };
+  const ref: unknown = { kind: input['kind'], id: input['id'] };
+  const enabled = input['enabled'];
+  if (!isCapabilityRef(ref) || typeof enabled !== 'boolean') return undefined;
+  return { accountLabel: input['accountLabel'], kind: ref.kind, id: ref.id, enabled };
 }
 
 const DEFAULT_FILE_SEARCH_LIMIT = 40;
