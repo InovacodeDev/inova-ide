@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { AccountError, addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
+import { serialize } from '@inova/core/capabilities/file-edit';
 import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
 import type {
   CapabilityAdapter,
@@ -2174,7 +2175,17 @@ export function createHandlers(deps: HandlerDeps) {
           });
           return ok(await listAccountCapabilities({ account, backupRoot }));
         }
-        return fail('Item não configurável.');
+        const ctx = await capabilityContext({ account, backupRoot });
+        try {
+          await serialize(`capabilities:${account.id}`, () =>
+            capabilityAdapterOf(account).setEnabled({ ctx, ref: { kind, id }, enabled }),
+          );
+        } catch (error: unknown) {
+          if (!(error instanceof Error)) throw error;
+          await listAccountCapabilities({ account, backupRoot });
+          return fail(error.message);
+        }
+        return ok(await listAccountCapabilities({ account, backupRoot }));
       }),
     searchFiles: (input: unknown) =>
       validated(input, parseFileSearch, async ({ projectId, query, limit, sessionId }) => {

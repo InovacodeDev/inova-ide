@@ -1330,6 +1330,50 @@ test('setCapabilityEnabled stores launch toggles and the connector wildcard', as
   });
 });
 
+test('setCapabilityEnabled reports unsupported items and file adapter failures', async () => {
+  const items = [
+    capabilityItem({
+      kind: 'plugin',
+      id: 'p',
+      applyMode: 'unsupported',
+      unsupportedReason: 'Desligue o plugin superpowers',
+    }),
+    capabilityItem({ kind: 'mcp', id: 'm', applyMode: 'account-file' }),
+  ];
+  const setEnabled = vi.fn<CapabilityAdapter['setEnabled']>();
+  const list = vi.fn<CapabilityAdapter['list']>(async () => ({
+    categories: [{ kind: 'mcp', items, error: null }],
+    cost: null,
+  }));
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({ list, launchArgs: () => [], setEnabled }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const input = { accountLabel: 'cl', enabled: false };
+
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'plugin', id: 'p' })).toEqual({
+    ok: false,
+    message: 'Desligue o plugin superpowers',
+  });
+  expect(setEnabled).not.toHaveBeenCalled();
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'tool', id: 'p' })).toEqual(INVALID);
+
+  setEnabled.mockRejectedValueOnce(new Error('Arquivo inválido'));
+  const listsBefore = list.mock.calls.length;
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'mcp', id: 'm' })).toEqual({
+    ok: false,
+    message: 'Arquivo inválido',
+  });
+  expect(list.mock.calls.length).toBe(listsBefore + 1);
+  expect((await loadStore(root)).accounts[0]?.disabledCapabilities).toBeUndefined();
+
+  const success = unwrap(await handlers.setCapabilityEnabled({ ...input, kind: 'mcp', id: 'm' }));
+  expect(setEnabled).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ref: { kind: 'mcp', id: 'm' }, enabled: false }),
+  );
+  expect(success.categories[0]?.items).toHaveLength(2);
+});
+
 test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {
   const { root, handlers } = await setup();
   const { project, session } = await seedSession(root);
