@@ -11,7 +11,7 @@ import {
   tomlTableHeader,
   updateTomlFile,
 } from './file-edit.js';
-import { baseItem, isRecord, pluginNamesIn, skillsIn } from './shared.js';
+import { baseItem, categoryFromFsError, pluginNamesIn, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -67,9 +67,11 @@ async function folderCategory(input: {
     );
     return { kind: input.kind, items, error: null };
   } catch (error: unknown) {
-    const code = isRecord(error) ? error['code'] : undefined;
-    if (typeof code !== 'string') throw error;
-    return { kind: input.kind, items: [], error: `${LIST_FAILED_MESSAGE[input.kind]} (${code}).` };
+    return categoryFromFsError({
+      kind: input.kind,
+      message: LIST_FAILED_MESSAGE[input.kind],
+      error,
+    });
   }
 }
 

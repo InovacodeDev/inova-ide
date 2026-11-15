@@ -9,7 +9,7 @@ import {
   tomlTableHeader,
   updateTomlFile,
 } from './file-edit.js';
-import { isRecord, skillsIn } from './shared.js';
+import { categoryFromFsError, isRecord, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -138,9 +138,7 @@ async function skillCategory(ctx: CapabilityContext): Promise<CapabilityCategory
   try {
     return { kind: 'skill', items: await listSkills(ctx), error: null };
   } catch (error: unknown) {
-    const code = isRecord(error) ? error['code'] : undefined;
-    if (typeof code !== 'string') throw error;
-    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
+    return categoryFromFsError({ kind: 'skill', message: SKILL_LIST_FAILED_MESSAGE, error });
   }
 }
 

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
-import { baseItem, isRecord, pluginNamesIn, skillsIn } from './shared.js';
+import { baseItem, categoryFromFsError, isRecord, pluginNamesIn, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -71,9 +71,7 @@ async function pluginCategory(input: {
     );
     return { kind: 'plugin', items, error: null };
   } catch (error: unknown) {
-    const code = isRecord(error) ? error['code'] : undefined;
-    if (typeof code !== 'string') throw error;
-    return { kind: 'plugin', items: [], error: `${PLUGIN_LIST_FAILED_MESSAGE} (${code}).` };
+    return categoryFromFsError({ kind: 'plugin', message: PLUGIN_LIST_FAILED_MESSAGE, error });
   }
 }
 
@@ -127,9 +125,7 @@ async function skillCategory(input: {
     );
     return { kind: 'skill', items, error: null };
   } catch (error: unknown) {
-    const code = isRecord(error) ? error['code'] : undefined;
-    if (typeof code !== 'string') throw error;
-    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
+    return categoryFromFsError({ kind: 'skill', message: SKILL_LIST_FAILED_MESSAGE, error });
   }
 }
 

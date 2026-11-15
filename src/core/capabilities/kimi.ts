@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
-import { baseItem, isRecord, skillsIn } from './shared.js';
+import { baseItem, categoryFromFsError, isRecord, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -56,9 +56,7 @@ async function skillCategory(ctx: CapabilityContext): Promise<CapabilityCategory
     );
     return { kind: 'skill', items, error: null };
   } catch (error: unknown) {
-    const code = isRecord(error) ? error['code'] : undefined;
-    if (typeof code !== 'string') throw error;
-    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
+    return categoryFromFsError({ kind: 'skill', message: SKILL_LIST_FAILED_MESSAGE, error });
   }
 }
 

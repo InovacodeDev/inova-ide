@@ -2,10 +2,20 @@ import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isMissingFile, readIfExists } from './file-edit.js';
-import type { CapabilityItem } from './types.js';
+import type { CapabilityCategoryResult, CapabilityItem, CapabilityKind } from './types.js';
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function categoryFromFsError(input: {
+  kind: CapabilityKind;
+  message: string;
+  error: unknown;
+}): CapabilityCategoryResult {
+  const code = isRecord(input.error) ? input.error['code'] : undefined;
+  if (typeof code !== 'string') throw input.error;
+  return { kind: input.kind, items: [], error: `${input.message} (${code}).` };
 }
 
 export function baseItem(
