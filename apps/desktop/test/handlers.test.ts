@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
 import type { CapabilityAdapter, CapabilityItem } from '@inova/core/capabilities/types';
+import { CapabilityFileError } from '@inova/core/capabilities/file-edit';
 import { createCheckpoint } from '@inova/core/git-checkpoints';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
@@ -1370,6 +1371,31 @@ test('setCapabilityEnabled does not add the wildcard when a connector appeared a
     { kind: 'connector', id: 'A' },
     { kind: 'connector', id: 'B' },
   ]);
+});
+
+test('setCapabilityEnabled translates file errors without paths and survives a failing re-list', async () => {
+  const items = [capabilityItem({ kind: 'mcp', id: 'm', applyMode: 'account-file' })];
+  const listing = { categories: [{ kind: 'mcp' as const, items, error: null }], cost: null };
+  const list = vi.fn<CapabilityAdapter['list']>(async () => listing);
+  const setEnabled = vi.fn<CapabilityAdapter['setEnabled']>();
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({ list, launchArgs: () => [], setEnabled }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = () =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind: 'mcp', id: 'm', enabled: false });
+  const prefix = 'Não foi possível alterar o arquivo de configuração: ';
+
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/.claude.json', 'invalid JSON'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}JSON inválido` });
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/c.toml', 'something new'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}formato não suportado` });
+  setEnabled.mockRejectedValueOnce(new Error('Mensagem do adaptador'));
+  expect(await toggle()).toEqual({ ok: false, message: 'Mensagem do adaptador' });
+
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/c.toml', 'invalid JSON'));
+  list.mockRejectedValueOnce(new Error('re-list quebrou'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}JSON inválido` });
 });
 
 test('setCapabilityEnabled reports unsupported items and file adapter failures', async () => {

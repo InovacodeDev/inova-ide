@@ -3,8 +3,11 @@ import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export class CapabilityFileError extends Error {
+  readonly reason: string;
+
   constructor(path: string, reason: string) {
     super(`${path}: ${reason}`);
+    this.reason = reason;
     this.name = 'CapabilityFileError';
   }
 }

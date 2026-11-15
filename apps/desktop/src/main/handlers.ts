@@ -3,7 +3,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { AccountError, addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
-import { serialize } from '@inova/core/capabilities/file-edit';
+import { CapabilityFileError, serialize } from '@inova/core/capabilities/file-edit';
 import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
 import type {
   CapabilityAdapter,
@@ -199,6 +199,24 @@ const NOTIFICATION_TOGGLES = {
   failed: 'failed',
   completed: 'completed',
 } as const satisfies Record<InboxAttentionKind, keyof Settings['notifications']>;
+
+const FILE_ERROR_PREFIX = 'Não foi possível alterar o arquivo de configuração: ';
+const FILE_ERROR_REASONS: Record<string, string> = {
+  'invalid JSON': 'JSON inválido',
+  'JSON root is not an object': 'a raiz do JSON não é um objeto',
+  'table defined inline; cannot edit safely': 'tabela definida em linha, edição insegura',
+  'unsupported string escape': 'escape de texto não suportado',
+  'invalid string': 'texto inválido',
+  'array has members other than double-quoted strings':
+    'lista com itens que não são texto entre aspas duplas',
+  'unsupported array form': 'formato de lista não suportado',
+  'malformed table header': 'cabeçalho de tabela malformado',
+};
+
+function fileErrorMessage(error: Error): string {
+  if (!(error instanceof CapabilityFileError)) return error.message;
+  return `${FILE_ERROR_PREFIX}${FILE_ERROR_REASONS[error.reason] ?? 'formato não suportado'}`;
+}
 
 export function isExternalWebUrl(url: string): boolean {
   try {
@@ -2184,8 +2202,13 @@ export function createHandlers(deps: HandlerDeps) {
           );
         } catch (error: unknown) {
           if (!(error instanceof Error)) throw error;
-          await listAccountCapabilities({ account, backupRoot });
-          return fail(error.message);
+          try {
+            await listAccountCapabilities({ account, backupRoot });
+          } catch (refreshError: unknown) {
+            // NOTE: the original adapter error is the one the user must see; a failed refresh keeps the old cache.
+            if (!(refreshError instanceof Error)) throw refreshError;
+          }
+          return fail(fileErrorMessage(error));
         }
         return ok(await listAccountCapabilities({ account, backupRoot }));
       }),
