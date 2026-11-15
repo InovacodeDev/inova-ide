@@ -60,6 +60,31 @@ describe('grokCapabilities mcp', () => {
     }, '[mcp_servers.broken\nenabled = false\n');
   });
 
+  it('maps bad escapes in a header or a disabled array to the config error, never throws', async () => {
+    const configs = ['[mcp_servers."\\U0001F600"]\n', '[skills]\ndisabled = ["\\U0001F600"]\n'];
+    for (const config of configs) {
+      await withAccountDir(async (ctx) => {
+        const { categories } = await grokCapabilities.list(ctx);
+        expect(categories.map((entry) => entry.error)).toEqual(
+          Array(3).fill('O config.toml do Grok é inválido.'),
+        );
+      }, config);
+    }
+  });
+
+  it('reads quoted headers and members the way the writer does', async () => {
+    const config =
+      '[mcp_servers."my#srv"]\nenabled = false\n\n["skills"]\ndisabled = ["a]b", "plan"]\n';
+    await withAccountDir(async (ctx) => {
+      await mkdir(join(ctx.account.homeDir, 'skills', 'a]b'), { recursive: true });
+      await writeFile(join(ctx.account.homeDir, 'skills', 'a]b', 'SKILL.md'), '# x');
+      const mcp = (await categoryOf(ctx, 'mcp'))?.items ?? [];
+      expect(mcp.map((item) => [item.id, item.enabled])).toEqual([['my#srv', false]]);
+      const skills = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(skills.map((item) => [item.id, item.enabled])).toEqual([['a]b', false]]);
+    }, config);
+  });
+
   it('lists skills and plugins from their folders honoring the disabled arrays', async () => {
     await withAccountDir(async (ctx) => {
       for (const name of ['plan', 'review']) {

@@ -1,6 +1,10 @@
 import { join } from 'node:path';
 import {
+  CapabilityFileError,
+  listTomlTables,
   readIfExists,
+  readTomlArrayMembers,
+  readTomlTableKey,
   serialize,
   setTomlArrayMembership,
   setTomlTableKey,
@@ -22,73 +26,34 @@ const LIST_FAILED_MESSAGE = {
   skill: 'Não foi possível listar as skills do Grok',
   plugin: 'Não foi possível listar os plugins do Grok',
 };
-// REGEX: double-quoted TOML basic string
-const QUOTED_STRING = /"(?:[^"\\]|\\.)*"/g;
 
-// REGEX: single-bracket table header with optional trailing comment
-const TABLE_HEADER = /^\s*\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/;
-// REGEX: bare or double-quoted dotted-key segment
-const KEY_SEGMENT = /"(?:[^"\\]|\\.)*"|[^.\s"]+/g;
+interface GrokConfig {
+  servers: { id: string; enabled: boolean }[];
+  disabledSkills: Set<string>;
+  disabledPlugins: Set<string>;
+}
 
 function configFile(ctx: CapabilityContext): string {
   return join(ctx.account.homeDir, 'config.toml');
 }
 
-function tableSegments(path: string): string[] {
-  return [...path.matchAll(KEY_SEGMENT)].map((match) =>
-    match[0].startsWith('"') ? (JSON.parse(match[0]) as string) : match[0],
-  );
-}
-
-function isMalformed(lines: readonly string[]): boolean {
-  return lines.some((line) => {
-    const text = line.trimStart();
-    return text.startsWith('[') && !text.startsWith('[[') && !TABLE_HEADER.test(line);
-  });
-}
-
-function mcpServers(toml: string): Map<string, boolean> | null {
-  const lines = toml.split('\n');
-  if (isMalformed(lines)) return null;
-  const servers = new Map<string, boolean>();
-  let current: string | null = null;
-  for (const line of lines) {
-    const header = TABLE_HEADER.exec(line);
-    if (header) {
-      const [root, name, ...rest] = tableSegments(header[1] ?? '');
-      current = root === 'mcp_servers' && name !== undefined && rest.length === 0 ? name : null;
-      if (current !== null && !servers.has(current)) servers.set(current, true);
-    } else if (current !== null && /^\s*enabled\s*=\s*false\b/.test(line)) {
-      servers.set(current, false);
-    }
+function parseConfig(toml: string): GrokConfig | null {
+  try {
+    const names = listTomlTables(toml).flatMap(([root, name, ...rest]) =>
+      root === 'mcp_servers' && name !== undefined && rest.length === 0 ? [name] : [],
+    );
+    const servers = [...new Set(names)].map((id) => {
+      const table = tomlTableHeader(['mcp_servers', id]);
+      const value = readTomlTableKey({ toml, table, key: 'enabled' });
+      return { id, enabled: !/^false\b/.test(value ?? '') };
+    });
+    const disabled = (table: string) =>
+      new Set(readTomlArrayMembers({ toml, table, key: 'disabled' }));
+    return { servers, disabledSkills: disabled('skills'), disabledPlugins: disabled('plugins') };
+  } catch (error: unknown) {
+    if (error instanceof CapabilityFileError) return null;
+    throw error;
   }
-  return servers;
-}
-
-function mcpCategory(toml: string): CapabilityCategoryResult {
-  const servers = mcpServers(toml);
-  if (servers === null) return { kind: 'mcp', items: [], error: INVALID_CONFIG_MESSAGE };
-  const items = [...servers].map(([id, enabled]) => baseItem({ kind: 'mcp', id, enabled }));
-  return { kind: 'mcp', items, error: null };
-}
-
-function disabledMembers(toml: string, table: string): Set<string> {
-  const members = new Set<string>();
-  let inTable = false;
-  let collecting = false;
-  for (const line of toml.split('\n')) {
-    const header = TABLE_HEADER.exec(line);
-    if (header) inTable = (header[1] ?? '').trim() === table;
-    const start = /^\s*disabled\s*=\s*\[(.*)$/.exec(line);
-    if (inTable && start) collecting = true;
-    if (!collecting) continue;
-    const text = start ? (start[1] ?? '') : line;
-    for (const quoted of text.split(']')[0]?.match(QUOTED_STRING) ?? []) {
-      members.add(JSON.parse(quoted) as string);
-    }
-    if (text.includes(']')) collecting = false;
-  }
-  return members;
 }
 
 async function folderCategory(input: {
@@ -109,8 +74,8 @@ async function folderCategory(input: {
 }
 
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
-  const toml = (await readIfExists(configFile(ctx))) ?? '';
-  if (isMalformed(toml.split('\n'))) {
+  const config = parseConfig((await readIfExists(configFile(ctx))) ?? '');
+  if (config === null) {
     const kinds = ['skill', 'mcp', 'plugin'] as const;
     const categories = kinds.map((kind) => ({ kind, items: [], error: INVALID_CONFIG_MESSAGE }));
     return { categories, cost: null };
@@ -120,20 +85,20 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
       id,
       description: null,
     }));
-  const categories = await Promise.all([
+  const mcp: CapabilityCategoryResult = {
+    kind: 'mcp',
+    items: config.servers.map(({ id, enabled }) => baseItem({ kind: 'mcp', id, enabled })),
+    error: null,
+  };
+  const [skill, plugin] = await Promise.all([
     folderCategory({
       kind: 'skill',
       names: () => skillsIn(join(ctx.account.homeDir, 'skills')),
-      disabled: disabledMembers(toml, 'skills'),
+      disabled: config.disabledSkills,
     }),
-    mcpCategory(toml),
-    folderCategory({
-      kind: 'plugin',
-      names: pluginNames,
-      disabled: disabledMembers(toml, 'plugins'),
-    }),
+    folderCategory({ kind: 'plugin', names: pluginNames, disabled: config.disabledPlugins }),
   ]);
-  return { categories, cost: null };
+  return { categories: [skill, mcp, plugin], cost: null };
 }
 
 function tomlUpdateFor(input: SetEnabledInput): ((toml: string) => string) | null {
