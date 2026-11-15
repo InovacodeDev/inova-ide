@@ -37,12 +37,16 @@ function configFile(ctx: CapabilityContext): string {
   return join(ctx.account.homeDir, 'config.toml');
 }
 
+function serverIds(toml: string): string[] {
+  const names = listTomlTables(toml).flatMap(([root, name, ...rest]) =>
+    root === 'mcp_servers' && name !== undefined && rest.length === 0 ? [name] : [],
+  );
+  return [...new Set(names)];
+}
+
 function parseConfig(toml: string): GrokConfig | null {
   try {
-    const names = listTomlTables(toml).flatMap(([root, name, ...rest]) =>
-      root === 'mcp_servers' && name !== undefined && rest.length === 0 ? [name] : [],
-    );
-    const servers = [...new Set(names)].map((id) => {
+    const servers = serverIds(toml).map((id) => {
       const table = tomlTableHeader(['mcp_servers', id]);
       const value = readTomlTableKey({ toml, table, key: 'enabled' });
       return { id, enabled: !/^false\b/.test(value ?? '') };
@@ -107,7 +111,10 @@ function tomlUpdateFor(input: SetEnabledInput): ((toml: string) => string) | nul
   const { ref, enabled } = input;
   if (ref.kind === 'mcp') {
     const table = tomlTableHeader(['mcp_servers', ref.id]);
-    return (toml) => setTomlTableKey({ toml, table, key: 'enabled', value: enabled });
+    return (toml) => {
+      if (!serverIds(toml).includes(ref.id)) throw new Error(`Item não encontrado: ${ref.id}.`);
+      return setTomlTableKey({ toml, table, key: 'enabled', value: enabled });
+    };
   }
   if (ref.kind !== 'skill' && ref.kind !== 'plugin') return null;
   const table = ref.kind === 'skill' ? 'skills' : 'plugins';

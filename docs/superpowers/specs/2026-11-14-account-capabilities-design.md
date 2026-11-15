@@ -120,7 +120,7 @@ A configuração fica em `~/.config/opencode/opencode.json`, fora da pasta da co
 
 | Categoria | Listar | Desligar | Modo |
 | --- | --- | --- | --- |
-| MCP | `mcp` em `opencode.json` | `"disabled": true` no servidor **[spike]**: confirme a chave atual | `global-file` |
+| MCP | `mcp.servers.<nome>` em `opencode.json` (V2), com fallback para `mcp.<nome>` (V1) | `"disabled": true` no servidor **[spike]**: confirme a chave atual | `global-file` |
 | Plugins | Lista `plugins` em `opencode.json` e pastas `~/.config/opencode/plugins/` | Prefixo `-` na lista `plugins` | `global-file` |
 | Skills | Pastas `~/.config/opencode/skills/*/SKILL.md` | Regra `permissions` com `action: "skill"`, `resource: "<id>"`, `effect: "deny"` | `global-file` |
 

@@ -118,6 +118,17 @@ describe('grokCapabilities mcp', () => {
     });
   });
 
+  it('rejects an unknown mcp id without touching config.toml', async () => {
+    await withAccountDir(async (ctx) => {
+      const file = join(ctx.account.homeDir, 'config.toml');
+      const before = await readFile(file, 'utf8');
+      await expect(
+        grokCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'ghost' }, enabled: false }),
+      ).rejects.toThrow('Item não encontrado: ghost.');
+      expect(await readFile(file, 'utf8')).toBe(before);
+    });
+  });
+
   it('edits the [skills] and [plugins] disabled arrays and rejects other kinds', async () => {
     await withAccountDir(async (ctx) => {
       const file = join(ctx.account.homeDir, 'config.toml');
