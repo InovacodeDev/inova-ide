@@ -146,7 +146,8 @@ function withPluginDisabled(input: { root: Config; id: string; enabled: boolean 
 function withMcpDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
   const servers = isRecord(input.root['mcp']) ? input.root['mcp'] : {};
   const current = servers[input.id];
-  const { disabled: _previous, ...rest } = isRecord(current) ? current : {};
+  if (!isRecord(current)) throw new Error(`Item não encontrado: ${input.id}.`);
+  const { disabled: _previous, ...rest } = current;
   const server = input.enabled ? rest : { ...rest, disabled: true };
   return { ...input.root, mcp: { ...servers, [input.id]: server } };
 }

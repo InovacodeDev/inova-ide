@@ -114,6 +114,19 @@ describe('kimiCapabilities.setEnabled', () => {
     });
   });
 
+  it('rejects an unknown id without creating an entry', async () => {
+    await withAccountDir(async (ctx) => {
+      await expect(
+        kimiCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'ghost' }, enabled: false }),
+      ).rejects.toThrow('Item não encontrado: ghost.');
+      const file = join(ctx.account.homeDir, 'mcp.json');
+      expect(Object.keys(JSON.parse(await readFile(file, 'utf8')).mcpServers)).toEqual([
+        'docs',
+        'search',
+      ]);
+    });
+  });
+
   it('has no launch args', () => {
     expect(kimiCapabilities.launchArgs([{ kind: 'mcp', id: 'docs' }])).toEqual([]);
   });

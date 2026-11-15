@@ -126,6 +126,15 @@ describe('opencodeCapabilities setEnabled', () => {
     });
   });
 
+  it('rejects an unknown mcp id without creating an entry', async () => {
+    await withHome(async (ctx) => {
+      await expect(setEnabled(ctx, 'mcp', 'ghost')(false)).rejects.toThrow(
+        'Item não encontrado: ghost.',
+      );
+      expect(Object.keys((await readConfig(ctx)).mcp)).toEqual(['docs', 'search']);
+    });
+  });
+
   it('rejects without HOME and for unsupported kinds; launchArgs is empty', async () => {
     await withHome(async (ctx) => {
       await expect(setEnabled({ ...ctx, env: {} }, 'mcp', 'a')(false)).rejects.toThrow(

@@ -93,7 +93,8 @@ function setEnabled(input: SetEnabledInput): Promise<void> {
       update: (root) => {
         const servers = isRecord(root['mcpServers']) ? root['mcpServers'] : {};
         const current = servers[ref.id];
-        const { enabled: _previous, ...rest } = isRecord(current) ? current : {};
+        if (!isRecord(current)) throw new Error(`Item não encontrado: ${ref.id}.`);
+        const { enabled: _previous, ...rest } = current;
         const server = enabled ? rest : { ...rest, enabled: false };
         return { ...root, mcpServers: { ...servers, [ref.id]: server } };
       },
