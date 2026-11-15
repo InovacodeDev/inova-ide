@@ -3,7 +3,12 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
-import { capabilityLaunchArgs } from '@inova/core/capabilities/index';
+import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
+import type {
+  CapabilityAdapter,
+  CapabilityContext,
+  CapabilityListing,
+} from '@inova/core/capabilities/types';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
@@ -34,7 +39,7 @@ import {
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
-import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
+import { buildChatTurn, buildLaunch, buildLogin, isolatedEnv } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import {
   PROVIDER_MODELS,
@@ -120,6 +125,7 @@ import {
   parseApplyProfileSync,
   parseAttachmentPick,
   parseBinding,
+  parseCapabilityList,
   parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
@@ -171,6 +177,7 @@ export interface HandlerDeps {
   updates?: { current: string; check: () => Promise<Result<UpdateInfo>> };
   installUpdate?: () => Promise<Result<null>>;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
+  capabilityAdapters?: Record<ProviderId, CapabilityAdapter>;
   pickFolder: () => Promise<string | null>;
   pickAttachments: (kind: AttachmentKind) => Promise<PickedAttachment[]>;
 }
@@ -276,6 +283,45 @@ export function createHandlers(deps: HandlerDeps) {
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
   const modelsCache = new Map<string, ProviderModels>();
+  const capabilityCache = new Map<string, CapabilityListing>();
+
+  function newBackupRoot(): string {
+    return join(
+      deps.root,
+      'backups',
+      'capabilities',
+      new Date().toISOString().replaceAll(':', '-'),
+    );
+  }
+
+  async function listAccountCapabilities(input: {
+    account: Account;
+    backupRoot: string;
+  }): Promise<CapabilityListing> {
+    const { account, backupRoot } = input;
+    const store = await loadStore(deps.root);
+    const baseEnv = await deps.baseEnv();
+    await providers[account.provider].prepareLaunch(account.homeDir, baseEnv['HOME']);
+    const ctx: CapabilityContext = {
+      account,
+      runner: deps.runner,
+      env: isolatedEnv(account, baseEnv),
+      projectPath: store.projects.find((item) => item.accountId === account.id)?.path ?? null,
+      backupRoot,
+    };
+    const adapter = (deps.capabilityAdapters ?? capabilityAdapters)[account.provider];
+    const fresh = await adapter.list(ctx);
+    const previous = capabilityCache.get(account.id);
+    const merged: CapabilityListing = {
+      ...fresh,
+      categories: fresh.categories.map((category) => {
+        const stale = previous?.categories.find((item) => item.kind === category.kind);
+        return category.error !== null && stale ? { ...category, items: stale.items } : category;
+      }),
+    };
+    capabilityCache.set(account.id, merged);
+    return merged;
+  }
   const fileListCache = new Map<string, { list: ProjectFileList; expiresAt: number }>();
   const fileListInflight = new Map<string, Promise<ProjectFileList>>();
   const fileListGen = new Map<string, number>();
@@ -2053,6 +2099,11 @@ export function createHandlers(deps: HandlerDeps) {
           if (error instanceof Error) return ok(fallback);
           throw error;
         }
+      }),
+    listCapabilities: (input: unknown): Promise<Result<CapabilityListing>> =>
+      validated(input, parseCapabilityList, async ({ accountLabel }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        return ok(await listAccountCapabilities({ account, backupRoot: newBackupRoot() }));
       }),
     searchFiles: (input: unknown) =>
       validated(input, parseFileSearch, async ({ projectId, query, limit, sessionId }) => {

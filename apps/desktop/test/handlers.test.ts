@@ -6,13 +6,14 @@ import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
+import type { CapabilityAdapter, CapabilityItem } from '@inova/core/capabilities/types';
 import { createCheckpoint } from '@inova/core/git-checkpoints';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
-import type { Store } from '@inova/core/types';
+import type { ProviderId, Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
@@ -41,7 +42,12 @@ function unwrap<T>(result: Result<T>): T {
 }
 
 async function setup(
-  options: { withBinary?: boolean; home?: string; withOpenPath?: boolean } = {},
+  options: {
+    withBinary?: boolean;
+    home?: string;
+    withOpenPath?: boolean;
+    capabilityAdapters?: HandlerDeps['capabilityAdapters'];
+  } = {},
 ) {
   const root = await tmp();
   const bin = await tmp();
@@ -101,6 +107,9 @@ async function setup(
   const handlers = createHandlers({
     root,
     notify,
+    ...(options.capabilityAdapters === undefined
+      ? {}
+      : { capabilityAdapters: options.capabilityAdapters }),
     ...(options.withOpenPath === false ? {} : { openPath }),
     runner: { run },
     sessions,
@@ -1193,6 +1202,72 @@ test('listModels returns dynamic agy models for gemini, caches them, and falls b
     { id: 'deepseek/deepseek-reasoner', label: 'deepseek-reasoner', description: 'deepseek' },
     { id: 'openai/gpt-5', label: 'gpt-5', description: 'openai' },
   ]);
+});
+
+function capabilityItem(
+  overrides: Partial<CapabilityItem> & Pick<CapabilityItem, 'kind' | 'id'>,
+): CapabilityItem {
+  return {
+    name: overrides.id,
+    description: null,
+    source: 'user',
+    enabled: true,
+    applyMode: 'launch',
+    unsupportedReason: null,
+    tokens: null,
+    group: null,
+    ...overrides,
+  };
+}
+
+function fakeCapabilityAdapters(adapter: CapabilityAdapter): Record<ProviderId, CapabilityAdapter> {
+  return {
+    claude: adapter,
+    codex: adapter,
+    gemini: adapter,
+    qwen: adapter,
+    opencode: adapter,
+    deepseek: adapter,
+    kimi: adapter,
+    grok: adapter,
+  };
+}
+
+test('listCapabilities builds the context, keeps cached items for a failing category, and rejects bad input', async () => {
+  const list = vi.fn<CapabilityAdapter['list']>();
+  const adapter: CapabilityAdapter = {
+    list,
+    launchArgs: () => [],
+    setEnabled: vi.fn(async () => undefined),
+  };
+  const { root, handlers } = await setup({ capabilityAdapters: fakeCapabilityAdapters(adapter) });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const project = await bindProject({ root, path: root, accountLabel: 'cl' });
+  const skill = capabilityItem({ kind: 'skill', id: 'a' });
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'skill', items: [skill], error: null }],
+    cost: null,
+  });
+  const first = unwrap(await handlers.listCapabilities({ accountLabel: 'cl' }));
+  expect(first.categories[0]?.items).toEqual([skill]);
+  const ctx = list.mock.calls[0]?.[0];
+  expect(ctx?.projectPath).toBe(project.path);
+  expect(ctx?.account.label).toBe('cl');
+  expect(ctx?.backupRoot.startsWith(join(root, 'backups', 'capabilities'))).toBe(true);
+  expect(ctx?.backupRoot).not.toContain(':');
+
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'skill', items: [], error: 'falhou' }],
+    cost: null,
+  });
+  const second = unwrap(await handlers.listCapabilities({ accountLabel: 'cl' }));
+  expect(second.categories[0]).toEqual({ kind: 'skill', items: [skill], error: 'falhou' });
+
+  expect(await handlers.listCapabilities({ accountLabel: 'x' })).toEqual({
+    ok: false,
+    message: 'Conta não encontrada: x.',
+  });
+  expect(await handlers.listCapabilities({})).toEqual(INVALID);
 });
 
 test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {
