@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -58,6 +58,27 @@ describe('grokCapabilities mcp', () => {
     await withAccountDir(async (ctx) => {
       expect((await categoryOf(ctx, 'mcp'))?.error).toBe('O config.toml do Grok é inválido.');
     }, '[mcp_servers.broken\nenabled = false\n');
+  });
+
+  it('lists skills and plugins from their folders honoring the disabled arrays', async () => {
+    await withAccountDir(async (ctx) => {
+      for (const name of ['plan', 'review']) {
+        await mkdir(join(ctx.account.homeDir, 'skills', name), { recursive: true });
+        await writeFile(join(ctx.account.homeDir, 'skills', name, 'SKILL.md'), '# x');
+      }
+      await mkdir(join(ctx.account.homeDir, 'plugins', 'tidy'), { recursive: true });
+      await mkdir(join(ctx.account.homeDir, 'plugins', 'lint'), { recursive: true });
+      const view = async (kind: string) =>
+        ((await categoryOf(ctx, kind))?.items ?? []).map((i) => [i.id, i.enabled, i.applyMode]);
+      expect((await view('skill')).sort()).toEqual([
+        ['plan', false, 'account-file'],
+        ['review', true, 'account-file'],
+      ]);
+      expect((await view('plugin')).sort()).toEqual([
+        ['lint', true, 'account-file'],
+        ['tidy', false, 'account-file'],
+      ]);
+    });
   });
 
   it('toggles enabled in the target table only', async () => {

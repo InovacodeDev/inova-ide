@@ -25,6 +25,19 @@ export function baseItem(
   };
 }
 
+export async function pluginNamesIn(dir: string): Promise<string[]> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return [];
+    throw error;
+  }
+  return entries
+    .filter((entry) => !entry.name.startsWith('.'))
+    .map((entry) => entry.name.replace(/\.(?:[cm]?js|ts)$/, ''));
+}
+
 function skillDescription(markdown: string): string | null {
   const lines = markdown.split('\n').map((line) => line.trimEnd());
   if (lines[0] !== '---') return null;

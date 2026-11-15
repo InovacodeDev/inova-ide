@@ -7,7 +7,7 @@ import {
   tomlTableHeader,
   updateTomlFile,
 } from './file-edit.js';
-import { baseItem } from './shared.js';
+import { baseItem, isRecord, pluginNamesIn, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -18,6 +18,12 @@ import type {
 
 const UNSUPPORTED_KIND_MESSAGE = 'Grok não suporta desligar este item.';
 const INVALID_CONFIG_MESSAGE = 'O config.toml do Grok é inválido.';
+const LIST_FAILED_MESSAGE = {
+  skill: 'Não foi possível listar as skills do Grok',
+  plugin: 'Não foi possível listar os plugins do Grok',
+};
+// REGEX: double-quoted TOML basic string
+const QUOTED_STRING = /"(?:[^"\\]|\\.)*"/g;
 
 // REGEX: single-bracket table header with optional trailing comment
 const TABLE_HEADER = /^\s*\[\s*([^[\]]+?)\s*\]\s*(?:#.*)?$/;
@@ -66,9 +72,68 @@ function mcpCategory(toml: string): CapabilityCategoryResult {
   return { kind: 'mcp', items, error: null };
 }
 
+function disabledMembers(toml: string, table: string): Set<string> {
+  const members = new Set<string>();
+  let inTable = false;
+  let collecting = false;
+  for (const line of toml.split('\n')) {
+    const header = TABLE_HEADER.exec(line);
+    if (header) inTable = (header[1] ?? '').trim() === table;
+    const start = /^\s*disabled\s*=\s*\[(.*)$/.exec(line);
+    if (inTable && start) collecting = true;
+    if (!collecting) continue;
+    const text = start ? (start[1] ?? '') : line;
+    for (const quoted of text.split(']')[0]?.match(QUOTED_STRING) ?? []) {
+      members.add(JSON.parse(quoted) as string);
+    }
+    if (text.includes(']')) collecting = false;
+  }
+  return members;
+}
+
+async function folderCategory(input: {
+  kind: 'skill' | 'plugin';
+  names: () => Promise<{ id: string; description: string | null }[]>;
+  disabled: Set<string>;
+}): Promise<CapabilityCategoryResult> {
+  try {
+    const items = (await input.names()).map((entry) =>
+      baseItem({ ...entry, kind: input.kind, enabled: !input.disabled.has(entry.id) }),
+    );
+    return { kind: input.kind, items, error: null };
+  } catch (error: unknown) {
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: input.kind, items: [], error: `${LIST_FAILED_MESSAGE[input.kind]} (${code}).` };
+  }
+}
+
 async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   const toml = (await readIfExists(configFile(ctx))) ?? '';
-  return { categories: [mcpCategory(toml)], cost: null };
+  if (isMalformed(toml.split('\n'))) {
+    const kinds = ['skill', 'mcp', 'plugin'] as const;
+    const categories = kinds.map((kind) => ({ kind, items: [], error: INVALID_CONFIG_MESSAGE }));
+    return { categories, cost: null };
+  }
+  const pluginNames = async () =>
+    (await pluginNamesIn(join(ctx.account.homeDir, 'plugins'))).map((id) => ({
+      id,
+      description: null,
+    }));
+  const categories = await Promise.all([
+    folderCategory({
+      kind: 'skill',
+      names: () => skillsIn(join(ctx.account.homeDir, 'skills')),
+      disabled: disabledMembers(toml, 'skills'),
+    }),
+    mcpCategory(toml),
+    folderCategory({
+      kind: 'plugin',
+      names: pluginNames,
+      disabled: disabledMembers(toml, 'plugins'),
+    }),
+  ]);
+  return { categories, cost: null };
 }
 
 function tomlUpdateFor(input: SetEnabledInput): ((toml: string) => string) | null {
