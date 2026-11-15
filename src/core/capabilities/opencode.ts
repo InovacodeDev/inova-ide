@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { readIfExists } from './file-edit.js';
+import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
 import { baseItem, isRecord } from './shared.js';
 import type {
   CapabilityAdapter,
@@ -7,6 +7,7 @@ import type {
   CapabilityContext,
   CapabilityItem,
   CapabilityListing,
+  SetEnabledInput,
 } from './types.js';
 
 const NO_HOME_MESSAGE = 'HOME não definido.';
@@ -58,8 +59,27 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   return { categories: [mcp], cost: null };
 }
 
-function setEnabled(): Promise<void> {
-  return Promise.reject(new Error(UNSUPPORTED_KIND_MESSAGE));
+function withMcpDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
+  const servers = isRecord(input.root['mcp']) ? input.root['mcp'] : {};
+  const current = servers[input.id];
+  const { disabled: _previous, ...rest } = isRecord(current) ? current : {};
+  const server = input.enabled ? rest : { ...rest, disabled: true };
+  return { ...input.root, mcp: { ...servers, [input.id]: server } };
+}
+
+function configUpdateFor(input: SetEnabledInput): ((root: Config) => Config) | null {
+  const { ref, enabled } = input;
+  if (ref.kind === 'mcp') return (root) => withMcpDisabled({ root, id: ref.id, enabled });
+  return null;
+}
+
+function setEnabled(input: SetEnabledInput): Promise<void> {
+  const dir = openCodeDir(input.ctx);
+  if (dir === null) return Promise.reject(new Error(NO_HOME_MESSAGE));
+  const update = configUpdateFor(input);
+  if (update === null) return Promise.reject(new Error(UNSUPPORTED_KIND_MESSAGE));
+  const file = join(dir, 'opencode.json');
+  return serialize(file, () => updateJsonFile({ file, backupRoot: input.ctx.backupRoot, update }));
 }
 
 export const opencodeCapabilities: CapabilityAdapter = {

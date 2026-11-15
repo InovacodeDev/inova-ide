@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -41,6 +41,45 @@ async function categoryOf(ctx: CapabilityContext, kind: string) {
   const { categories } = await opencodeCapabilities.list(ctx);
   return categories.find((entry) => entry.kind === kind);
 }
+
+function setEnabled(ctx: CapabilityContext, kind: 'mcp' | 'plugin' | 'skill', id: string) {
+  return (enabled: boolean) => opencodeCapabilities.setEnabled({ ctx, ref: { kind, id }, enabled });
+}
+
+async function readConfig(ctx: CapabilityContext) {
+  const file = join(ctx.env['HOME'] ?? '', '.config', 'opencode', 'opencode.json');
+  return JSON.parse(await readFile(file, 'utf8'));
+}
+
+describe('opencodeCapabilities setEnabled', () => {
+  it('writes mcp disabled: true and removes the key on enable, keeping the rest', async () => {
+    await withHome(async (ctx) => {
+      await setEnabled(ctx, 'mcp', 'docs')(false);
+      await setEnabled(ctx, 'mcp', 'search')(true);
+      const config = await readConfig(ctx);
+      expect(config.mcp.docs).toEqual({
+        type: 'remote',
+        url: 'https://example.com/mcp',
+        disabled: true,
+      });
+      expect(config.mcp.search).toEqual({ type: 'local', command: ['search-mcp'] });
+      expect(config.theme).toBe('system');
+    });
+  });
+
+  it('rejects without HOME and for unsupported kinds; launchArgs is empty', async () => {
+    await withHome(async (ctx) => {
+      await expect(setEnabled({ ...ctx, env: {} }, 'mcp', 'a')(false)).rejects.toThrow(
+        'HOME não definido.',
+      );
+      const connector = { kind: 'connector', id: 'x' } as const;
+      await expect(
+        opencodeCapabilities.setEnabled({ ctx, ref: connector, enabled: false }),
+      ).rejects.toThrow('OpenCode não suporta desligar este item.');
+    });
+    expect(opencodeCapabilities.launchArgs([{ kind: 'mcp', id: 'docs' }])).toEqual([]);
+  });
+});
 
 describe('opencodeCapabilities mcp', () => {
   it('lists mcp servers as global-file items honoring disabled: true', async () => {
