@@ -379,6 +379,7 @@ export function AccountsView(props: AccountsViewProps) {
       </div>
       {configuring ? (
         <AccountCapabilitiesModal
+          key={configuring.label}
           account={configuring}
           call={call}
           onClose={() => setConfiguring(null)}

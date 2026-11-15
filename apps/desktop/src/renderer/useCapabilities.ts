@@ -66,6 +66,7 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
       setPendingKey(capabilityKey(item));
       latestRequest.current += 1;
       const requestId = latestRequest.current;
+      let current = false;
       try {
         const updated = await call(() =>
           window.inova.setCapabilityEnabled({
@@ -75,10 +76,16 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
             enabled,
           }),
         );
+        current = shouldApplyListing({
+          requestId,
+          latestRequestId: latestRequest.current,
+          mounted: mounted.current,
+        });
+        if (!current) return;
         if (updated) store(requestId, updated.value);
-        else if (mounted.current) await refresh();
+        else await refresh();
       } finally {
-        if (mounted.current) setPendingKey(null);
+        if (current) setPendingKey(null);
       }
     },
     [accountLabel, call, pendingKey, refresh, store],
