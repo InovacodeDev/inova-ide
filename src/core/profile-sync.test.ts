@@ -271,7 +271,10 @@ describe('profile-sync helpers', () => {
     expect(codexMcp?.status).toBe('update');
     expect(codexMcp?.maskedAfter).not.toContain('secret-key-999');
 
-    const run = vi.fn<CommandRunner['run']>(async () => ({ exitCode: 0, stdout: 'added' }));
+    const run = vi.fn<CommandRunner['run']>(async (request) => ({
+      exitCode: 0,
+      stdout: request.args.join(' ') === 'mcp list' ? 'NAME  TYPE  STATUS\n' : 'added',
+    }));
     const applied = await applyProfileSync({
       root,
       projectPath: project,
@@ -384,5 +387,94 @@ describe('profile-sync helpers', () => {
     expect(addA).toBeGreaterThanOrEqual(0);
     expect(disableA).toBeGreaterThan(addA);
     expect(calls).not.toContain('mcp disable b');
+  });
+
+  test.each([
+    ['non-zero exit', { exitCode: 1, stdout: '' }],
+    ['not found', { notFound: true as const }],
+    ['unparseable output', { exitCode: 0, stdout: 'garbage' }],
+  ])('applyProfileSync skips agy remove and add when mcp list fails: %s', async (_label, reply) => {
+    const root = await tmp();
+    const project = await tmp();
+    const geminiHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const calls: string[] = [];
+    const run = vi.fn<CommandRunner['run']>(async (request) => {
+      calls.push(request.args.join(' '));
+      return reply;
+    });
+    const accounts = [
+      { id: 'acc-gemini', provider: 'gemini' as const, label: 'g', homeDir: geminiHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    const applied = await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+      runner: { run },
+    });
+    expect(calls).toEqual(['mcp list']);
+    expect(applied.appliedIds).not.toContain('mcp:acc-gemini');
+    expect(applied.skippedIds).toContain('mcp:acc-gemini');
+  });
+
+  test('codex sync still works on TOML with a multi-line array of arrays and no MCP tables', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const existing = 'matrix = [\n  ["a", "b"],\n  ["c", "d"],\n]\n';
+    await writeFile(join(codexHome, 'config.toml'), existing);
+    const accounts = [
+      { id: 'acc-codex', provider: 'codex' as const, label: 'c', homeDir: codexHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    expect(preview.items.find((item) => item.id === 'mcp:acc-codex')?.status).toBe('update');
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+    });
+    const written = await readFile(join(codexHome, 'config.toml'), 'utf8');
+    expect(written).toContain(existing.trimEnd());
+    expect(written).toContain('[mcp_servers.a]');
+  });
+
+  test('codex plan reports a conflict when the disabled state cannot be read', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const existing =
+      '[mcp_servers.a]\ncommand = "old"\nenabled = false\n\n[other]\nmatrix = [\n  ["a"],\n]\n';
+    await writeFile(join(codexHome, 'config.toml'), existing);
+    const accounts = [
+      { id: 'acc-codex', provider: 'codex' as const, label: 'c', homeDir: codexHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    const item = preview.items.find((entry) => entry.id === 'mcp:acc-codex');
+    expect(item?.status).toBe('conflict');
+    expect(item?.reason).toBe(
+      'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
+    );
+    const applied = await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((entry) => entry.id),
+    });
+    expect(applied.skippedIds).toContain('mcp:acc-codex');
+    expect(await readFile(join(codexHome, 'config.toml'), 'utf8')).toBe(existing);
   });
 });

@@ -10,6 +10,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import {
+  CapabilityFileError,
   listTomlTables,
   readTomlTableKey,
   tomlTableHeader,
@@ -312,11 +313,15 @@ export function formatCodexMcpToml(
   servers: CanonicalMcpMap,
 ): { content: string; incompatible: { name: string; reason: string }[] } {
   const base = stripTomlMcpSections(existingToml);
+  // REGEX: header of the mcp_servers table or of one of its subtables
+  const hasMcpTables = /^\s*\[mcp_servers[.\]]/m.test(existingToml);
   const disabledNames = new Set(
-    listTomlTables(existingToml)
-      .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
-      .map((segments) => segments[1] ?? '')
-      .filter((name) => isTomlServerDisabled(existingToml, name)),
+    hasMcpTables
+      ? listTomlTables(existingToml)
+          .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
+          .map((segments) => segments[1] ?? '')
+          .filter((name) => isTomlServerDisabled(existingToml, name))
+      : [],
   );
   const blocks: string[] = [];
   const incompatible: { name: string; reason: string }[] = [];
@@ -541,7 +546,28 @@ async function planAccountMcpTarget(input: {
   if (account.provider === 'codex') {
     const targetPath = join(account.homeDir, 'config.toml');
     const before = (await readOptionalFile(targetPath)) ?? '';
-    const formatted = formatCodexMcpToml(before, servers);
+    let formatted: ReturnType<typeof formatCodexMcpToml>;
+    try {
+      formatted = formatCodexMcpToml(before, servers);
+    } catch (error: unknown) {
+      if (!(error instanceof CapabilityFileError)) throw error;
+      return {
+        rawPath: targetPath,
+        item: {
+          id: `mcp:${account.id}`,
+          scope: 'mcp',
+          provider: account.provider,
+          accountId: account.id,
+          accountLabel: account.label,
+          targetPath,
+          status: 'conflict',
+          reason:
+            'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
+          maskedBefore: maskSecretsInText(before),
+          maskedAfter: maskSecretsInText(before),
+        },
+      };
+    }
     const firstBad = formatted.incompatible[0];
     const status: ProfileSyncStatus =
       firstBad && Object.keys(servers).length === formatted.incompatible.length
@@ -839,14 +865,18 @@ export async function applyProfileSync(input: {
         skippedIds.push(item.id);
         continue;
       }
-      await backupExistingFile({ targetPath: planned.rawPath, backupDir, index: backupIndex++ });
       const env = { ...(input.baseEnv ?? process.env), HOME: account.homeDir };
-      let okAll = true;
       const listed = await input.runner.run({ command: 'agy', args: ['mcp', 'list'], env });
+      const listedItems =
+        'exitCode' in listed && listed.exitCode === 0 ? parseMcpItems(listed.stdout) : null;
+      if (listedItems === null) {
+        skippedIds.push(item.id);
+        continue;
+      }
+      await backupExistingFile({ targetPath: planned.rawPath, backupDir, index: backupIndex++ });
+      let okAll = true;
       const disabledBefore = new Set(
-        'exitCode' in listed && listed.exitCode === 0
-          ? (parseMcpItems(listed.stdout) ?? []).filter((mcp) => !mcp.enabled).map((mcp) => mcp.id)
-          : [],
+        listedItems.filter((mcp) => !mcp.enabled).map((mcp) => mcp.id),
       );
       for (const [name, server] of Object.entries(servers)) {
         const built = buildAgyMcpAddArgs(name, server);
