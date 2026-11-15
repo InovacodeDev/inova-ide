@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.7.0] - 2026-11-15
+
 ### Adicionado
 
 - Botão "Revisar diff (adversarial)" na aba `Git` do inspetor e comando na paleta para abrir sub-sessão isolada somente-leitura usando outra conta ou provedor.
