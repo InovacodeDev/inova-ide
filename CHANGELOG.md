@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.8.1] - 2026-11-15
+
 ### Alterado
 
 - Seletor de idioma e opções gerais movidos para a aba `Geral` nas configurações.
