@@ -24,6 +24,7 @@ import {
   GitBranchIcon,
   RefreshIcon,
   RotateCcwIcon,
+  ShieldCheckIcon,
   SwitchIcon,
 } from './icons';
 import { inspectorTabs, subagentSummaryCounts, type InspectorTabId } from './inspector-state';
@@ -222,6 +223,8 @@ interface SessionDetailsProps {
   onInspectWorktree?: (initialFilePath?: string) => void;
   onApplyWorktree?: () => void;
   onRevertFiles?: (files: string[]) => Promise<boolean>;
+  onReviewDiff?: () => void;
+  reviewBusy?: boolean;
   onHandoff?: () => void;
   projectPinnedMemory?: string | null;
   sessionPinnedMemory?: string | null;
@@ -254,6 +257,8 @@ export function SessionDetails({
   onInspectWorktree,
   onApplyWorktree,
   onRevertFiles,
+  onReviewDiff,
+  reviewBusy = false,
   onHandoff,
   projectPinnedMemory = null,
   sessionPinnedMemory = null,
@@ -409,6 +414,17 @@ export function SessionDetails({
                 {onInspectWorktree ? (
                   <button type="button" className="btn btn-sm" onClick={() => onInspectWorktree()}>
                     Ver diff
+                  </button>
+                ) : null}
+                {onReviewDiff ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={worktreeBusy || reviewBusy}
+                    onClick={onReviewDiff}
+                  >
+                    <ShieldCheckIcon size={12} />
+                    {reviewBusy ? 'Iniciando...' : 'Revisar diff'}
                   </button>
                 ) : null}
                 {onRevertFiles ? (

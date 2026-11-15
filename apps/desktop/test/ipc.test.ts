@@ -55,6 +55,7 @@ function setup() {
       'switchSessionAccount',
       'handoffSession',
       'forkSession',
+      'reviewSessionDiff',
       'rewindSession',
       'clearSession',
       'recordFeedback',
@@ -224,6 +225,7 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   await invoke('inova:switchSessionAccount', trusted, { sessionId: 's', accountId: 'a2' });
   await invoke('inova:handoffSession', trusted, { sessionId: 's', targetAccountId: 'a2' });
   await invoke('inova:forkSession', trusted, { sessionId: 's', turnIndex: 0 });
+  await invoke('inova:reviewSessionDiff', trusted, { sessionId: 's' });
   await invoke('inova:rewindSession', trusted, { sessionId: 's', turnIndex: 0 });
   await invoke('inova:clearSession', trusted, { sessionId: 's' });
   await invoke('inova:recordFeedback', trusted, { sessionId: 's', turnIndex: 0, value: 'up' });

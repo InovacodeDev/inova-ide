@@ -1474,6 +1474,13 @@
   opacity: 1;
 }
 
+.chat-meta-btn-action {
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text);
+  opacity: 0.85;
+}
+
 .chat-meta-sep {
   opacity: 0.6;
 }

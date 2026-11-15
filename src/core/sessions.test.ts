@@ -374,6 +374,16 @@ describe('sessions', () => {
         }),
       ),
     ).toBe('invalid-pinned-memory');
+
+    const detachedChild = await createSession({
+      root,
+      projectId: 'p1',
+      parentId: created.id,
+      title: 'Revisão',
+      detachedFromParent: true,
+    });
+    expect(detachedChild.parentId).toBe(created.id);
+    expect(detachedChild.detachedFromParent).toBe(true);
   });
 });
 

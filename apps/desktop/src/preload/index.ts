@@ -62,6 +62,7 @@ const api: InovaApi = {
   switchSessionAccount: (input) => ipcRenderer.invoke(CHANNELS.switchSessionAccount, input),
   handoffSession: (input) => ipcRenderer.invoke(CHANNELS.handoffSession, input),
   forkSession: (input) => ipcRenderer.invoke(CHANNELS.forkSession, input),
+  reviewSessionDiff: (input) => ipcRenderer.invoke(CHANNELS.reviewSessionDiff, input),
   rewindSession: (input) => ipcRenderer.invoke(CHANNELS.rewindSession, input),
   clearSession: (input) => ipcRenderer.invoke(CHANNELS.clearSession, input),
   recordFeedback: (input) => ipcRenderer.invoke(CHANNELS.recordFeedback, input),

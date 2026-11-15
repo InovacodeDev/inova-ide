@@ -257,6 +257,9 @@ export interface InovaApi {
     targetAccountId?: string;
     copyWorktreeFiles?: boolean;
   }): Promise<Result<{ session: SessionView; strategy: 'native-claude' | 'summary-handoff' }>>;
+  reviewSessionDiff(input: {
+    sessionId: string;
+  }): Promise<Result<{ session: SessionView; prompt: string }>>;
   rewindSession(input: { sessionId: string; turnIndex: number }): Promise<Result<{ text: string }>>;
   clearSession(input: { sessionId: string }): Promise<Result<null>>;
   recordFeedback(input: {
@@ -380,6 +383,7 @@ export const CHANNELS = {
   switchSessionAccount: 'inova:switchSessionAccount',
   handoffSession: 'inova:handoffSession',
   forkSession: 'inova:forkSession',
+  reviewSessionDiff: 'inova:reviewSessionDiff',
   rewindSession: 'inova:rewindSession',
   clearSession: 'inova:clearSession',
   recordFeedback: 'inova:recordFeedback',

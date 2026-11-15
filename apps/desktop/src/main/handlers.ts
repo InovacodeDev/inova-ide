@@ -41,12 +41,14 @@ import {
   removeSessionWorktree,
 } from '@inova/core/git-worktree';
 import {
+  buildAdversarialReviewPrompt,
   buildHandoffContext,
   formatPinnedMemoryBlock,
   hashPinnedMemory,
   isAuthRevokedMessage,
   isRateLimitMessage,
   rankFailoverAccounts,
+  rankReviewAccounts,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
@@ -60,7 +62,7 @@ import {
   parseOpenCodeModelsOutput,
 } from '@inova/core/models';
 import type { ProviderModels } from '@inova/core/models';
-import { isModeSupported, resolveExecutionMode } from '@inova/core/modes';
+import { isModeSupported, resolveExecutionMode, reviewExecutionMode } from '@inova/core/modes';
 import { applyProfileSync, previewProfileSync } from '@inova/core/profile-sync';
 import {
   PathNotFoundError,
@@ -691,6 +693,75 @@ export function createHandlers(deps: HandlerDeps) {
     });
   }
 
+  function accountAvailabilityState(accounts: readonly Account[]) {
+    const busyIds = deps.chat.accountsInUse();
+    const exhaustedIds = new Set<string>();
+    for (const account of accounts) {
+      if (isAccountExhausted(account.id)) exhaustedIds.add(account.id);
+    }
+    const usageByAccount = new Map<string, readonly UsageWindow[]>();
+    for (const [accountId, snapshot] of streamUsage) {
+      usageByAccount.set(accountId, snapshot.windows);
+    }
+    return { busyIds, exhaustedIds, usageByAccount };
+  }
+
+  async function prepareRunnableAccount(
+    candidate: Account,
+    baseEnv: NodeJS.ProcessEnv,
+  ): Promise<string | null> {
+    const entry = exhaustionEntry(candidate.id);
+    if (entry !== null) {
+      if (isFutureReset(entry.resetsAt)) return null;
+      const blocked = await recheckExhaustion({ account: candidate, resetsAt: entry.resetsAt });
+      if (blocked !== null) return null;
+    }
+    const adapter = providers[candidate.provider];
+    const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+    if (file === undefined) return null;
+    let status: AuthStatus = 'unknown';
+    try {
+      const { env } = buildLaunch({
+        account: candidate,
+        cwd: candidate.homeDir,
+        args: [],
+        baseEnv,
+      });
+      status = await adapter.checkStatus({
+        homeDir: candidate.homeDir,
+        env,
+        runner: deps.runner,
+      });
+    } catch (error: unknown) {
+      if (!(error instanceof Error)) throw error;
+    }
+    if (status !== 'logged-in') return null;
+    await adapter.prepareLaunch(candidate.homeDir, baseEnv['HOME']);
+    return file;
+  }
+
+  async function worktreeStatusFor(
+    store: Store,
+    session: Session,
+  ): Promise<Result<WorktreeStatusView>> {
+    if (session.worktree) {
+      return ok(
+        await getWorktreeStatus({
+          worktreePath: session.worktree.path,
+          baseCommit: session.worktree.baseCommit,
+        }),
+      );
+    }
+    const project = store.projects.find((item) => item.id === session.projectId);
+    if (!project) return fail('Projeto não encontrado.');
+    return ok(
+      await getWorktreeStatus({
+        worktreePath: project.path,
+        baseCommit: 'HEAD',
+      }),
+    );
+  }
+
   async function resolveFailoverTarget(input: {
     policy: RateLimitFailoverPolicy;
     store: Store;
@@ -701,15 +772,9 @@ export function createHandlers(deps: HandlerDeps) {
   }): Promise<{ account: Account; file: string; baseEnv: NodeJS.ProcessEnv } | null> {
     if (input.policy === 'off') return null;
     const allowBusy = input.allowBusy ?? true;
-    const busyIds = deps.chat.accountsInUse();
-    const exhaustedIds = new Set<string>();
-    for (const account of input.store.accounts) {
-      if (isAccountExhausted(account.id)) exhaustedIds.add(account.id);
-    }
-    const usageByAccount = new Map<string, readonly UsageWindow[]>();
-    for (const [accountId, snapshot] of streamUsage) {
-      usageByAccount.set(accountId, snapshot.windows);
-    }
+    const { busyIds, exhaustedIds, usageByAccount } = accountAvailabilityState(
+      input.store.accounts,
+    );
     const ranked = rankFailoverAccounts({
       policy: input.policy,
       currentAccountId: input.currentAccount.id,
@@ -725,33 +790,8 @@ export function createHandlers(deps: HandlerDeps) {
     const baseEnv = input.baseEnv ?? (await deps.baseEnv());
     for (const candidate of ranked) {
       if (!allowBusy && deps.chat.accountsInUse().has(candidate.id)) continue;
-      const entry = exhaustionEntry(candidate.id);
-      if (entry !== null) {
-        if (isFutureReset(entry.resetsAt)) continue;
-        const blocked = await recheckExhaustion({ account: candidate, resetsAt: entry.resetsAt });
-        if (blocked !== null) continue;
-      }
-      const adapter = providers[candidate.provider];
-      const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
-      if (file === undefined) continue;
-      let status: AuthStatus = 'unknown';
-      try {
-        const { env } = buildLaunch({
-          account: candidate,
-          cwd: candidate.homeDir,
-          args: [],
-          baseEnv,
-        });
-        status = await adapter.checkStatus({
-          homeDir: candidate.homeDir,
-          env,
-          runner: deps.runner,
-        });
-      } catch (error: unknown) {
-        if (!(error instanceof Error)) throw error;
-      }
-      if (status !== 'logged-in') continue;
-      await adapter.prepareLaunch(candidate.homeDir, baseEnv['HOME']);
+      const file = await prepareRunnableAccount(candidate, baseEnv);
+      if (file === null) continue;
       return { account: candidate, file, baseEnv };
     }
     return null;
@@ -2058,20 +2098,7 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseSessionRef, async ({ sessionId }) => {
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
-        if (session.worktree) {
-          const status = await getWorktreeStatus({
-            worktreePath: session.worktree.path,
-            baseCommit: session.worktree.baseCommit,
-          });
-          return ok(status);
-        }
-        const project = store.projects.find((item) => item.id === session.projectId);
-        if (!project) return fail('Projeto não encontrado.');
-        const status = await getWorktreeStatus({
-          worktreePath: project.path,
-          baseCommit: 'HEAD',
-        });
-        return ok(status);
+        return worktreeStatusFor(store, session);
       }),
     applyWorktree: (input: unknown): Promise<Result<{ appliedFiles: string[] }>> =>
       validated(input, parseSessionRef, ({ sessionId }) =>
@@ -2561,6 +2588,69 @@ export function createHandlers(deps: HandlerDeps) {
             await writeTranscriptEvents(resultSession.id, sliced.slicedEvents);
             return ok({ session: resultSession, strategy });
           }),
+      ),
+    reviewSessionDiff: (input: unknown): Promise<Result<{ session: Session; prompt: string }>> =>
+      validated(input, parseSessionRef, ({ sessionId }) =>
+        serialized(async () => {
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          const project = store.projects.find((item) => item.id === session.projectId);
+          if (!project) return fail('Projeto não encontrado.');
+          const sourceAccount = resolveSessionAccount({
+            session,
+            project,
+            accounts: store.accounts,
+          });
+          if (!sourceAccount) return fail('Conta de origem não encontrada.');
+          const status = await worktreeStatusFor(store, session);
+          if (!status.ok) return status;
+          if (!status.value.dirty) {
+            return fail('Nenhuma alteração pendente para revisar.');
+          }
+          const { busyIds, exhaustedIds, usageByAccount } = accountAvailabilityState(
+            store.accounts,
+          );
+          const rankedAlternatives = rankReviewAccounts({
+            currentAccountId: sourceAccount.id,
+            currentProvider: sourceAccount.provider,
+            accounts: store.accounts,
+            busyAccountIds: busyIds,
+            exhaustedAccountIds: exhaustedIds,
+            expiredAccountIds: expiredAccounts,
+            usageByAccount,
+          });
+          let reviewAccount = sourceAccount;
+          if (rankedAlternatives.length > 0) {
+            const baseEnv = await deps.baseEnv();
+            for (const candidate of rankedAlternatives) {
+              if ((await prepareRunnableAccount(candidate, baseEnv)) !== null) {
+                reviewAccount = candidate;
+                break;
+              }
+            }
+          }
+          const crossProvider = reviewAccount.provider !== sourceAccount.provider;
+          const created = await createSession({
+            root: deps.root,
+            projectId: project.id,
+            parentId: session.id,
+            title: `Revisão: ${session.title}`,
+            accountIdOverride: reviewAccount.id,
+            detachedFromParent: true,
+            pinnedMemory: session.pinnedMemory ?? null,
+            model: crossProvider ? null : (session.model ?? null),
+            effort: crossProvider ? null : (session.effort ?? null),
+            mode: reviewExecutionMode(reviewAccount.provider),
+            worktree: session.worktree ?? null,
+          });
+          const prompt = buildAdversarialReviewPrompt({
+            branch: status.value.branch,
+            changedFiles: status.value.changedFiles,
+            diffStat: status.value.diffStat,
+            diff: status.value.diff,
+          });
+          return ok({ session: created, prompt });
+        }),
       ),
     rewindSession: (input: unknown): Promise<Result<{ text: string }>> =>
       validated(input, parseRewindSession, ({ sessionId, turnIndex }) =>

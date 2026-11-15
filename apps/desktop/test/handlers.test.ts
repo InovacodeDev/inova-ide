@@ -3264,3 +3264,67 @@ test('pinnedMemory reinjects after clearSession and rewindSession, and propagate
   expect(handoffPrompt).toContain('Contexto de handoff');
   expect(handoffPrompt).toContain('Solicitação do usuário:\ncontinuar no codex');
 });
+
+test('reviewSessionDiff creates clean read-only/plan subsession on idle cross-provider account and handles clean repos/fallbacks', async () => {
+  const exec = promisify(execFile);
+  const { root, send, chatInUse, handlers } = await setup();
+  const claudeMain = await addAccount({ root, provider: 'claude', label: 'claude-main' });
+  const claudeAlt = await addAccount({ root, provider: 'claude', label: 'claude-alt' });
+  const codexReviewer = await addAccount({ root, provider: 'codex', label: 'codex-rev' });
+
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  await writeFile(join(repoDir, 'app.ts'), 'export const value = 1;\n');
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+  const project = unwrap(
+    await handlers.bindProject({ path: repoDir, accountLabel: 'claude-main' }),
+  );
+  const parent = unwrap(
+    await handlers.createSession({ projectId: project.id, isolatedWorktree: true }),
+  );
+  await updateSession({
+    root,
+    sessionId: parent.id,
+    patch: { model: 'claude-sonnet-4-6', effort: 'high', pinnedMemory: 'Sem regressões' },
+  });
+
+  const cleanResult = await handlers.reviewSessionDiff({ sessionId: parent.id });
+  expect(cleanResult.ok).toBe(false);
+
+  const worktreePath = parent.worktree!.path;
+  await writeFile(join(worktreePath, 'app.ts'), 'export const value = 2;\n');
+
+  const review = unwrap(await handlers.reviewSessionDiff({ sessionId: parent.id }));
+  expect(review.session.parentId).toBe(parent.id);
+  expect(review.session.detachedFromParent).toBe(true);
+  expect(review.session.accountIdOverride).toBe(codexReviewer.id);
+  expect(review.session.mode).toBe('read-only');
+  expect(review.session.model).toBeNull();
+  expect(review.session.effort).toBeNull();
+  expect(review.session.pinnedMemory).toBe('Sem regressões');
+  expect(review.session.worktree).toEqual(parent.worktree);
+  expect(review.prompt).toContain('app.ts');
+  expect(review.prompt).toContain('+export const value = 2;');
+
+  unwrap(await handlers.sendMessage({ sessionId: review.session.id, prompt: review.prompt }));
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send.mock.calls[0]?.[0].accountId).toBe(codexReviewer.id);
+  expect(send.mock.calls[0]?.[0].spec.args).not.toContain('--fork-session');
+  handlers.handleChatEvent(review.session.id, OK_DONE);
+  await flush(handlers, review.session.id);
+
+  chatInUse.add(codexReviewer.id);
+  const sameProviderReview = unwrap(await handlers.reviewSessionDiff({ sessionId: parent.id }));
+  expect(sameProviderReview.session.accountIdOverride).toBe(claudeAlt.id);
+  expect(sameProviderReview.session.mode).toBe('plan');
+  expect(sameProviderReview.session.model).toBe('claude-sonnet-4-6');
+
+  chatInUse.add(claudeAlt.id);
+  const currentFallbackReview = unwrap(await handlers.reviewSessionDiff({ sessionId: parent.id }));
+  expect(currentFallbackReview.session.accountIdOverride).toBe(claudeMain.id);
+  expect(currentFallbackReview.session.mode).toBe('plan');
+});

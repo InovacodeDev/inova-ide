@@ -5,6 +5,7 @@ import {
   isExecutionMode,
   isModeSupported,
   resolveExecutionMode,
+  reviewExecutionMode,
 } from './modes.js';
 import { providers } from './providers.js';
 import type { ProviderId } from './types.js';
@@ -72,5 +73,16 @@ describe('execution modes catalog', () => {
         provider: 'claude',
       }),
     ).toBe('accept-edits');
+  });
+
+  test('reviewExecutionMode selects strictest read-only or plan mode supported by provider', () => {
+    expect(reviewExecutionMode('codex')).toBe('read-only');
+    expect(reviewExecutionMode('deepseek')).toBe('read-only');
+    expect(reviewExecutionMode('claude')).toBe('plan');
+    expect(reviewExecutionMode('gemini')).toBe('plan');
+    expect(reviewExecutionMode('qwen')).toBe('plan');
+    expect(reviewExecutionMode('kimi')).toBe('manual');
+    expect(reviewExecutionMode('grok')).toBe('manual');
+    expect(reviewExecutionMode('opencode')).toBe('manual');
   });
 });

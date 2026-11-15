@@ -8,7 +8,7 @@ import {
   summarizeGitChanges,
   type GitDiffLine,
 } from './git-diff-presentation';
-import { CloseIcon, GitBranchIcon, RefreshIcon, RotateCcwIcon } from './icons';
+import { CloseIcon, GitBranchIcon, RefreshIcon, RotateCcwIcon, ShieldCheckIcon } from './icons';
 
 interface SessionDiffModalProps {
   status: WorktreeStatusView;
@@ -18,6 +18,7 @@ interface SessionDiffModalProps {
   onClose: () => void;
   onRefresh: () => void;
   onApplyWorktree?: () => void;
+  onReviewDiff?: () => void;
   onRevertFiles: (files: string[]) => Promise<boolean>;
 }
 
@@ -41,6 +42,7 @@ export function SessionDiffModal({
   onClose,
   onRefresh,
   onApplyWorktree,
+  onReviewDiff,
   onRevertFiles,
 }: SessionDiffModalProps) {
   const files = useMemo(
@@ -227,6 +229,17 @@ export function SessionDiffModal({
               onClick={() => void onRevertFiles(files.map((file) => file.path))}
             >
               Reverter tudo
+            </button>
+          ) : null}
+          {files.length > 0 && onReviewDiff ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy}
+              onClick={onReviewDiff}
+            >
+              <ShieldCheckIcon size={14} />
+              Revisar diff
             </button>
           ) : null}
           {hasWorktree && files.length > 0 && onApplyWorktree ? (

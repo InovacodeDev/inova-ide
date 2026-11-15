@@ -205,6 +205,8 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     sessionId: 's',
     turnIndex: 0,
   });
+  void api.reviewSessionDiff({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:reviewSessionDiff', { sessionId: 's' });
   void api.rewindSession({ sessionId: 's', turnIndex: 1 });
   expect(electron.invoke).toHaveBeenCalledWith('inova:rewindSession', {
     sessionId: 's',

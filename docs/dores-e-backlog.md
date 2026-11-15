@@ -19,9 +19,10 @@ Este documento registra as 20 dores identificadas na pesquisa da conversa e acom
   - **Solução implementada:** Memória Fixada (Scratchpad) por projeto e por sessão (até 4.000 caracteres por nível), editável na aba **Contexto** do painel lateral e via comando local `/pin <texto>` no chat, com reinjeção inteligente por hash em novos turnos e após `/compact`, `clearSession`, `rewindSession`, `handoffSession` e `forkSession`.
   - **Arquivos principais:** `src/core/types.ts`, `src/core/handoff.ts`, `src/core/projects.ts`, `src/core/sessions.ts`, `src/core/slash-commands.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/renderer/SessionDetails.tsx`, `apps/desktop/src/renderer/ChatView.tsx`.
 
-- [ ] **4. Viés de autoconfirmação na revisão de código**
+- [x] **4. Viés de autoconfirmação na revisão de código**
   - **Problema:** O mesmo agente que escreve o código frequentemente afirma que o diff não possui bugs.
-  - **Solução planejada:** Botão de revisão adversarial em 1 clique na aba **Git** que inicia uma subsessão `read-only` limpa para auditar o diff e enfileirar correções.
+  - **Solução implementada:** Botão **Revisar diff** em 1 clique na aba **Git** e no modal de diff que cria uma subsessão isolada e limpa (`detachedFromParent: true`), compartilha o worktree ativo, força o modo `read-only`/`plan` mais restrito do provedor, prioriza outra conta ativa (outro provedor primeiro) e oferece o botão **Enviar para sessão pai** nos achados do revisor.
+  - **Arquivos principais:** `src/core/modes.ts`, `src/core/handoff.ts`, `src/core/sessions.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/renderer/SessionDetails.tsx`, `apps/desktop/src/renderer/SessionDiffModal.tsx`, `apps/desktop/src/renderer/ChatView.tsx`, `apps/desktop/src/renderer/App.tsx`.
 
 - [ ] **5. Falta de visibilidade financeira por sessão e projeto**
   - **Problema:** Desenvolvedores não enxergam quanto cada tarefa ou sessão custou em USD e em tokens de cache, entrada e saída.

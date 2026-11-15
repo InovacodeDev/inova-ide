@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
+import { MAX_PINNED_MEMORY_CHARS, buildParentFixPrompt } from '@inova/core/handoff';
 import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import { PROVIDER_MODES, resolveExecutionMode } from '@inova/core/modes';
 import type {
@@ -113,6 +113,7 @@ export function App() {
   } | null>(null);
   const [gitRevision, setGitRevision] = useState(0);
   const [revertingFiles, setRevertingFiles] = useState(false);
+  const [reviewingDiff, setReviewingDiff] = useState(false);
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [turnQueue, setTurnQueue] = useState<QueuedTurn[]>([]);
   const [pausedQueueIds, setPausedQueueIds] = useState<string[]>([]);
@@ -737,6 +738,41 @@ export function App() {
     if (pendingPrompt) {
       await sendMessage(created.id, pendingPrompt);
     }
+  };
+
+  const reviewSessionDiff = async (session: Session) => {
+    if (reviewingDiff) return;
+    if (!ensureTabRoom('')) return;
+    setReviewingDiff(true);
+    try {
+      const res = await window.inova.reviewSessionDiff({ sessionId: session.id });
+      if (!res.ok) {
+        setNotice(res.message);
+        return;
+      }
+      setWorktreeModal(null);
+      await reloadSessions(res.value.session.projectId);
+      await openChatTab(res.value.session);
+      await sendMessage(res.value.session.id, res.value.prompt);
+    } finally {
+      setReviewingDiff(false);
+    }
+  };
+
+  const sendFindingsToParent = async (childSession: Session, findings: string) => {
+    if (!childSession.parentId) return;
+    const projectSessions = latest.current.sessions[childSession.projectId] ?? [];
+    const parent = projectSessions.find(
+      (item) => item.id === childSession.parentId && item.archivedAt === null,
+    );
+    if (!parent) {
+      setNotice('Sessão pai não encontrada ou arquivada.');
+      return;
+    }
+    if (!ensureTabRoom(parent.id)) return;
+    await openChatTab(parent);
+    seedComposer(parent.id, buildParentFixPrompt(findings));
+    setNotice('Achados enviados para o rascunho da sessão pai.');
   };
 
   const startAccountLogin = async (account: AccountView) => {
@@ -1741,6 +1777,15 @@ export function App() {
                         ),
                       )
                     }
+                    onSendToParent={
+                      tabSession &&
+                      tabSession.parentId !== null &&
+                      (sessions[tabSession.projectId] ?? []).some(
+                        (item) => item.id === tabSession.parentId && item.archivedAt === null,
+                      )
+                        ? (findings) => void sendFindingsToParent(tabSession, findings)
+                        : undefined
+                    }
                     onClearSession={() => void clearConversation(tab.sessionId)}
                     onFeedback={({ turnIndex, value }) =>
                       void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
@@ -1795,6 +1840,8 @@ export function App() {
                     activeSession.worktree ? () => void applyWorktree(activeSession) : undefined
                   }
                   onRevertFiles={(files) => revertSessionFiles(activeSession, files)}
+                  onReviewDiff={() => void reviewSessionDiff(activeSession)}
+                  reviewBusy={reviewingDiff}
                   onHandoff={() => setPendingHandoff(activeSession)}
                   projectPinnedMemory={activeProject.pinnedMemory ?? null}
                   sessionPinnedMemory={activeSession.pinnedMemory ?? null}
@@ -1973,7 +2020,10 @@ export function App() {
           status={worktreeModal.status}
           hasWorktree={Boolean(worktreeModal.session.worktree)}
           busy={
-            applyingWorktree || revertingFiles || Boolean(chats[worktreeModal.session.id]?.running)
+            applyingWorktree ||
+            revertingFiles ||
+            reviewingDiff ||
+            Boolean(chats[worktreeModal.session.id]?.running)
           }
           initialFilePath={worktreeModal.initialFilePath}
           onClose={() => setWorktreeModal(null)}
@@ -1983,6 +2033,7 @@ export function App() {
               ? () => void applyWorktree(worktreeModal.session)
               : undefined
           }
+          onReviewDiff={() => void reviewSessionDiff(worktreeModal.session)}
           onRevertFiles={(files) => revertSessionFiles(worktreeModal.session, files)}
         />
       )}

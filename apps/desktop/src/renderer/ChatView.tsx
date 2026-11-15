@@ -139,6 +139,7 @@ export interface ChatViewProps {
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
+  onSendToParent?: (text: string) => void;
   onEnqueuePrompt?: (input: { prompt: string; extraDirs?: string[] }) => void;
   onResumeQueue?: () => void;
   onCancelQueuedTurn?: (turnId: string) => void;
@@ -773,6 +774,7 @@ interface AgentMetaProps {
   onCopyText: (text: string) => void;
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onRegenerate?: () => void;
+  onSendToParent?: (text: string) => void;
 }
 
 function AgentMeta({
@@ -783,6 +785,7 @@ function AgentMeta({
   onCopyText,
   onFeedback,
   onRegenerate,
+  onSendToParent,
 }: AgentMetaProps) {
   const time = footer.at ? formatMessageTime(footer.at) : '';
   const vote = (value: 'up' | 'down') =>
@@ -834,6 +837,17 @@ function AgentMeta({
           onClick={onRegenerate}
         >
           <RefreshIcon size={12} />
+        </button>
+      ) : null}
+      {onSendToParent && footer.text.trim() !== '' ? (
+        <button
+          type="button"
+          className="chat-meta-btn chat-meta-btn-action"
+          data-tooltip="Enviar achados desta revisão para o rascunho da sessão pai"
+          onClick={() => onSendToParent(footer.text)}
+        >
+          <SendIcon size={12} />
+          <span>Enviar para sessão pai</span>
         </button>
       ) : null}
       {model ? <span className="chat-meta-model">{model}</span> : null}
@@ -1185,6 +1199,7 @@ export function ChatView({
   onFeedback,
   onWarn,
   onOpenHandoff,
+  onSendToParent,
   onEnqueuePrompt,
   onResumeQueue,
   onCancelQueuedTurn,
@@ -1597,6 +1612,7 @@ export function ChatView({
               onCopyText={copyText}
               onFeedback={readOnly ? undefined : onFeedback}
               onRegenerate={readOnly || !onRegenerate ? undefined : () => onRegenerate(grantedDirs)}
+              onSendToParent={onSendToParent}
             />
           ) : undefined
         }

@@ -240,6 +240,7 @@ export async function createSession(ctx: {
   handoffContext?: string | null;
   pinnedMemory?: string | null;
   pinnedMemoryHash?: string | null;
+  detachedFromParent?: boolean;
   comparisonGroupId?: string | null;
   comparisonRole?: 'left' | 'right' | null;
   model?: string | null;
@@ -298,6 +299,9 @@ export async function createSession(ctx: {
       ...(ctx.handoffContext ? { handoffContext: ctx.handoffContext } : {}),
       ...(resolvedPinnedMemory === undefined ? {} : { pinnedMemory: resolvedPinnedMemory }),
       ...(ctx.pinnedMemoryHash === undefined ? {} : { pinnedMemoryHash: ctx.pinnedMemoryHash }),
+      ...(ctx.detachedFromParent === undefined
+        ? {}
+        : { detachedFromParent: ctx.detachedFromParent }),
       ...(ctx.comparisonGroupId ? { comparisonGroupId: ctx.comparisonGroupId } : {}),
       ...(ctx.comparisonRole ? { comparisonRole: ctx.comparisonRole } : {}),
       model: resolvedModel,

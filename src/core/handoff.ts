@@ -317,3 +317,122 @@ export function hashPinnedMemory(block: string | null): string | null {
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
+
+export const MAX_REVIEW_DIFF_CHARS = 32_000;
+
+export interface SelectReviewAccountInput {
+  currentAccountId: string;
+  currentProvider: ProviderId;
+  accounts: readonly Account[];
+  busyAccountIds?: ReadonlySet<string>;
+  exhaustedAccountIds?: ReadonlySet<string>;
+  expiredAccountIds?: ReadonlySet<string>;
+  usageByAccount?: ReadonlyMap<string, readonly UsageWindow[]>;
+}
+
+function reviewProviderRank(provider: ProviderId, currentProvider: ProviderId): number {
+  if (provider !== currentProvider) {
+    return PRIMARY_FAILOVER_PROVIDERS.has(provider) ? 0 : 1;
+  }
+  return 2;
+}
+
+export function rankReviewAccounts(input: SelectReviewAccountInput): Account[] {
+  const {
+    currentAccountId,
+    currentProvider,
+    accounts,
+    busyAccountIds = new Set<string>(),
+    exhaustedAccountIds = new Set<string>(),
+    expiredAccountIds = new Set<string>(),
+    usageByAccount = new Map<string, readonly UsageWindow[]>(),
+  } = input;
+
+  return accounts
+    .filter(
+      (account) =>
+        account.id !== currentAccountId &&
+        !busyAccountIds.has(account.id) &&
+        !exhaustedAccountIds.has(account.id) &&
+        !expiredAccountIds.has(account.id),
+    )
+    .sort((left, right) => {
+      const rankDiff =
+        reviewProviderRank(left.provider, currentProvider) -
+        reviewProviderRank(right.provider, currentProvider);
+      if (rankDiff !== 0) return rankDiff;
+      return (
+        peakUsagePercent(usageByAccount.get(left.id) ?? []) -
+        peakUsagePercent(usageByAccount.get(right.id) ?? [])
+      );
+    });
+}
+
+export function selectReviewAccount(input: SelectReviewAccountInput): Account | null {
+  const ranked = rankReviewAccounts(input);
+  if (ranked.length > 0) {
+    return ranked[0] ?? null;
+  }
+
+  return (
+    input.accounts.find((account) => account.id === input.currentAccountId) ??
+    input.accounts[0] ??
+    null
+  );
+}
+
+export interface AdversarialReviewPromptInput {
+  branch: string;
+  changedFiles: readonly string[];
+  diffStat: string;
+  diff: string;
+  maxDiffChars?: number;
+}
+
+export function buildAdversarialReviewPrompt(input: AdversarialReviewPromptInput): string {
+  const maxDiffChars = input.maxDiffChars ?? MAX_REVIEW_DIFF_CHARS;
+  const filesList =
+    input.changedFiles.length > 0
+      ? input.changedFiles.map((file) => `- ${file}`).join('\n')
+      : '- (nenhum arquivo listado)';
+  const diffStat = input.diffStat.trim() || '(sem estatística)';
+  const diff =
+    clip(input.diff, maxDiffChars) ||
+    '(sem diff textual; inspecione os arquivos alterados no repositório)';
+
+  return [
+    'Você é um revisor de código adversarial independente.',
+    'Esta sessão está em contexto limpo e modo somente-leitura/plano. NÃO edite arquivos nem crie commits.',
+    'Inspecione as alterações abaixo (e leia os arquivos completos no repositório quando necessário) em busca de:',
+    '1. Bugs de lógica, condições de corrida, casos de borda e regressões.',
+    '2. Falhas de segurança, validação de entrada, vazamento de dados ou quebra de contrato/API.',
+    '3. Violações de arquitetura, duplicação, código morto ou cobertura de testes ausente.',
+    '',
+    'Para cada achado, informe severidade (`CRÍTICO`, `ALTO`, `MÉDIO` ou `BAIXO`), arquivo/linha e evidência objetiva.',
+    'Se não houver problemas relevantes após verificação real, declare explicitamente "Sem achados críticos ou altos" e aponte riscos residuais.',
+    '',
+    `Branch: ${input.branch}`,
+    '',
+    'Arquivos alterados:',
+    filesList,
+    '',
+    'Resumo do diff:',
+    '```',
+    diffStat,
+    '```',
+    '',
+    'Diff atual:',
+    '```diff',
+    diff,
+    '```',
+  ].join('\n');
+}
+
+export function buildParentFixPrompt(findings: string): string {
+  return [
+    'Um revisor independente analisou o diff atual e reportou os achados abaixo.',
+    'Verifique cada achado contra o código real, corrija os problemas procedimentais válidos e rode os testes relevantes:',
+    '',
+    findings.trim(),
+  ].join('\n');
+}

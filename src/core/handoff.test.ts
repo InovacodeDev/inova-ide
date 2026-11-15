@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import type { ChatEvent, UsageWindow } from './chat-types.js';
 import {
+  MAX_REVIEW_DIFF_CHARS,
+  buildAdversarialReviewPrompt,
   buildHandoffContext,
+  buildParentFixPrompt,
   formatPinnedMemoryBlock,
   hashPinnedMemory,
   isAuthRevokedMessage,
@@ -9,6 +12,7 @@ import {
   peakUsagePercent,
   rankFailoverAccounts,
   selectFailoverAccount,
+  selectReviewAccount,
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from './handoff.js';
@@ -338,6 +342,72 @@ describe('handoff', () => {
       expect(combined).toContain('### Projeto\nUse pnpm\n\n### Sessão\nNão alterar schema');
       expect(hashPinnedMemory(combined)).not.toBe(hashPinnedMemory(projectOnly));
       expect(hashPinnedMemory(combined)).toBe(hashPinnedMemory(combined));
+    });
+  });
+
+  describe('adversarial review helpers', () => {
+    const acc = (id: string, provider: Account['provider']): Account => ({
+      id,
+      provider,
+      label: id,
+      homeDir: `/h/${id}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    test('selectReviewAccount prefers idle non-exhausted cross-provider account before same provider or fallback', () => {
+      const a1 = acc('a1', 'claude');
+      const a2 = acc('a2', 'claude');
+      const gBusy = acc('g-busy', 'gemini');
+      const cExhausted = acc('c-exh', 'codex');
+      const cExpired = acc('c-exp', 'codex');
+      const q1 = acc('q1', 'qwen');
+      const gIdle = acc('g-idle', 'gemini');
+
+      const chosen = selectReviewAccount({
+        currentAccountId: 'a1',
+        currentProvider: 'claude',
+        accounts: [a1, a2, gBusy, cExhausted, cExpired, q1, gIdle],
+        busyAccountIds: new Set(['g-busy']),
+        exhaustedAccountIds: new Set(['c-exh']),
+        expiredAccountIds: new Set(['c-exp']),
+      });
+      expect(chosen?.id).toBe('g-idle');
+
+      const sameProviderFallback = selectReviewAccount({
+        currentAccountId: 'a1',
+        currentProvider: 'claude',
+        accounts: [a1, a2, gBusy],
+        busyAccountIds: new Set(['g-busy']),
+      });
+      expect(sameProviderFallback?.id).toBe('a2');
+
+      const currentFallback = selectReviewAccount({
+        currentAccountId: 'a1',
+        currentProvider: 'claude',
+        accounts: [a1, gBusy, cExhausted],
+        busyAccountIds: new Set(['g-busy']),
+        exhaustedAccountIds: new Set(['c-exh']),
+      });
+      expect(currentFallback?.id).toBe('a1');
+    });
+
+    test('buildAdversarialReviewPrompt and buildParentFixPrompt include branch, files, bounded diff, and findings', () => {
+      const prompt = buildAdversarialReviewPrompt({
+        branch: 'feat/x',
+        changedFiles: ['src/a.ts', 'src/b.ts'],
+        diffStat: '2 files changed',
+        diff: 'x'.repeat(MAX_REVIEW_DIFF_CHARS + 50),
+        maxDiffChars: 20,
+      });
+      expect(prompt).toContain('Branch: feat/x');
+      expect(prompt).toContain('- src/a.ts');
+      expect(prompt).toContain('- src/b.ts');
+      expect(prompt).toContain('2 files changed');
+      expect(prompt).toContain(`${'x'.repeat(19)}…`);
+
+      const fixPrompt = buildParentFixPrompt('CRÍTICO: bug na linha 10');
+      expect(fixPrompt).toContain('CRÍTICO: bug na linha 10');
+      expect(fixPrompt).toContain('revisor independente');
     });
   });
 });

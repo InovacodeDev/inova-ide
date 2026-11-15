@@ -252,3 +252,12 @@ export function resolveExecutionMode(input: {
   }
   return PROVIDER_MODES[provider].defaultMode;
 }
+
+const REVIEW_MODE_PRIORITY: readonly ExecutionMode[] = ['read-only', 'plan', 'manual'];
+
+export function reviewExecutionMode(provider: ProviderId): ExecutionMode {
+  for (const mode of REVIEW_MODE_PRIORITY) {
+    if (isModeSupported(provider, mode)) return mode;
+  }
+  return PROVIDER_MODES[provider].defaultMode;
+}
