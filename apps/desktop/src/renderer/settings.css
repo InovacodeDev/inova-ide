@@ -192,6 +192,11 @@
   background: var(--accent-ink);
 }
 
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .segmented {
   display: inline-flex;
   gap: 2px;
