@@ -14,6 +14,7 @@ const SKILL_REASON = 'Kimi não permite desligar skills uma a uma.';
 const PLUGIN_REASON = 'Kimi só desliga plugins dentro da sessão (/plugins disable).';
 const UNSUPPORTED_KIND_MESSAGE = 'Kimi não suporta desligar este item.';
 const INVALID_MCP_MESSAGE = 'O mcp.json do Kimi é inválido.';
+const INVALID_PLUGINS_MESSAGE = 'O installed.json do Kimi é inválido.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Kimi';
 
 function mcpFile(ctx: CapabilityContext): string {
@@ -67,10 +68,12 @@ function pluginName(entry: unknown): string[] {
 
 async function pluginCategory(ctx: CapabilityContext): Promise<CapabilityCategoryResult> {
   const raw = await readIfExists(join(ctx.account.homeDir, 'plugins', 'installed.json'));
-  const parsed = raw === null ? null : parseJson(raw);
+  if (raw === null) return { kind: 'plugin', items: [], error: null };
+  const parsed = parseJson(raw);
   let names: string[] = [];
   if (Array.isArray(parsed)) names = parsed.flatMap(pluginName);
   else if (isRecord(parsed)) names = Object.keys(parsed);
+  else return { kind: 'plugin', items: [], error: INVALID_PLUGINS_MESSAGE };
   const items = [...new Set(names)].map((id) =>
     unsupported(baseItem({ kind: 'plugin', id, enabled: true }), PLUGIN_REASON),
   );

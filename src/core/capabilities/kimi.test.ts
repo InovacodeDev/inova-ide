@@ -86,7 +86,13 @@ describe('kimiCapabilities.list', () => {
         ['beta', 'unsupported', PLUGIN_REASON],
       ]);
       await writeFile(file, '{oops');
-      expect((await categoryOf(ctx, 'plugin'))?.items).toEqual([]);
+      expect(await categoryOf(ctx, 'plugin')).toEqual({
+        kind: 'plugin',
+        items: [],
+        error: 'O installed.json do Kimi é inválido.',
+      });
+      await writeFile(file, '3');
+      expect((await categoryOf(ctx, 'plugin'))?.error).toBe('O installed.json do Kimi é inválido.');
     });
   });
 });
