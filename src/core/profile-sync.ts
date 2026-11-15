@@ -9,7 +9,13 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { writeAtomic } from './capabilities/file-edit.js';
+import {
+  listTomlTables,
+  readTomlTableKey,
+  tomlTableHeader,
+  writeAtomic,
+} from './capabilities/file-edit.js';
+import { parseMcpItems } from './capabilities/gemini.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
 
@@ -288,6 +294,15 @@ function stripTomlMcpSections(toml: string): string {
   return kept.join('\n').trimEnd();
 }
 
+function isTomlServerDisabled(toml: string, name: string): boolean {
+  const value = readTomlTableKey({
+    toml,
+    table: tomlTableHeader(['mcp_servers', name]),
+    key: 'enabled',
+  });
+  return value !== null && /^false\b/.test(value);
+}
+
 function formatTomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
 }
@@ -297,6 +312,12 @@ export function formatCodexMcpToml(
   servers: CanonicalMcpMap,
 ): { content: string; incompatible: { name: string; reason: string }[] } {
   const base = stripTomlMcpSections(existingToml);
+  const disabledNames = new Set(
+    listTomlTables(existingToml)
+      .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
+      .map((segments) => segments[1] ?? '')
+      .filter((name) => isTomlServerDisabled(existingToml, name)),
+  );
   const blocks: string[] = [];
   const incompatible: { name: string; reason: string }[] = [];
 
@@ -318,6 +339,7 @@ export function formatCodexMcpToml(
           .join(', ');
         lines.push(`http_headers = { ${pairs} }`);
       }
+      if (disabledNames.has(name)) lines.push('enabled = false');
       blocks.push(lines.join('\n'));
       continue;
     }
@@ -326,6 +348,7 @@ export function formatCodexMcpToml(
     if (server.args && server.args.length > 0) {
       lines.push(`args = [${server.args.map((arg) => JSON.stringify(arg)).join(', ')}]`);
     }
+    if (disabledNames.has(name)) lines.push('enabled = false');
     if (server.env && Object.keys(server.env).length > 0) {
       lines.push('', `[mcp_servers.${key}.env]`);
       for (const [ek, ev] of Object.entries(server.env)) {
@@ -395,6 +418,15 @@ export function mergeOpencodeMcpJson(
   return { content: `${JSON.stringify(rootObj, null, 2)}\n`, incompatible };
 }
 
+function preservedDisabledKeys(entry: unknown): { enabled?: false; disabled?: true } {
+  if (typeof entry !== 'object' || entry === null) return {};
+  const record = entry as Record<string, unknown>;
+  return {
+    ...(record['enabled'] === false ? { enabled: false as const } : {}),
+    ...(record['disabled'] === true ? { disabled: true as const } : {}),
+  };
+}
+
 export function mergeMcpServersJson(
   existingJson: string,
   servers: CanonicalMcpMap,
@@ -408,7 +440,7 @@ export function mergeMcpServersJson(
       ? { ...(rootObj['mcpServers'] as Record<string, unknown>) }
       : {};
   for (const [name, server] of Object.entries(servers)) {
-    existing[name] = server;
+    existing[name] = { ...server, ...preservedDisabledKeys(existing[name]) };
   }
   rootObj['mcpServers'] = existing;
   return `${JSON.stringify(rootObj, null, 2)}\n`;
@@ -810,6 +842,12 @@ export async function applyProfileSync(input: {
       await backupExistingFile({ targetPath: planned.rawPath, backupDir, index: backupIndex++ });
       const env = { ...(input.baseEnv ?? process.env), HOME: account.homeDir };
       let okAll = true;
+      const listed = await input.runner.run({ command: 'agy', args: ['mcp', 'list'], env });
+      const disabledBefore = new Set(
+        'exitCode' in listed && listed.exitCode === 0
+          ? (parseMcpItems(listed.stdout) ?? []).filter((mcp) => !mcp.enabled).map((mcp) => mcp.id)
+          : [],
+      );
       for (const [name, server] of Object.entries(servers)) {
         const built = buildAgyMcpAddArgs(name, server);
         if ('incompatibleReason' in built) continue;
@@ -817,6 +855,15 @@ export async function applyProfileSync(input: {
         const result = await input.runner.run({ command: 'agy', args: built.args, env });
         if ('notFound' in result || result.exitCode !== 0) {
           okAll = false;
+          continue;
+        }
+        if (disabledBefore.has(name)) {
+          const disabled = await input.runner.run({
+            command: 'agy',
+            args: ['mcp', 'disable', name],
+            env,
+          });
+          if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
       if (okAll) appliedIds.push(item.id);

@@ -18,6 +18,7 @@ import {
   buildClaudeMcpAddJsonArgs,
   formatCodexMcpToml,
   maskSecretsInText,
+  mergeMcpServersJson,
   mergeOpencodeMcpJson,
   previewProfileSync,
 } from './profile-sync.js';
@@ -303,5 +304,85 @@ describe('profile-sync helpers', () => {
 
     const geminiStats = await lstat(join(project, 'GEMINI.md'));
     expect(geminiStats.isFile()).toBe(true);
+  });
+
+  test('mergeMcpServersJson keeps enabled false and disabled true from the destination entry', () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        a: { command: 'old', enabled: false },
+        b: { command: 'old', disabled: true },
+        c: { command: 'old', enabled: true, disabled: false },
+      },
+    });
+    const merged = JSON.parse(
+      mergeMcpServersJson(existing, {
+        a: { command: 'x' },
+        b: { command: 'y' },
+        c: { command: 'z' },
+      }),
+    ) as { mcpServers: Record<string, unknown> };
+    expect(merged.mcpServers['a']).toEqual({ command: 'x', enabled: false });
+    expect(merged.mcpServers['b']).toEqual({ command: 'y', disabled: true });
+    expect(merged.mcpServers['c']).toEqual({ command: 'z' });
+  });
+
+  test('formatCodexMcpToml keeps an existing enabled = false line on a rewritten table', () => {
+    const existing = [
+      '[mcp_servers.a]',
+      'command = "old"',
+      'enabled = false',
+      '',
+      '[mcp_servers.b]',
+      'command = "old"',
+      'enabled = true',
+      '',
+    ].join('\n');
+    const result = formatCodexMcpToml(existing, {
+      a: { command: 'npx', args: ['-y', 'srv'] },
+      b: { command: 'npx' },
+    });
+    expect(result.content).toContain(
+      '[mcp_servers.a]\ncommand = "npx"\nargs = ["-y", "srv"]\nenabled = false',
+    );
+    expect(result.content).not.toContain('enabled = true');
+    expect(result.content.match(/enabled/g)).toHaveLength(1);
+  });
+
+  test('applyProfileSync disables an agy MCP server again after re-adding it', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const geminiHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' }, b: { command: 'npx' } } }),
+    );
+    const calls: string[] = [];
+    const run = vi.fn<CommandRunner['run']>(async (request) => {
+      const line = request.args.join(' ');
+      calls.push(line);
+      if (line === 'mcp list') {
+        return {
+          exitCode: 0,
+          stdout: 'NAME  TYPE   STATUS\na     stdio  disabled\nb     stdio  enabled\n',
+        };
+      }
+      return { exitCode: 0, stdout: '' };
+    });
+    const accounts = [
+      { id: 'acc-gemini', provider: 'gemini' as const, label: 'g', homeDir: geminiHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+      runner: { run },
+    });
+    const addA = calls.findIndex((call) => call.startsWith('mcp add') && call.includes(' a '));
+    const disableA = calls.indexOf('mcp disable a');
+    expect(addA).toBeGreaterThanOrEqual(0);
+    expect(disableA).toBeGreaterThan(addA);
+    expect(calls).not.toContain('mcp disable b');
   });
 });

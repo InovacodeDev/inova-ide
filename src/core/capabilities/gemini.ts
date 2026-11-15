@@ -27,7 +27,7 @@ function parseJson(stdout: string): unknown {
   }
 }
 
-function parseMcpItems(stdout: string): CapabilityItem[] | null {
+export function parseMcpItems(stdout: string): CapabilityItem[] | null {
   const lines = stdout
     .split('\n')
     .map((line) => line.trim())
