@@ -7,6 +7,7 @@ import {
 } from './command-palette-state';
 import { CloseIcon, SearchIcon } from './icons';
 import { formatShortcut } from './shortcuts';
+import { useDialogFocus } from './useDialogFocus';
 
 interface CommandPaletteModalProps {
   items: readonly CommandPaletteItem[];
@@ -18,6 +19,7 @@ interface CommandPaletteModalProps {
 export function CommandPaletteModal({ items, isMac, onSelect, onClose }: CommandPaletteModalProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const cardRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const activeRowRef = useRef<HTMLButtonElement | null>(null);
 
@@ -31,6 +33,8 @@ export function CommandPaletteModal({ items, isMac, onSelect, onClose }: Command
   const activeIndex =
     orderedItems.length === 0 ? 0 : Math.min(selectedIndex, orderedItems.length - 1);
   const selectedItem = orderedItems[activeIndex] ?? null;
+
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -77,7 +81,12 @@ export function CommandPaletteModal({ items, isMac, onSelect, onClose }: Command
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card command-palette-card" onKeyDown={handleKeyDown}>
+      <div
+        ref={cardRef}
+        tabIndex={-1}
+        className="modal-card command-palette-card"
+        onKeyDown={handleKeyDown}
+      >
         <div className="command-palette-search">
           <span className="command-palette-search-icon" aria-hidden="true">
             <SearchIcon size={16} />

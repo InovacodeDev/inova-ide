@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/core/types';
 import { CloseIcon } from './icons';
+import { useI18n } from './I18nContext';
 import { openModalCount } from './modal-layers';
 import { SETTINGS_SECTIONS, moveSection, type SettingsSectionId } from './settings-sections';
 import {
@@ -12,6 +13,7 @@ import {
 } from './SettingsSections';
 import { ModelsSection } from './SettingsModels';
 import { VoiceSection } from './SettingsVoice';
+import { useDialogFocus } from './useDialogFocus';
 import type { WarningCall } from './useWarning';
 import './modal.css';
 import './settings.css';
@@ -28,18 +30,13 @@ interface SettingsModalProps {
 
 export function SettingsModal(props: SettingsModalProps) {
   const { settings, defaultModes, isMac, call, onUpdate, onSetDefaultMode, onClose } = props;
+  const { t } = useI18n();
   const [active, setActive] = useState<SettingsSectionId>('general');
   const cardRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    cardRef.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, []);
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     // NOTE: nested layers (confirm modal, open select menu) register their own Esc handler after
@@ -94,14 +91,14 @@ export function SettingsModal(props: SettingsModalProps) {
         <div className="modal-header">
           <div className="modal-title-group">
             <h2 id="settings-title" className="modal-title">
-              Configurações
+              {t('settings.title')}
             </h2>
           </div>
           <button
             type="button"
             className="icon-btn"
-            aria-label="Fechar configurações"
-            data-tooltip="Fechar configurações"
+            aria-label={t('settings.close')}
+            data-tooltip={t('settings.close')}
             data-shortcut="dismiss"
             onClick={onClose}
           >

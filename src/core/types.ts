@@ -106,6 +106,10 @@ export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-tur
 
 export type ThemePreference = 'system' | 'dark' | 'light';
 
+export type SupportedLocale = 'pt-BR' | 'en-US';
+
+export type LocalePreference = 'auto' | SupportedLocale;
+
 export type RateLimitFailoverPolicy = 'off' | 'same-provider' | 'any-provider';
 
 export type MaxConsecutiveToolErrors = 0 | 3 | 5 | 10;
@@ -119,6 +123,7 @@ export type MaxContextPercent = 0 | 80 | 90 | 95;
 export interface Settings {
   appearance: {
     theme: ThemePreference;
+    locale: LocalePreference;
     sidebarCollapsed: boolean;
     detailsCollapsed: boolean;
   };

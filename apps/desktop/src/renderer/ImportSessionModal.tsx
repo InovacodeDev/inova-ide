@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AccountView,
   ExternalSessionView,
@@ -13,6 +13,7 @@ import { PlatformSelect } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
 import { relativeTime } from './relative-time';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 
 export interface ImportRequest {
@@ -45,6 +46,9 @@ export function ImportSessionModal({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [targets, setTargets] = useState<Partial<Record<ImportProvider, string>>>({});
   const [importing, setImporting] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     let active = true;
@@ -126,7 +130,7 @@ export function ImportSessionModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card modal-card-overflow import-card">
+      <div ref={cardRef} tabIndex={-1} className="modal-card modal-card-overflow import-card">
         <div className="modal-header">
           <DownloadIcon size={17} />
           <div className="modal-title-group">
@@ -134,7 +138,7 @@ export function ImportSessionModal({
               Importar sessões
             </h2>
             <span className="modal-subtitle" title={project.path}>
-              {folderName(project.path)} · sessões criadas fora do Inova IDE nesta pasta
+              {folderName(project.path)} · sessões criadas fora do InovaIDE nesta pasta
             </span>
           </div>
           <button

@@ -18,7 +18,8 @@ export type TabsAction =
   | { type: 'close'; sessionId: string }
   | { type: 'activate'; sessionId: string }
   | { type: 'exited'; sessionId: string }
-  | { type: 'rename'; sessionId: string; title: string };
+  | { type: 'rename'; sessionId: string; title: string }
+  | { type: 'rebind'; sessionId: string; provider: ProviderId | null };
 
 export const MAX_OPEN_TABS = 3;
 
@@ -69,5 +70,7 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       return updateTab(state, action.sessionId, { exited: true });
     case 'rename':
       return updateTab(state, action.sessionId, { title: action.title });
+    case 'rebind':
+      return updateTab(state, action.sessionId, { provider: action.provider });
   }
 }

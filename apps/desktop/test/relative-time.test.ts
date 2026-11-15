@@ -36,6 +36,17 @@ describe('relativeTime', () => {
   test('returns empty string for an invalid date', () => {
     expect(relativeTime({ iso: 'nope', now })).toBe('');
   });
+
+  test('supports en-US labels for sub-minute and yesterday', () => {
+    expect(relativeTime({ iso: now.toISOString(), now, locale: 'en-US' })).toBe('now');
+    expect(
+      relativeTime({
+        iso: new Date(now.getTime() - DAY).toISOString(),
+        now,
+        locale: 'en-US',
+      }),
+    ).toBe('yesterday');
+  });
 });
 
 describe('formatMessageTime', () => {

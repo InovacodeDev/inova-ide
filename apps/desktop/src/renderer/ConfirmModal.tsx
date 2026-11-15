@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { CloseIcon } from './icons';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 
 interface ConfirmModalProps {
@@ -19,6 +20,16 @@ export function ConfirmModal({
   onConfirm,
   onCancel,
 }: ConfirmModalProps) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  useDialogFocus(cardRef);
+
+  useEffect(() => {
+    (danger ? cancelRef.current : confirmRef.current)?.focus();
+  }, [danger]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
@@ -39,7 +50,7 @@ export function ConfirmModal({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="modal-card">
+      <div ref={cardRef} tabIndex={-1} className="modal-card">
         <div className="modal-header">
           <div className="modal-title-group">
             <h2 id="confirm-modal-title" className="modal-title">
@@ -61,13 +72,13 @@ export function ConfirmModal({
           <p className="modal-description">{description}</p>
         </div>
         <div className="modal-footer">
-          <button type="button" className="btn" onClick={onCancel}>
+          <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
             Cancelar
           </button>
           <button
+            ref={confirmRef}
             type="button"
             className={danger ? 'btn btn-danger' : 'btn btn-primary'}
-            autoFocus
             onClick={onConfirm}
           >
             {confirmLabel}

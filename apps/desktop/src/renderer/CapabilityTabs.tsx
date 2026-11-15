@@ -1,5 +1,6 @@
 import type { CapabilityKind, CapabilityListing } from '../shared/api';
 import { CAPABILITY_TABS } from './capabilities-state';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import './capabilities.css';
 
 export function CapabilityTabs(props: {
@@ -11,15 +12,29 @@ export function CapabilityTabs(props: {
   onQuery: (query: string) => void;
 }) {
   const { listing, tabs, active, query, onSelect, onQuery } = props;
+  const visible = CAPABILITY_TABS.filter(({ kind }) => tabs.includes(kind));
   return (
     <div className="capabilities-toolbar">
-      <div className="capabilities-tabs" role="tablist" aria-label="Categorias">
-        {CAPABILITY_TABS.filter(({ kind }) => tabs.includes(kind)).map(({ kind, label }) => (
+      <div
+        className="capabilities-tabs"
+        role="tablist"
+        aria-label="Categorias"
+        onKeyDown={(event) =>
+          handleHorizontalTabListKeyDown({
+            event,
+            ids: visible.map(({ kind }) => kind),
+            activeId: active,
+            onSelect,
+          })
+        }
+      >
+        {visible.map(({ kind, label }) => (
           <button
             key={kind}
             type="button"
             role="tab"
             aria-selected={kind === active}
+            tabIndex={kind === active ? 0 : -1}
             className="capabilities-tab"
             onClick={() => onSelect(kind)}
           >

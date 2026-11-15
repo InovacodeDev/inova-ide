@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { LoginStage } from '../shared/api';
 import { AlertIcon, CheckIcon, CloseIcon, CopyIcon, ExternalLinkIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 
 export interface LoginModalState {
@@ -72,6 +73,9 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
   const [code, setCode] = useState('');
   const [submittingCode, setSubmittingCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   const inProgress =
     state.stage === 'starting' || state.stage === 'waiting-auth' || state.stage === 'verifying';
@@ -129,7 +133,7 @@ export function LoginModal({ state, onCancel, onClose, onRetry, onSubmitCode }: 
         if (event.target === event.currentTarget && !inProgress) onClose();
       }}
     >
-      <div className="modal-card">
+      <div ref={cardRef} tabIndex={-1} className="modal-card">
         <div className="modal-header">
           <ProviderBadge provider={state.provider} size={28} />
           <div className="modal-title-group">

@@ -1,4 +1,5 @@
 import { LogoIcon, RefreshIcon, SearchIcon, SettingsIcon } from './icons';
+import { useI18n } from './I18nContext';
 import type { SessionStatus } from './session-status';
 import type { Tab } from './tabs';
 import { TabBar } from './TabBar';
@@ -30,6 +31,7 @@ export function Header({
   onActivateTab,
   onCloseTab,
 }: HeaderProps) {
+  const { t } = useI18n();
   return (
     <header className="app-header">
       <div className="app-brand">
@@ -55,14 +57,14 @@ export function Header({
         {runningCount > 0 ? (
           <span className="app-running">
             <span className="app-running-dot pulse" />
-            {runningCount} executando
+            {t('header.running', { count: runningCount })}
           </span>
         ) : null}
         {update ? (
           <button
             type="button"
             className="btn btn-sm app-update-btn"
-            data-tooltip={`Instalar a versão v${update.latest} e reiniciar`}
+            data-tooltip={t('header.updateTooltip', { version: update.latest })}
             aria-busy={update.installing}
             disabled={update.installing}
             onClick={update.onInstall}
@@ -72,27 +74,27 @@ export function Header({
             ) : (
               <RefreshIcon size={13} />
             )}
-            {update.installing ? 'Atualizando…' : 'Reiniciar para atualizar'}
+            {update.installing ? t('header.updating') : t('header.restartToUpdate')}
           </button>
         ) : null}
         {onOpenCommandPalette ? (
           <button
             type="button"
             className="btn btn-ghost btn-sm app-command-palette-btn"
-            aria-label="Abrir paleta de comandos"
-            data-tooltip="Paleta de comandos"
+            aria-label={t('header.commandsLabel')}
+            data-tooltip={t('header.commandsTooltip')}
             data-shortcut="open-command-palette"
             onClick={onOpenCommandPalette}
           >
             <SearchIcon size={14} />
-            <span>Comandos</span>
+            <span>{t('header.commands')}</span>
           </button>
         ) : null}
         <button
           type="button"
           className="icon-btn"
-          aria-label="Configurações"
-          data-tooltip="Abrir configurações"
+          aria-label={t('header.settingsLabel')}
+          data-tooltip={t('header.settingsTooltip')}
           data-shortcut="open-settings"
           onClick={onOpenSettings}
         >

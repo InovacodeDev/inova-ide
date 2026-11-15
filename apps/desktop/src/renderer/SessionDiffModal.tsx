@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { WorktreeStatusView } from '../shared/api';
 import {
   parseUnifiedGitDiff,
@@ -9,6 +9,7 @@ import {
   type GitDiffLine,
 } from './git-diff-presentation';
 import { CloseIcon, GitBranchIcon, RefreshIcon, RotateCcwIcon, ShieldCheckIcon } from './icons';
+import { useDialogFocus } from './useDialogFocus';
 
 interface SessionDiffModalProps {
   status: WorktreeStatusView;
@@ -19,7 +20,7 @@ interface SessionDiffModalProps {
   onRefresh: () => void;
   onApplyWorktree?: () => void;
   onReviewDiff?: () => void;
-  onRevertFiles: (files: string[]) => Promise<boolean>;
+  onRevertFiles: (files: string[]) => Promise<boolean> | void;
 }
 
 function diffRowClass(type: GitDiffLine['type']): string {
@@ -52,6 +53,9 @@ export function SessionDiffModal({
   const summary = useMemo(() => summarizeGitChanges(files), [files]);
   const [selectedPath, setSelectedPath] = useState<string | null>(initialFilePath);
   const selectedFile = files.find((file) => file.path === selectedPath) ?? files[0] ?? null;
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   return (
     <div
@@ -63,7 +67,7 @@ export function SessionDiffModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card session-diff-modal-card">
+      <div ref={cardRef} tabIndex={-1} className="modal-card session-diff-modal-card">
         <div className="modal-header">
           <GitBranchIcon size={17} />
           <div className="modal-title-group">

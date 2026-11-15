@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
 import { CloseIcon, SwitchIcon } from './icons';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 
 interface HandoffModalProps {
@@ -25,6 +26,9 @@ export function HandoffModal({
   const alternatives = accounts.filter((account) => account.id !== sourceAccount?.id);
   const [targetAccountId, setTargetAccountId] = useState(alternatives[0]?.id ?? '');
   const [createWorktree, setCreateWorktree] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -53,7 +57,7 @@ export function HandoffModal({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="modal-card modal-card-overflow">
+      <div ref={cardRef} tabIndex={-1} className="modal-card modal-card-overflow">
         <div className="modal-header">
           <SwitchIcon size={17} />
           <div className="modal-title-group">

@@ -62,9 +62,21 @@ describe('settings', () => {
     );
     expect((await getSettings(root)).appearance).toEqual({
       theme: 'light',
+      locale: 'pt-BR',
       sidebarCollapsed: false,
       detailsCollapsed: false,
     });
+  });
+
+  it('updateSettings validates and persists appearance.locale', async () => {
+    expect((await getSettings(root)).appearance.locale).toBe('pt-BR');
+    for (const locale of ['auto', 'en-US', 'pt-BR'] as const) {
+      const updated = await updateSettings({ root, patch: { appearance: { locale } } });
+      expect(updated.appearance.locale).toBe(locale);
+    }
+    await expect(
+      updateSettings({ root, patch: { appearance: { locale: 'fr-FR' } as never } }),
+    ).rejects.toThrow(SettingsError);
   });
 
   it('updateSettings preserves a saved detailsCollapsed of true', async () => {

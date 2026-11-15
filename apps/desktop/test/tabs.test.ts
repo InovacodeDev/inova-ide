@@ -61,6 +61,13 @@ describe('tabsReducer', () => {
     expect(state.active).toBe('b');
   });
 
+  test('rebind updates only the provider of the matching tab', () => {
+    const two = open(open(empty, 'a'), 'b');
+    const state = tabsReducer(two, { type: 'rebind', sessionId: 'a', provider: 'codex' });
+    expect(state.tabs.map((tab) => tab.provider)).toEqual(['codex', 'claude']);
+    expect(state.active).toBe('b');
+  });
+
   test('unknown session ids leave the state unchanged', () => {
     const state = open(empty, 'a');
     expect(tabsReducer(state, { type: 'close', sessionId: 'zzz' })).toBe(state);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   AccountView,
   ProfileSyncApplyResult,
@@ -12,6 +12,7 @@ import { CloseIcon, SlidersIcon } from './icons';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName } from './provider-meta';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 import './compare.css';
 
@@ -73,6 +74,9 @@ export function ProfileSyncModal({
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [result, setResult] = useState<ProfileSyncApplyResult | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -187,7 +191,7 @@ export function ProfileSyncModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="modal-card modal-card-overflow sync-modal-card">
+      <div ref={cardRef} tabIndex={-1} className="modal-card modal-card-overflow sync-modal-card">
         <div className="modal-header">
           <SlidersIcon size={17} />
           <div className="modal-title-group">

@@ -5,12 +5,16 @@ import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
 import type { AccountView, ComparisonDiffView, ProjectView } from '../shared/api';
 import type { ChatItem, ChatState } from './chat-reducer';
+import { ConfirmModal } from './ConfirmModal';
 import { CompareIcon, PlusIcon, RefreshIcon } from './icons';
+import { copyToClipboard } from './clipboard';
 import { Markdown } from './Markdown';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
 import { STATUS_LABEL, sessionStatus } from './session-status';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
+import { ToolCard } from './ToolCard';
 import './compare.css';
 
 interface CompareMetrics {
@@ -54,6 +58,7 @@ interface CompareViewProps {
   }) => Promise<boolean>;
   onOpenSession: (session: Session) => void;
   onEnsureSessionLoaded?: (sessionId: string) => void;
+  onWarn?: (message: string) => void;
 }
 
 interface ComparisonGroupEntry {
@@ -189,6 +194,7 @@ function ComparisonColumn({
   chat,
   metrics,
   onOpenSession,
+  onWarn,
 }: {
   label: string;
   session: Session;
@@ -196,6 +202,7 @@ function ComparisonColumn({
   chat: ChatState | undefined;
   metrics: CompareMetrics | undefined;
   onOpenSession: () => void;
+  onWarn?: (message: string) => void;
 }) {
   const status = sessionStatus(chat);
   const items: readonly ChatItem[] = chat?.items ?? [];
@@ -230,12 +237,14 @@ function ComparisonColumn({
             }
             if (item.type === 'tool') {
               return (
-                <div key={item.id} className="chat-tool">
-                  <div className="chat-tool-summary">
-                    <span className="chat-tool-name">{item.name}</span>
-                    <span className="chat-tool-preview">{item.isError ? 'erro' : 'ok'}</span>
-                  </div>
-                </div>
+                <ToolCard
+                  key={item.id}
+                  item={item}
+                  defaultOpen={false}
+                  onCopyText={(text) =>
+                    void copyToClipboard({ text, onError: (message) => onWarn?.(message) })
+                  }
+                />
               );
             }
             if (item.type === 'error') {
@@ -286,6 +295,7 @@ export function CompareView(props: CompareViewProps) {
     onResolveComparison,
     onOpenSession,
     onEnsureSessionLoaded,
+    onWarn,
   } = props;
 
   const groups = useMemo<ComparisonGroupEntry[]>(() => {
@@ -336,6 +346,7 @@ export function CompareView(props: CompareViewProps) {
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [cleanupWorktrees, setCleanupWorktrees] = useState(true);
   const [resolving, setResolving] = useState(false);
+  const [pendingWinner, setPendingWinner] = useState<'left' | 'right' | null>(null);
 
   const effectiveProjectId = projects.some((p) => p.id === projectId)
     ? projectId
@@ -510,11 +521,34 @@ export function CompareView(props: CompareViewProps) {
       ) : (
         <>
           <div className="compare-tabs">
-            <div className="compare-tablist" role="tablist">
+            <div
+              className="compare-tablist"
+              role="tablist"
+              aria-label="Visualização da comparação"
+              onKeyDown={(event) =>
+                handleHorizontalTabListKeyDown({
+                  event,
+                  ids: ['stream', 'diff'] as const,
+                  activeId: tab,
+                  onSelect: (nextTab) => {
+                    setTab(nextTab);
+                    if (
+                      nextTab === 'diff' &&
+                      !diffView &&
+                      activeGroup.left.worktree &&
+                      activeGroup.right.worktree
+                    ) {
+                      void refreshDiff(activeGroup.groupId);
+                    }
+                  },
+                })
+              }
+            >
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === 'stream'}
+                tabIndex={tab === 'stream' ? 0 : -1}
                 className={tab === 'stream' ? 'btn btn-sm btn-primary' : 'btn btn-sm'}
                 onClick={() => setTab('stream')}
               >
@@ -524,6 +558,7 @@ export function CompareView(props: CompareViewProps) {
                 type="button"
                 role="tab"
                 aria-selected={tab === 'diff'}
+                tabIndex={tab === 'diff' ? 0 : -1}
                 className={tab === 'diff' ? 'btn btn-sm btn-primary' : 'btn btn-sm'}
                 onClick={() => {
                   setTab('diff');
@@ -557,6 +592,7 @@ export function CompareView(props: CompareViewProps) {
                 chat={chats[activeGroup.left.id]}
                 metrics={compareMetrics[activeGroup.left.id]}
                 onOpenSession={() => onOpenSession(activeGroup.left)}
+                onWarn={onWarn}
               />
               <ComparisonColumn
                 label="Lado B"
@@ -565,6 +601,7 @@ export function CompareView(props: CompareViewProps) {
                 chat={chats[activeGroup.right.id]}
                 metrics={compareMetrics[activeGroup.right.id]}
                 onOpenSession={() => onOpenSession(activeGroup.right)}
+                onWarn={onWarn}
               />
             </div>
           ) : (
@@ -614,7 +651,13 @@ export function CompareView(props: CompareViewProps) {
                     Boolean(chats[activeGroup.left.id]?.running) ||
                     Boolean(chats[activeGroup.right.id]?.running)
                   }
-                  onClick={() => void resolveWinner('left')}
+                  onClick={() => {
+                    if (cleanupWorktrees) {
+                      setPendingWinner('left');
+                      return;
+                    }
+                    void resolveWinner('left');
+                  }}
                 >
                   Aplicar vencedor A
                 </button>
@@ -626,7 +669,13 @@ export function CompareView(props: CompareViewProps) {
                     Boolean(chats[activeGroup.left.id]?.running) ||
                     Boolean(chats[activeGroup.right.id]?.running)
                   }
-                  onClick={() => void resolveWinner('right')}
+                  onClick={() => {
+                    if (cleanupWorktrees) {
+                      setPendingWinner('right');
+                      return;
+                    }
+                    void resolveWinner('right');
+                  }}
                 >
                   Aplicar vencedor B
                 </button>
@@ -635,6 +684,20 @@ export function CompareView(props: CompareViewProps) {
           ) : null}
         </>
       )}
+      {pendingWinner ? (
+        <ConfirmModal
+          title="Aplicar vencedor e remover worktrees?"
+          description={`As alterações do ${pendingWinner === 'left' ? 'Lado A' : 'Lado B'} serão aplicadas no repositório principal e os dois worktrees temporários desta comparação serão removidos.`}
+          confirmLabel="Aplicar e remover"
+          danger
+          onCancel={() => setPendingWinner(null)}
+          onConfirm={() => {
+            const side = pendingWinner;
+            setPendingWinner(null);
+            void resolveWinner(side);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

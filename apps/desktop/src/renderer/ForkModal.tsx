@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@inova/core/types';
 import type { AccountView } from '../shared/api';
 import { CloseIcon, GitForkIcon } from './icons';
 import { PlatformSelect, type PlatformSelectOption } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { accountDisplayName, PROVIDER_NAME } from './provider-meta';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 
 interface ForkModalProps {
@@ -29,6 +30,9 @@ export function ForkModal({
   const defaultAccountId = sourceAccount?.id ?? accounts[0]?.id ?? '';
   const [targetAccountId, setTargetAccountId] = useState(defaultAccountId);
   const [copyWorktreeFiles, setCopyWorktreeFiles] = useState(true);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -60,7 +64,7 @@ export function ForkModal({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="modal-card modal-card-overflow">
+      <div ref={cardRef} tabIndex={-1} className="modal-card modal-card-overflow">
         <div className="modal-header">
           <GitForkIcon size={17} />
           <div className="modal-title-group">

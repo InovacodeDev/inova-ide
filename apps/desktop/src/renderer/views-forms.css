@@ -391,6 +391,13 @@
   border: none;
 }
 
+.new-session-lock-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .new-session-folder {
   display: flex;
   align-items: center;

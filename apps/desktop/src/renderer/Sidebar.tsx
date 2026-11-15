@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { InboxItem, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
+import { useI18n } from './I18nContext';
+import type { TranslationKey } from './i18n';
 import { InboxView } from './InboxView';
 import { accountDisplayName } from './provider-meta';
 import {
@@ -12,6 +14,7 @@ import {
   ChevronRightIcon,
   CompareIcon,
   DownloadIcon,
+  EllipsisIcon,
   FolderIcon,
   GridIcon,
   InboxIcon,
@@ -81,12 +84,136 @@ type SessionActions = Pick<
   onRequestArchive: (session: Session) => void;
 };
 
-const NAV_ITEMS: { view: Exclude<View, 'new-session'>; label: string; icon: ReactNode }[] = [
-  { view: 'workspace', label: 'Workspace', icon: <ChatIcon size={16} /> },
-  { view: 'agents', label: 'Agentes em paralelo', icon: <GridIcon size={16} /> },
-  { view: 'compare', label: 'Comparar', icon: <CompareIcon size={16} /> },
-  { view: 'accounts', label: 'Contas e providers', icon: <KeyIcon size={16} /> },
+const NAV_ITEMS: {
+  view: Exclude<View, 'new-session'>;
+  labelKey: TranslationKey;
+  icon: ReactNode;
+}[] = [
+  { view: 'workspace', labelKey: 'sidebar.nav.workspace', icon: <ChatIcon size={16} /> },
+  { view: 'agents', labelKey: 'sidebar.nav.agents', icon: <GridIcon size={16} /> },
+  { view: 'compare', labelKey: 'sidebar.nav.compare', icon: <CompareIcon size={16} /> },
+  { view: 'accounts', labelKey: 'sidebar.nav.accounts', icon: <KeyIcon size={16} /> },
 ];
+
+interface SidebarMenuItem {
+  id: string;
+  label: string;
+  icon: ReactNode;
+  danger?: boolean;
+  onSelect: () => void;
+}
+
+interface SidebarActionMenuProps {
+  label: string;
+  items: SidebarMenuItem[];
+}
+
+function SidebarActionMenu({ label, items }: SidebarActionMenuProps) {
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const open = position !== null;
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      setPosition(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPosition(null);
+        triggerRef.current?.focus();
+      }
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setPosition(null);
+      return;
+    }
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = 220;
+    const menuHeight = items.length * 32 + 12;
+    const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menuHeight - 8));
+    const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+    setPosition({ top, left });
+  };
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={open ? 'session-action session-action-open' : 'session-action'}
+        aria-label={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-tooltip={label}
+        onClick={toggle}
+      >
+        <EllipsisIcon size={14} />
+      </button>
+      {position && (
+        <div
+          ref={menuRef}
+          className="sidebar-menu"
+          role="menu"
+          aria-label={label}
+          style={{ top: position.top, left: position.left }}
+          onKeyDown={(event) => {
+            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+            const buttons = Array.from(
+              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+            );
+            if (buttons.length === 0) return;
+            const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+            const delta = event.key === 'ArrowDown' ? 1 : -1;
+            const next =
+              current === -1
+                ? event.key === 'ArrowDown'
+                  ? 0
+                  : buttons.length - 1
+                : (current + delta + buttons.length) % buttons.length;
+            event.preventDefault();
+            buttons[next]?.focus();
+          }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={
+                item.danger ? 'sidebar-menu-item sidebar-menu-item-danger' : 'sidebar-menu-item'
+              }
+              onClick={() => {
+                setPosition(null);
+                item.onSelect();
+              }}
+            >
+              <span className="sidebar-menu-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
 
 interface TitleEditorProps {
   initial: string;
@@ -154,6 +281,7 @@ interface SessionRowProps extends SessionActions {
 
 function SessionRow(props: SessionRowProps) {
   const { node, project, accounts, activeSessionId, ...actions } = props;
+  const { locale, t } = useI18n();
   const {
     onOpenSession,
     onNewSession,
@@ -173,9 +301,44 @@ function SessionRow(props: SessionRowProps) {
   const rowClasses = ['session-row', isSubsession ? 'session-row-sub' : 'session-row-root'];
   if (session.id === activeSessionId) rowClasses.push('active');
 
-  const remove = () => {
-    onRequestDelete(session);
-  };
+  const menuItems: SidebarMenuItem[] = [
+    {
+      id: 'rename',
+      label: t('sidebar.rename'),
+      icon: <PencilIcon size={14} />,
+      onSelect: () => setEditing(true),
+    },
+    ...(archived
+      ? [
+          {
+            id: 'unarchive',
+            label: t('sidebar.unarchive'),
+            icon: <ArchiveIcon size={14} />,
+            onSelect: () => actions.onUnarchiveSession(session),
+          },
+        ]
+      : [
+          {
+            id: 'new-subsession',
+            label: t('sidebar.newSubsession'),
+            icon: <PlusIcon size={14} />,
+            onSelect: () => onNewSession({ project, parent: session }),
+          },
+          {
+            id: 'archive',
+            label: t('sidebar.archive'),
+            icon: <ArchiveIcon size={14} />,
+            onSelect: () => onRequestArchive(session),
+          },
+        ]),
+    {
+      id: 'delete',
+      label: t('sidebar.delete'),
+      icon: <TrashIcon size={14} />,
+      danger: true,
+      onSelect: () => onRequestDelete(session),
+    },
+  ];
 
   return (
     <li className="session-node">
@@ -207,62 +370,13 @@ function SessionRow(props: SessionRowProps) {
               <StatusLine status={statusOf(session.id)} />
             </span>
             <span className="session-time">
-              {relativeTime({ iso: session.updatedAt, now: new Date() })}
+              {relativeTime({ iso: session.updatedAt, now: new Date(), locale })}
             </span>
           </button>
         )}
         {!editing && (
           <div className="session-actions">
-            <button
-              type="button"
-              className="session-action"
-              aria-label={isSubsession ? 'Renomear subsessão' : 'Renomear sessão'}
-              data-tooltip={isSubsession ? 'Renomear subsessão' : 'Renomear sessão'}
-              onClick={() => setEditing(true)}
-            >
-              <PencilIcon size={14} />
-            </button>
-            {archived ? (
-              <button
-                type="button"
-                className="session-action"
-                aria-label={isSubsession ? 'Desarquivar subsessão' : 'Desarquivar sessão'}
-                data-tooltip={isSubsession ? 'Desarquivar subsessão' : 'Desarquivar sessão'}
-                onClick={() => actions.onUnarchiveSession(session)}
-              >
-                <ArchiveIcon size={14} />
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="session-action"
-                  aria-label="Nova subsessão"
-                  data-tooltip="Criar subsessão a partir desta sessão"
-                  onClick={() => onNewSession({ project, parent: session })}
-                >
-                  <PlusIcon size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="session-action"
-                  aria-label={isSubsession ? 'Arquivar subsessão' : 'Arquivar sessão'}
-                  data-tooltip={isSubsession ? 'Arquivar subsessão' : 'Arquivar sessão'}
-                  onClick={() => onRequestArchive(session)}
-                >
-                  <ArchiveIcon size={14} />
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              className="session-action session-action-danger"
-              aria-label={isSubsession ? 'Excluir subsessão' : 'Excluir sessão'}
-              data-tooltip={isSubsession ? 'Excluir subsessão' : 'Excluir sessão'}
-              onClick={remove}
-            >
-              <TrashIcon size={14} />
-            </button>
+            <SidebarActionMenu label={t('sidebar.sessionActions')} items={menuItems} />
           </div>
         )}
       </div>
@@ -310,6 +424,7 @@ function ProjectSection(props: ProjectSectionProps) {
     ...actions
   } = props;
   const { onNewSession } = actions;
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -322,6 +437,46 @@ function ProjectSection(props: ProjectSectionProps) {
     expanded,
     activeSessionId,
   });
+
+  const projectMenuItems: SidebarMenuItem[] = [
+    ...(onOpenProjectSettings
+      ? [
+          {
+            id: 'project-settings',
+            label: t('sidebar.projectSettings'),
+            icon: <SettingsIcon size={14} />,
+            onSelect: () => onOpenProjectSettings(project),
+          },
+        ]
+      : []),
+    ...(onOpenProfileSync
+      ? [
+          {
+            id: 'profile-sync',
+            label: t('sidebar.profileSync'),
+            icon: <SlidersIcon size={14} />,
+            onSelect: () => onOpenProfileSync(project),
+          },
+        ]
+      : []),
+    ...(onImportSessions
+      ? [
+          {
+            id: 'import-sessions',
+            label: t('sidebar.importSessions'),
+            icon: <DownloadIcon size={14} />,
+            onSelect: () => onImportSessions(project),
+          },
+        ]
+      : []),
+    {
+      id: 'remove-project',
+      label: t('sidebar.removeProject'),
+      icon: <TrashIcon size={14} />,
+      danger: true,
+      onSelect: () => onRequestUnbind(project),
+    },
+  ];
 
   return (
     <section className="project-section">
@@ -347,62 +502,21 @@ function ProjectSection(props: ProjectSectionProps) {
           </span>
         </button>
         <div className="project-actions">
-          {onOpenProjectSettings ? (
-            <button
-              type="button"
-              className="session-action"
-              aria-label="Configurações do projeto"
-              data-tooltip="Configurações do projeto"
-              onClick={() => onOpenProjectSettings(project)}
-            >
-              <SettingsIcon size={14} />
-            </button>
-          ) : null}
-          {onOpenProfileSync ? (
-            <button
-              type="button"
-              className="session-action"
-              aria-label="Sincronizar MCPs e regras"
-              data-tooltip="Sincronizar MCPs e regras"
-              onClick={() => onOpenProfileSync(project)}
-            >
-              <SlidersIcon size={14} />
-            </button>
-          ) : null}
-          {onImportSessions ? (
-            <button
-              type="button"
-              className="session-action"
-              aria-label="Importar sessões externas"
-              data-tooltip="Importar sessões externas"
-              onClick={() => onImportSessions(project)}
-            >
-              <DownloadIcon size={14} />
-            </button>
-          ) : null}
           <button
             type="button"
             className="session-action"
-            aria-label="Nova sessão na seção"
-            data-tooltip="Nova sessão neste projeto"
+            aria-label={t('sidebar.newSession')}
+            data-tooltip={t('sidebar.newSession')}
             onClick={() => onNewSession({ project, parent: null })}
           >
             <PlusIcon size={14} />
           </button>
-          <button
-            type="button"
-            className="session-action session-action-danger"
-            aria-label="Excluir seção"
-            data-tooltip="Excluir seção do projeto"
-            onClick={() => onRequestUnbind(project)}
-          >
-            <TrashIcon size={14} />
-          </button>
+          <SidebarActionMenu label={t('sidebar.moreActions')} items={projectMenuItems} />
         </div>
       </div>
       {!collapsed &&
         (roots.length === 0 ? (
-          <p className="session-empty">Nenhuma sessão</p>
+          <p className="session-empty">{t('sidebar.noSessions')}</p>
         ) : (
           <>
             <ul className="session-tree">
@@ -419,12 +533,12 @@ function ProjectSection(props: ProjectSectionProps) {
             </ul>
             {hiddenCount > 0 && (
               <button className="session-more" onClick={() => setExpanded(true)}>
-                Mostrar mais ({hiddenCount})
+                {t('sidebar.showMore', { count: hiddenCount })}
               </button>
             )}
             {expanded && roots.length > SESSION_LIMIT && (
               <button className="session-more" onClick={() => setExpanded(false)}>
-                Mostrar menos
+                {t('sidebar.showLess')}
               </button>
             )}
           </>
@@ -436,7 +550,7 @@ function ProjectSection(props: ProjectSectionProps) {
             aria-expanded={showArchived}
             onClick={() => setShowArchived((value) => !value)}
           >
-            Arquivadas ({split.archived.length})
+            {t('sidebar.archived', { count: split.archived.length })}
           </button>
           {showArchived && (
             <ul className="session-tree">
@@ -474,6 +588,7 @@ export function Sidebar(props: SidebarProps) {
     onToggleCollapsed,
   } = props;
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const { t } = useI18n();
   const emailByLabel = useMemo(
     () => new Map(accounts.map((account) => [account.label, account.email] as const)),
     [accounts],
@@ -487,26 +602,29 @@ export function Sidebar(props: SidebarProps) {
         <button
           type="button"
           className="sidebar-rail-item"
-          aria-label="Nova sessão"
-          data-tooltip="Criar uma nova sessão"
+          aria-label={t('sidebar.newSession')}
+          data-tooltip={t('sidebar.newSession')}
           data-shortcut="new-session"
           onClick={() => onNavigate('new-session')}
         >
           <PlusIcon size={16} />
         </button>
-        {NAV_ITEMS.map((item) => (
-          <button
-            key={item.view}
-            type="button"
-            className={view === item.view ? 'sidebar-rail-item active' : 'sidebar-rail-item'}
-            aria-label={item.label}
-            aria-current={view === item.view ? 'page' : undefined}
-            data-tooltip={item.label}
-            onClick={() => onNavigate(item.view)}
-          >
-            {item.icon}
-          </button>
-        ))}
+        {NAV_ITEMS.map((item) => {
+          const itemLabel = t(item.labelKey);
+          return (
+            <button
+              key={item.view}
+              type="button"
+              className={view === item.view ? 'sidebar-rail-item active' : 'sidebar-rail-item'}
+              aria-label={itemLabel}
+              aria-current={view === item.view ? 'page' : undefined}
+              data-tooltip={itemLabel}
+              onClick={() => onNavigate(item.view)}
+            >
+              {item.icon}
+            </button>
+          );
+        })}
         {unreadCount > 0 ? (
           <button
             type="button"
@@ -538,12 +656,12 @@ export function Sidebar(props: SidebarProps) {
         <div className="sidebar-top">
           <button
             className="btn btn-primary sidebar-new"
-            data-tooltip="Criar uma nova sessão"
+            data-tooltip={t('sidebar.newSession')}
             data-shortcut="new-session"
             onClick={() => onNavigate('new-session')}
           >
             <PlusIcon size={16} />
-            Nova sessão
+            {t('sidebar.newSession')}
           </button>
           <button
             type="button"
@@ -564,7 +682,7 @@ export function Sidebar(props: SidebarProps) {
                 onClick={() => onNavigate(item.view)}
               >
                 {item.icon}
-                {item.label}
+                {t(item.labelKey)}
               </button>
             </li>
           ))}
@@ -632,9 +750,11 @@ export function Sidebar(props: SidebarProps) {
       )}
       {pendingConfirm?.kind === 'unbind-project' && (
         <ConfirmModal
-          title="Excluir seção"
-          description={`Excluir a seção "${folderName(pendingConfirm.project.path)}"? Todas as sessões e subsessões vinculadas a ela serão excluídas da IDE.`}
-          confirmLabel="Excluir seção"
+          title={t('sidebar.removeProjectTitle')}
+          description={t('sidebar.removeProjectDesc', {
+            name: folderName(pendingConfirm.project.path),
+          })}
+          confirmLabel={t('sidebar.removeProjectConfirm')}
           danger
           onCancel={() => setPendingConfirm(null)}
           onConfirm={() => {

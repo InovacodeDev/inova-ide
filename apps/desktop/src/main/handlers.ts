@@ -122,6 +122,7 @@ import type {
   AccountView,
   AttachmentKind,
   ExternalSessionView,
+  FailoverEvent,
   LoginEvent,
   PickedAttachment,
   ProjectView,
@@ -190,7 +191,7 @@ export interface HandlerDeps {
   emitInbox?: (items: InboxItem[]) => void;
   emitQueue?: (queue: QueuedTurn[]) => void;
   emitQueuePaused?: (sessionIds: string[]) => void;
-  emitFailover?: (event: { session: Session; rollbackLastTurn: boolean }) => void;
+  emitFailover?: (event: FailoverEvent) => void;
   notify?: (input: { title: string; body: string }) => Promise<Result<null>>;
   openNotificationSettings?: () => Promise<void>;
   openPath?: (path: string) => Promise<void>;
@@ -837,7 +838,12 @@ export function createHandlers(deps: HandlerDeps) {
     if (turnQueue.reassignSessionAccount({ sessionId: session.id, accountId: toAccount.id })) {
       emitQueueSnapshot();
     }
-    deps.emitFailover?.({ session: updated, rollbackLastTurn });
+    deps.emitFailover?.({
+      session: updated,
+      rollbackLastTurn,
+      fromAccountId: fromAccount.id,
+      toAccountId: toAccount.id,
+    });
     return updated;
   }
 

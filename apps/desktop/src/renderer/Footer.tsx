@@ -12,9 +12,13 @@ import {
   usageWindowKey,
   usageWindowLabel,
 } from './footer-state';
+import { useI18n } from './I18nContext';
+import { BellIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
+import { formatMessageTime } from './relative-time';
 import { STATUS_TEXT, type UsageState } from './UsageBar';
+import type { WarningEntry } from './useWarning';
 import './footer.css';
 import './update.css';
 
@@ -26,6 +30,8 @@ export interface FooterProps {
   usage: Record<string, UsageState>;
   onLoadUsage: (account: AccountView) => void;
   onManageAccounts: () => void;
+  warningHistory?: readonly WarningEntry[];
+  onClearWarningHistory?: () => void;
   version?: string | null;
   updateAvailable?: boolean;
   onOpenChangelog?: () => void;
@@ -143,11 +149,15 @@ function PopoverAccountCard(props: {
 
 export function Footer(props: FooterProps) {
   const { accounts, focusedAccountLabel, usage, onLoadUsage, onManageAccounts } = props;
+  const { warningHistory = [], onClearWarningHistory } = props;
   const { version = null, updateAvailable = false, onOpenChangelog } = props;
+  const { t } = useI18n();
   const loadRef = useRef(onLoadUsage);
-  const [popover, setPopover] = useState<{ provider: ProviderId; alignRight: boolean } | null>(
-    null,
-  );
+  const [popover, setPopover] = useState<
+    | { kind: 'provider'; provider: ProviderId; alignRight: boolean }
+    | { kind: 'alerts'; alignRight: boolean }
+    | null
+  >(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const groups = useMemo(() => groupByProvider(accounts), [accounts]);
@@ -162,15 +172,27 @@ export function Footer(props: FooterProps) {
       })),
     [groups, focusedAccountLabel],
   );
-  const popoverProvider = popover?.provider ?? null;
+  const popoverProvider = popover?.kind === 'provider' ? popover.provider : null;
+  const alertsOpen = popover?.kind === 'alerts';
+
+  const alignPopoverRight = (anchor: HTMLElement): boolean => {
+    const { left } = anchor.getBoundingClientRect();
+    return left + POPOVER_WIDTH_PX + POPOVER_EDGE_GAP_PX > window.innerWidth;
+  };
 
   const openPopover = (provider: ProviderId, anchor: HTMLElement) => {
-    const { left } = anchor.getBoundingClientRect();
     setNowMs(Date.now());
     setPopover({
+      kind: 'provider',
       provider,
-      alignRight: left + POPOVER_WIDTH_PX + POPOVER_EDGE_GAP_PX > window.innerWidth,
+      alignRight: alignPopoverRight(anchor),
     });
+  };
+  const toggleAlertsPopover = (anchor: HTMLElement) => {
+    setNowMs(Date.now());
+    setPopover((current) =>
+      current?.kind === 'alerts' ? null : { kind: 'alerts', alignRight: alignPopoverRight(anchor) },
+    );
   };
   const closePopover = () => setPopover(null);
 
@@ -213,45 +235,65 @@ export function Footer(props: FooterProps) {
   }, [popoverProvider]);
 
   return (
-    <footer className="footer-bar" aria-label="Provedores conectados">
-      {shown.length === 0 ? <span className="footer-empty">Nenhuma conta conectada</span> : null}
+    <footer className="footer-bar" aria-label={t('footer.ariaLabel')}>
+      {shown.length === 0 ? (
+        <span className="footer-empty">{t('footer.noConnectedAccounts')}</span>
+      ) : null}
       {shown.map(({ group, account }) => {
         if (!account) return null;
         const extra = group.accounts.length - 1;
         const active = account.label === focusedAccountLabel;
-        const open = popover?.provider === group.provider;
+        const open = popover?.kind === 'provider' && popover.provider === group.provider;
         return (
           <div
             key={group.provider}
             className={`footer-group${active ? ' footer-group-active' : ''}`}
-            tabIndex={0}
             onMouseEnter={(event) => openPopover(group.provider, event.currentTarget)}
             onMouseLeave={closePopover}
-            onFocus={(event) => openPopover(group.provider, event.currentTarget)}
-            onBlur={closePopover}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                closePopover();
+              }
+            }}
           >
-            <ProviderBadge provider={group.provider} size={16} />
-            <span className="footer-name">
-              {PROVIDER_NAME[group.provider]} · {accountDisplayName(account)}
-            </span>
-            {active ? (
-              <span className="footer-inuse">
-                <span className="footer-inuse-dot" />
-                em uso
+            <button
+              type="button"
+              className="footer-group-trigger"
+              aria-expanded={open}
+              onClick={(event) => {
+                if (!open) openPopover(group.provider, event.currentTarget);
+              }}
+              onFocus={(event) => openPopover(group.provider, event.currentTarget)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape' && open) {
+                  event.preventDefault();
+                  closePopover();
+                }
+              }}
+            >
+              <ProviderBadge provider={group.provider} size={16} />
+              <span className="footer-name">
+                {PROVIDER_NAME[group.provider]} · {accountDisplayName(account)}
               </span>
-            ) : null}
-            {account.status === 'logged-in' ? (
-              primaryUsageWindows(readyWindows(usage[account.label])).map((w) => (
-                <FooterMeter key={usageWindowKey(w)} window={w} provider={group.provider} />
-              ))
-            ) : (
-              <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>
-            )}
-            {extra > 0 ? (
-              <span className="footer-extra">
-                +{extra} {extra === 1 ? 'conta' : 'contas'}
-              </span>
-            ) : null}
+              {active ? (
+                <span className="footer-inuse">
+                  <span className="footer-inuse-dot" />
+                  {t('footer.inUse')}
+                </span>
+              ) : null}
+              {account.status === 'logged-in' ? (
+                primaryUsageWindows(readyWindows(usage[account.label])).map((w) => (
+                  <FooterMeter key={usageWindowKey(w)} window={w} provider={group.provider} />
+                ))
+              ) : (
+                <span className="footer-disconnected">{STATUS_TEXT[account.status]}</span>
+              )}
+              {extra > 0 ? (
+                <span className="footer-extra">
+                  +{extra} {extra === 1 ? t('footer.accountSingular') : t('footer.accountPlural')}
+                </span>
+              ) : null}
+            </button>
             {open ? (
               <section
                 className={
@@ -288,11 +330,77 @@ export function Footer(props: FooterProps) {
       <button
         type="button"
         className="footer-manage"
-        data-tooltip="Abrir contas e providers"
+        data-tooltip={t('footer.manageAccountsTooltip')}
         onClick={onManageAccounts}
       >
-        Gerenciar contas
+        {t('footer.manageAccounts')}
       </button>
+      {warningHistory.length > 0 ? (
+        <div
+          className="footer-alerts-wrap"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              closePopover();
+            }
+          }}
+        >
+          <button
+            type="button"
+            className="footer-alerts-btn"
+            aria-label={t('footer.alertsLabel', { count: warningHistory.length })}
+            aria-expanded={alertsOpen}
+            data-tooltip={t('footer.alertsTooltip')}
+            onClick={(event) => toggleAlertsPopover(event.currentTarget)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && alertsOpen) {
+                event.preventDefault();
+                closePopover();
+              }
+            }}
+          >
+            <BellIcon size={13} />
+            <span className="footer-alerts-badge mono">{warningHistory.length}</span>
+          </button>
+          {alertsOpen ? (
+            <section
+              className={
+                popover?.alignRight
+                  ? 'footer-popover footer-popover-right footer-alerts-popover'
+                  : 'footer-popover footer-alerts-popover'
+              }
+              aria-label={t('footer.alertsTitle')}
+            >
+              <header className="footer-popover-head">
+                <span className="footer-popover-title">{t('footer.alertsTitle')}</span>
+                {onClearWarningHistory ? (
+                  <button
+                    type="button"
+                    className="footer-alerts-clear"
+                    onClick={() => {
+                      onClearWarningHistory();
+                      closePopover();
+                    }}
+                  >
+                    {t('footer.alertsClear')}
+                  </button>
+                ) : null}
+              </header>
+              {warningHistory.length === 0 ? (
+                <p className="footer-popover-note">{t('footer.alertsEmpty')}</p>
+              ) : (
+                <ul className="footer-alerts-list">
+                  {warningHistory.map((entry) => (
+                    <li key={entry.id} className="footer-alert-row">
+                      <span className="footer-alert-time mono">{formatMessageTime(entry.at)}</span>
+                      <span className="footer-alert-msg">{entry.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          ) : null}
+        </div>
+      ) : null}
       {version !== null ? (
         <button
           type="button"

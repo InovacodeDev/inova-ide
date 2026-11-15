@@ -2,6 +2,7 @@ import { CloseIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { queueCountLabel } from './queue-state';
 import type { SessionStatus } from './session-status';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import type { Tab } from './tabs';
 
 interface TabBarProps {
@@ -15,8 +16,22 @@ interface TabBarProps {
 
 export function TabBar(props: TabBarProps) {
   const { tabs, active, statusOf, queuedCountOf, onActivate, onClose } = props;
+  const tabIds = tabs.map((tab) => tab.sessionId);
+  const focusableId = tabIds.includes(active ?? '') ? active : (tabIds[0] ?? null);
   return (
-    <div className="tab-bar" role="tablist" aria-label="Sessões abertas">
+    <div
+      className="tab-bar"
+      role="tablist"
+      aria-label="Sessões abertas"
+      onKeyDown={(event) =>
+        handleHorizontalTabListKeyDown({
+          event,
+          ids: tabIds,
+          activeId: focusableId,
+          onSelect: onActivate,
+        })
+      }
+    >
       {tabs.map((tab) => {
         const selected = tab.sessionId === active;
         const queuedCount = queuedCountOf?.(tab.sessionId) ?? 0;
@@ -29,6 +44,7 @@ export function TabBar(props: TabBarProps) {
               type="button"
               role="tab"
               aria-selected={selected}
+              tabIndex={tab.sessionId === focusableId ? 0 : -1}
               className="tab-bar-select"
               data-tooltip={tab.title}
               onClick={() => onActivate(tab.sessionId)}

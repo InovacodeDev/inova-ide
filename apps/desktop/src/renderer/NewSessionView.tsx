@@ -6,6 +6,8 @@ import { PROVIDER_ORDER } from './footer-state';
 import { PlatformSelect } from './PlatformSelect';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_BINARY, PROVIDER_NAME, accountDisplayName } from './provider-meta';
+import { isMacPlatform } from './shortcuts';
+import { useI18n } from './I18nContext';
 import './views-forms.css';
 
 export type NewSessionTarget =
@@ -33,6 +35,7 @@ function baseName(path: string): string {
 
 export function NewSessionView(props: NewSessionViewProps) {
   const { accounts, projects, onPickFolder, onStart, onCancel, onManageAccounts } = props;
+  const { t } = useI18n();
   const [choice, setChoice] = useState<string>(projects[0]?.id ?? OTHER_FOLDER);
   const [folderPath, setFolderPath] = useState<string | null>(null);
   const [pickedProvider, setPickedProvider] = useState<ProviderId | null>(null);
@@ -174,6 +177,9 @@ export function NewSessionView(props: NewSessionViewProps) {
 
         <div className="new-session-group" role="radiogroup" aria-label="Provider">
           <span className="section-label">Provider</span>
+          {project !== null ? (
+            <p className="new-session-lock-note">{t('newSession.projectInheritHint')}</p>
+          ) : null}
           <div className="new-session-providers">
             {providers.map((id) => (
               <button
@@ -212,7 +218,7 @@ export function NewSessionView(props: NewSessionViewProps) {
 
         <div className="new-session-group">
           <label htmlFor="new-session-prompt" className="section-label">
-            Primeira mensagem (opcional)
+            {t('newSession.firstMessage')}
           </label>
           <textarea
             id="new-session-prompt"
@@ -231,20 +237,20 @@ export function NewSessionView(props: NewSessionViewProps) {
               checked={isolatedWorktree}
               onChange={(e) => setIsolatedWorktreeOverride(e.target.checked)}
             />
-            <span>Isolar sessão em Git worktree</span>
+            <span>{t('newSession.worktree')}</span>
           </label>
         </div>
 
         <div className="new-session-footer">
           <button type="button" className="btn" onClick={onCancel}>
-            Cancelar
+            {t('common.cancel')}
           </button>
           <button
             type="submit"
             className="btn btn-primary"
             disabled={target === null || submitting}
           >
-            Iniciar sessão <kbd>⌘↵</kbd>
+            {t('newSession.start')} <kbd>{isMacPlatform(navigator.platform) ? '⌘↵' : 'Ctrl+↵'}</kbd>
           </button>
         </div>
       </form>

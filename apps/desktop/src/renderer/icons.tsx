@@ -1,5 +1,7 @@
 import { Archive } from 'pulsoicon-react/icons/archive';
+import { Bell } from 'pulsoicon-react/icons/bell';
 import { CodeXml } from 'pulsoicon-react/icons/code-xml';
+import { Ellipsis } from 'pulsoicon-react/icons/ellipsis';
 import { FileText } from 'pulsoicon-react/icons/file-text';
 import { Image } from 'pulsoicon-react/icons/image';
 import { Italic } from 'pulsoicon-react/icons/italic';
@@ -347,4 +349,12 @@ export function CodeBlockIcon({ size = 16 }: IconProps) {
 
 export function DividerIcon({ size = 16 }: IconProps) {
   return <Minus size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function EllipsisIcon({ size = 16 }: IconProps) {
+  return <Ellipsis size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function BellIcon({ size = 16 }: IconProps) {
+  return <Bell size={size} strokeWidth={1.8} aria-hidden="true" />;
 }

@@ -6,6 +6,22 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Base de internacionalização (`pt-BR` e `en-US`) em `Settings['appearance'].locale` (`auto`, `pt-BR`, `en-US`) com seletor na aba Aparência, detecção por idioma do sistema e sincronização de `document.documentElement.lang`.
+- Toggle `Aa` na barra de busca para alternar diferenciação de maiúsculas/minúsculas.
+- Alerta de failover automático com escolha explícita entre migrar para o novo modelo ou permanecer no modelo atual.
+- Modais de confirmação antes de reverter alterações de trabalho e antes de limpar worktrees.
+- Cartões de ferramenta (`ToolCard`) expansíveis também na visão de comparação lado a lado (`CompareView`).
+- Histórico dos últimos 20 alertas no rodapé (`Footer`) com popover datado e ação de limpeza.
+- Seção recolhível `Memória fixada` com badge `Definida` no inspetor da sessão (`SessionDetails`).
+- Menus `⋯` sempre visíveis e navegáveis por teclado para ações de projetos e sessões na barra lateral (`Sidebar`).
+
+### Corrigido
+
+- Acessibilidade de teclado em modais (`useDialogFocus` com foco inicial e retorno de foco), `tablist` horizontais e `PlatformSelect`.
+- Contraste de badges (`--on-accent`), legibilidade tipográfica mínima (`11px`), tokens de sombra/tooltip e suporte a `prefers-reduced-motion: reduce`.
+
 ## [0.7.2] - 2026-11-15
 
 ### Corrigido

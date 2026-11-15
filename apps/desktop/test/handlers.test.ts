@@ -14,13 +14,13 @@ import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore, saveStore } from '@inova/core/store';
-import type { ProviderId, Session, Store } from '@inova/core/types';
+import type { ProviderId, Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
 import type { HandlerDeps } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
-import type { LoginEvent, Result } from '../src/shared/api.js';
+import type { FailoverEvent, LoginEvent, Result } from '../src/shared/api.js';
 
 const INVALID = { ok: false, message: 'Entrada inválida.' };
 const tmpDirs: string[] = [];
@@ -64,7 +64,7 @@ async function setup(
   const idleListeners: ((accountId: string) => void)[] = [];
   const pausedSnapshots: string[][] = [];
   const emitted: { sessionId: string; event: ChatEvent }[] = [];
-  const failoverEvents: { session: Session; rollbackLastTurn: boolean }[] = [];
+  const failoverEvents: FailoverEvent[] = [];
   const loginEvents: LoginEvent[] = [];
   const send = vi.fn<ChatRunner['send']>();
   const cancel = vi.fn<ChatRunner['cancel']>();
@@ -3029,6 +3029,8 @@ test('rateLimitFailover same-provider rolls back failed turn, fails over with ha
 
   expect(failoverEvents).toHaveLength(1);
   expect(failoverEvents[0]?.rollbackLastTurn).toBe(true);
+  expect(failoverEvents[0]?.fromAccountId).toBe(pessoal.id);
+  expect(failoverEvents[0]?.toAccountId).toBe(trabalho.id);
   expect(failoverEvents[0]?.session.accountIdOverride).toBe(trabalho.id);
   expect(
     unwrap(await handlers.listInbox()).some(

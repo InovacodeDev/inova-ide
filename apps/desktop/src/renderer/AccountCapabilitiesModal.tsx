@@ -7,6 +7,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { CloseIcon } from './icons';
 import { PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { capabilityKey, useCapabilities } from './useCapabilities';
+import { useDialogFocus } from './useDialogFocus';
 import type { WarningCall } from './useWarning';
 import './modal.css';
 import './capabilities.css';
@@ -33,13 +34,7 @@ export function AccountCapabilitiesModal(props: {
 
   const cardRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    cardRef.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, []);
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     if (confirming) return;

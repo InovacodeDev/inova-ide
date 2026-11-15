@@ -1,6 +1,7 @@
 import { loadStore, saveStore, withStoreLock } from './store.js';
 import { isEffortLevel, isEffortSupported } from './models.js';
 import type {
+  LocalePreference,
   ProviderId,
   RateLimitFailoverPolicy,
   Settings,
@@ -28,8 +29,10 @@ export const RATE_LIMIT_FAILOVER_POLICIES: readonly RateLimitFailoverPolicy[] = 
   'any-provider',
 ];
 
+export const LOCALE_PREFERENCES: readonly LocalePreference[] = ['auto', 'pt-BR', 'en-US'];
+
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: 'dark', sidebarCollapsed: false, detailsCollapsed: false },
+  appearance: { theme: 'dark', locale: 'pt-BR', sidebarCollapsed: false, detailsCollapsed: false },
   voice: { language: 'auto', modelId: 'large-v3-turbo-q5_0' },
   sessions: {
     autoArchiveDays: 0,
@@ -84,6 +87,7 @@ const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Secti
   {
     appearance: {
       theme: oneOf(['system', 'dark', 'light']),
+      locale: oneOf(LOCALE_PREFERENCES),
       sidebarCollapsed: isBoolean,
       detailsCollapsed: isBoolean,
     },

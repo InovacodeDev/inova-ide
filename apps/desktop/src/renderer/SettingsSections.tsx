@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Settings, SettingsPatch } from '@inova/core/types';
+import { useI18n } from './I18nContext';
 import { Segmented, SettingGroup, SettingRow, Switch } from './settings-controls';
 import { SHORTCUTS, formatBinding, groupShortcuts } from './shortcuts';
 import type { WarningCall } from './useWarning';
@@ -14,7 +15,7 @@ export function GeneralSection({ call }: { call: WarningCall }) {
     <SettingGroup title="Dados">
       <SettingRow
         title="Pasta de dados"
-        description="Onde o Inova IDE guarda contas, sessões e configurações."
+        description="Onde o InovaIDE guarda contas, sessões e configurações."
       >
         <button
           type="button"
@@ -28,22 +29,36 @@ export function GeneralSection({ call }: { call: WarningCall }) {
   );
 }
 
-const THEME_OPTIONS: { value: Settings['appearance']['theme']; label: string }[] = [
-  { value: 'system', label: 'Sistema' },
-  { value: 'dark', label: 'Escuro' },
-  { value: 'light', label: 'Claro' },
-];
-
 export function AppearanceSection({ settings, onUpdate }: SettingsSectionProps) {
+  const { t } = useI18n();
+  const themeOptions: { value: Settings['appearance']['theme']; label: string }[] = [
+    { value: 'system', label: t('settings.theme.system') },
+    { value: 'dark', label: t('settings.theme.dark') },
+    { value: 'light', label: t('settings.theme.light') },
+  ];
+  const localeOptions: { value: Settings['appearance']['locale']; label: string }[] = [
+    { value: 'auto', label: t('settings.locale.auto') },
+    { value: 'pt-BR', label: t('settings.locale.ptBR') },
+    { value: 'en-US', label: t('settings.locale.enUS') },
+  ];
   return (
     <SettingGroup>
-      <SettingRow title="Tema" description="Sistema segue a aparência do seu computador.">
+      <SettingRow title={t('settings.theme.title')} description={t('settings.theme.desc')}>
         <Segmented
           name="theme"
-          label="Tema"
+          label={t('settings.theme.title')}
           value={settings.appearance.theme}
-          options={THEME_OPTIONS}
+          options={themeOptions}
           onChange={(theme) => onUpdate({ appearance: { theme } })}
+        />
+      </SettingRow>
+      <SettingRow title={t('settings.locale.title')} description={t('settings.locale.desc')}>
+        <Segmented
+          name="locale"
+          label={t('settings.locale.title')}
+          value={settings.appearance.locale}
+          options={localeOptions}
+          onChange={(locale) => onUpdate({ appearance: { locale } })}
         />
       </SettingRow>
     </SettingGroup>
@@ -146,7 +161,7 @@ export function SessionsSection({ settings, onUpdate }: SettingsSectionProps) {
         </SettingRow>
       </SettingGroup>
       <SettingGroup
-        title="Circuit Breaker"
+        title="Proteção contra falhas em loop (Circuit Breaker)"
         description="Interrompe loops de erro e pausa a fila automaticamente antes de consumir sua quota."
       >
         <SettingRow

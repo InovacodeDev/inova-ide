@@ -33,6 +33,7 @@
   --success: #3fb950;
   --success-border: rgba(63, 185, 80, 0.35);
   --scrim: rgba(10, 11, 14, 0.72);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
   --claude: #d9a68c;
   --claude-soft: rgba(217, 166, 140, 0.16);
   --gemini: #7eb0ff;
@@ -87,6 +88,7 @@
   --success: #17722f;
   --success-border: rgba(23, 114, 47, 0.4);
   --scrim: rgba(20, 21, 24, 0.45);
+  --shadow: 0 12px 32px rgba(20, 21, 24, 0.14);
   --claude: #9a5530;
   --claude-soft: rgba(154, 85, 48, 0.14);
   --gemini: #2563c9;
@@ -219,6 +221,11 @@
 .icon-btn:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
+}
+
+.icon-btn-sm {
+  width: 28px;
+  height: 28px;
 }
 
 .btn:disabled,

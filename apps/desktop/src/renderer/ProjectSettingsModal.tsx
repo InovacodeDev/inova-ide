@@ -6,6 +6,7 @@ import { openModalCount } from './modal-layers';
 import { folderName } from './path-name';
 import { addCustomCheck, removeCheck, toggleCheck } from './project-checks';
 import { SettingGroup, SettingRow, Switch } from './settings-controls';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 import './settings.css';
 
@@ -34,13 +35,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
   onCloseRef.current = props.onClose;
   const checks = project.verificationChecks ?? [];
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    cardRef.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, []);
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

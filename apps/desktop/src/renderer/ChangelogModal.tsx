@@ -4,6 +4,7 @@ import { CloseIcon } from './icons';
 import { Markdown } from './Markdown';
 import { openModalCount } from './modal-layers';
 import { changelogTitle, publishedChangelog } from './update-state';
+import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
 import './update.css';
 
@@ -20,13 +21,7 @@ export function ChangelogModal({ version, whatsNew, onClose }: ChangelogModalPro
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useEffect(() => {
-    const previous = document.activeElement;
-    cardRef.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement) previous.focus();
-    };
-  }, []);
+  useDialogFocus(cardRef);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

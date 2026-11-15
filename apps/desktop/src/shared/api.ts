@@ -155,6 +155,13 @@ export interface StartedLogin {
   provider: ProviderId;
 }
 
+export interface FailoverEvent {
+  session: Session;
+  rollbackLastTurn: boolean;
+  fromAccountId?: string;
+  toAccountId?: string;
+}
+
 export interface InovaApi {
   listAccounts(): Promise<Result<AccountView[]>>;
   addAccount(input: { provider: string; label: string }): Promise<Result<AccountView>>;
@@ -332,7 +339,7 @@ export interface InovaApi {
   onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
   onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
   onQueuePausedEvent(cb: (sessionIds: string[]) => void): () => void;
-  onFailoverEvent(cb: (e: { session: Session; rollbackLastTurn: boolean }) => void): () => void;
+  onFailoverEvent(cb: (e: FailoverEvent) => void): () => void;
   startLogin(input: { accountLabel: string }): Promise<Result<StartedLogin>>;
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
   cancelLogin(sessionId: string): void;

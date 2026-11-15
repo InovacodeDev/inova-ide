@@ -28,9 +28,11 @@ import {
   ShieldCheckIcon,
   SwitchIcon,
 } from './icons';
+import { useI18n } from './I18nContext';
 import { inspectorTabs, subagentSummaryCounts, type InspectorTabId } from './inspector-state';
 import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_NAME } from './provider-meta';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import { contextLabel, formatTokens } from './token-format';
 import { useContextBreakdown } from './useContextBreakdown';
 import { useSessionGitStatus } from './useSessionGitStatus';
@@ -328,7 +330,7 @@ interface SessionDetailsProps {
   gitRevision?: number;
   onInspectWorktree?: (initialFilePath?: string) => void;
   onApplyWorktree?: () => void;
-  onRevertFiles?: (files: string[]) => Promise<boolean>;
+  onRevertFiles?: (files: string[]) => Promise<boolean> | void;
   onReviewDiff?: () => void;
   reviewBusy?: boolean;
   onHandoff?: () => void;
@@ -376,8 +378,11 @@ export function SessionDetails({
   onSaveProjectPinnedMemory,
   onSaveSessionPinnedMemory,
 }: SessionDetailsProps) {
+  const { t } = useI18n();
   const contextSummary = contextLabel(context);
+  const hasPinnedMemory = Boolean(sessionPinnedMemory?.trim() || projectPinnedMemory?.trim());
   const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [pinnedMemoryOpen, setPinnedMemoryOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<InspectorTabId>('context');
   const gitStatus = useSessionGitStatus({
     sessionId,
@@ -409,13 +414,26 @@ export function SessionDetails({
   return (
     <aside className="session-details" aria-label="Detalhes da sessão">
       <div className="session-details-top">
-        <div className="session-details-tabs" role="tablist" aria-label="Abas do inspetor">
+        <div
+          className="session-details-tabs"
+          role="tablist"
+          aria-label="Abas do inspetor"
+          onKeyDown={(event) =>
+            handleHorizontalTabListKeyDown({
+              event,
+              ids: tabs.map((tab) => tab.id),
+              activeId: activeTab,
+              onSelect: setActiveTab,
+            })
+          }
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               role="tab"
               aria-selected={activeTab === tab.id}
+              tabIndex={activeTab === tab.id ? 0 : -1}
               className={
                 activeTab === tab.id ? 'session-details-tab active' : 'session-details-tab'
               }
@@ -473,26 +491,48 @@ export function SessionDetails({
               turnUsages={turnUsages}
             />
             {onSaveSessionPinnedMemory || onSaveProjectPinnedMemory ? (
-              <div className="pinned-memory-group">
-                {onSaveSessionPinnedMemory ? (
-                  <PinnedMemoryField
-                    key={`session:${sessionId}:${sessionPinnedMemory ?? ''}`}
-                    title="Memória da sessão"
-                    placeholder="Regras ou notas fixadas para esta sessão (ou use /pin no chat)..."
-                    value={sessionPinnedMemory}
-                    disabled={pinnedMemoryDisabled}
-                    onSave={onSaveSessionPinnedMemory}
-                  />
-                ) : null}
-                {onSaveProjectPinnedMemory ? (
-                  <PinnedMemoryField
-                    key={`project:${path ?? ''}:${projectPinnedMemory ?? ''}`}
-                    title="Memória do projeto"
-                    placeholder="Convenções, arquitetura ou restrições aplicadas a todas as sessões deste projeto..."
-                    value={projectPinnedMemory}
-                    disabled={pinnedMemoryDisabled}
-                    onSave={onSaveProjectPinnedMemory}
-                  />
+              <div className="pinned-memory-section">
+                <button
+                  type="button"
+                  className="context-breakdown-toggle pinned-memory-toggle"
+                  aria-expanded={pinnedMemoryOpen}
+                  onClick={() => setPinnedMemoryOpen((open) => !open)}
+                >
+                  {pinnedMemoryOpen ? (
+                    <ChevronDownIcon size={13} />
+                  ) : (
+                    <ChevronRightIcon size={13} />
+                  )}
+                  <span>{t('details.pinnedMemory')}</span>
+                  {hasPinnedMemory ? (
+                    <span className="session-details-tab-badge">
+                      {t('details.pinnedMemoryConfigured')}
+                    </span>
+                  ) : null}
+                </button>
+                {pinnedMemoryOpen ? (
+                  <div className="pinned-memory-group">
+                    {onSaveSessionPinnedMemory ? (
+                      <PinnedMemoryField
+                        key={`session:${sessionId}:${sessionPinnedMemory ?? ''}`}
+                        title="Memória da sessão"
+                        placeholder="Regras ou notas fixadas para esta sessão (ou use /pin no chat)..."
+                        value={sessionPinnedMemory}
+                        disabled={pinnedMemoryDisabled}
+                        onSave={onSaveSessionPinnedMemory}
+                      />
+                    ) : null}
+                    {onSaveProjectPinnedMemory ? (
+                      <PinnedMemoryField
+                        key={`project:${path ?? ''}:${projectPinnedMemory ?? ''}`}
+                        title="Memória do projeto"
+                        placeholder="Convenções, arquitetura ou restrições aplicadas a todas as sessões deste projeto..."
+                        value={projectPinnedMemory}
+                        disabled={pinnedMemoryDisabled}
+                        onSave={onSaveProjectPinnedMemory}
+                      />
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ) : null}

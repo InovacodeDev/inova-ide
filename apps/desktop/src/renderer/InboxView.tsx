@@ -4,6 +4,7 @@ import { InboxIcon } from './icons';
 import { filterInbox, inboxFilterCounts, unreadInboxCount, type InboxFilter } from './inbox-state';
 import { ProviderBadge } from './ProviderBadge';
 import { relativeTime } from './relative-time';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
 
 interface InboxViewProps {
   ref?: Ref<HTMLElement>;
@@ -48,13 +49,26 @@ export function InboxView({ ref, items, onOpenItem, onClearRead }: InboxViewProp
       </div>
       {items.length > 0 ? (
         <>
-          <div className="inbox-filters" role="tablist" aria-label="Filtro da caixa de entrada">
+          <div
+            className="inbox-filters"
+            role="tablist"
+            aria-label="Filtro da caixa de entrada"
+            onKeyDown={(event) =>
+              handleHorizontalTabListKeyDown({
+                event,
+                ids: FILTER_OPTIONS.map((option) => option.id),
+                activeId: filter,
+                onSelect: setFilter,
+              })
+            }
+          >
             {FILTER_OPTIONS.map((option) => (
               <button
                 key={option.id}
                 type="button"
                 role="tab"
                 aria-selected={filter === option.id}
+                tabIndex={filter === option.id ? 0 : -1}
                 className={filter === option.id ? 'inbox-filter active' : 'inbox-filter'}
                 onClick={() => setFilter(option.id)}
               >
