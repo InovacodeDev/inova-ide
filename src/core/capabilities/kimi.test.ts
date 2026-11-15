@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { kimiCapabilities } from './kimi.js';
 import type { CapabilityContext } from './types.js';
+
+const SKILL_REASON = 'Kimi não permite desligar skills uma a uma.';
+const PLUGIN_REASON = 'Kimi só desliga plugins dentro da sessão (/plugins disable).';
 
 async function withAccountDir(
   run: (ctx: CapabilityContext) => Promise<void>,
@@ -59,6 +62,33 @@ describe('kimiCapabilities.list', () => {
       expect((await categoryOf(ctx, 'mcp'))?.error).toBe('O mcp.json do Kimi é inválido.');
     }, '{oops');
   });
+
+  it('lists skills as unsupported', async () => {
+    await withAccountDir(async (ctx) => {
+      await mkdir(join(ctx.account.homeDir, 'skills', 'review'), { recursive: true });
+      await writeFile(join(ctx.account.homeDir, 'skills', 'review', 'SKILL.md'), '# x');
+      const items = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(items.map((item) => [item.id, item.applyMode, item.unsupportedReason])).toEqual([
+        ['review', 'unsupported', SKILL_REASON],
+      ]);
+    });
+  });
+
+  it('lists plugins from installed.json as unsupported and ignores unreadable shapes', async () => {
+    await withAccountDir(async (ctx) => {
+      expect((await categoryOf(ctx, 'plugin'))?.items).toEqual([]);
+      await mkdir(join(ctx.account.homeDir, 'plugins'), { recursive: true });
+      const file = join(ctx.account.homeDir, 'plugins', 'installed.json');
+      await writeFile(file, '["alpha", {"name":"beta"}, 3]');
+      const items = (await categoryOf(ctx, 'plugin'))?.items ?? [];
+      expect(items.map((item) => [item.id, item.applyMode, item.unsupportedReason])).toEqual([
+        ['alpha', 'unsupported', PLUGIN_REASON],
+        ['beta', 'unsupported', PLUGIN_REASON],
+      ]);
+      await writeFile(file, '{oops');
+      expect((await categoryOf(ctx, 'plugin'))?.items).toEqual([]);
+    });
+  });
 });
 
 describe('kimiCapabilities.setEnabled', () => {
@@ -71,6 +101,16 @@ describe('kimiCapabilities.setEnabled', () => {
       await kimiCapabilities.setEnabled({ ctx, ref: { kind: 'mcp', id: 'search' }, enabled: true });
       const on = JSON.parse(await readFile(file, 'utf8'));
       expect(on.mcpServers.search).toEqual({ command: 'search-mcp' });
+    });
+  });
+
+  it('rejects skills and plugins', async () => {
+    await withAccountDir(async (ctx) => {
+      for (const kind of ['skill', 'plugin'] as const) {
+        await expect(
+          kimiCapabilities.setEnabled({ ctx, ref: { kind, id: 'x' }, enabled: false }),
+        ).rejects.toThrow('Kimi não suporta desligar este item.');
+      }
     });
   });
 
