@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.7.1] - 2026-11-15
+
 ### Corrigido
 
 - Abas do modal "Configurar conta" (`Skills`, `Conectores`, `Plugins`) agora permanecem em uma linha única com rolagem horizontal quando necessário, alinhadas ao campo de filtro.
