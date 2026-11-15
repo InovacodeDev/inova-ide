@@ -6,6 +6,13 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Engrenagem em cada conta de "Contas e providers". Ela abre um modal para ligar ou desligar skills, MCPs, conectores e plugins da conta.
+- No Claude, cada item mostra o custo em tokens. O modal também mostra o custo real dos MCPs da conta.
+- Cada item indica onde a mudança vale: "Só no Inova", "Na conta" ou "Global".
+- No OpenCode, a mudança pede confirmação. Ela afeta todas as contas OpenCode.
+
 ## [0.6.2] - 2026-11-14
 
 ### Adicionado
