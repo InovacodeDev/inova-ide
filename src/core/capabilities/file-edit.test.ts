@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   backupFile,
   CapabilityFileError,
+  listTomlTables,
+  readTomlArrayMembers,
+  readTomlTableKey,
   serialize,
   setTomlArrayMembership,
   setTomlSkillConfig,
@@ -204,6 +207,38 @@ describe('setTomlArrayMembership', () => {
     expect(() =>
       setTomlArrayMembership({ ...base, toml: bad, member: 'b', present: true }),
     ).toThrow(CapabilityFileError);
+  });
+});
+
+describe('TOML readers', () => {
+  it('lists canonical table paths, including quoted segments with # and ]', () => {
+    const toml = '[a.b]\n["c"]\n[mcp_servers."my#srv"]\n[x."y]z"]\n[[arr]]\n';
+    expect(listTomlTables(toml)).toEqual([
+      ['a', 'b'],
+      ['c'],
+      ['mcp_servers', 'my#srv'],
+      ['x', 'y]z'],
+    ]);
+  });
+
+  it('throws CapabilityFileError on bad escapes and unterminated headers', () => {
+    expect(() => listTomlTables('[a."\\U0001F600"]\n')).toThrow(CapabilityFileError);
+    expect(() => listTomlTables('[a.b\nk = 1\n')).toThrow(CapabilityFileError);
+  });
+
+  it('reads a table key through a quoted header and null when absent', () => {
+    const toml = '["skills"]\nenabled = false # why\n';
+    expect(readTomlTableKey({ toml, table: 'skills', key: 'enabled' })).toBe('false # why');
+    expect(readTomlTableKey({ toml, table: 'skills', key: 'other' })).toBeNull();
+    expect(readTomlTableKey({ toml, table: 'nope', key: 'enabled' })).toBeNull();
+  });
+
+  it('reads array members, including ] inside a member, and rejects other forms', () => {
+    const read = (toml: string) => readTomlArrayMembers({ toml, table: 'skills', key: 'disabled' });
+    expect(read('["skills"]\ndisabled = ["a]b", "c"]\n')).toEqual(['a]b', 'c']);
+    expect(read('[skills]\n')).toEqual([]);
+    expect(() => read('[skills]\ndisabled = [\n"a",\n]\n')).toThrow(CapabilityFileError);
+    expect(() => read('[skills]\ndisabled = ["\\U0001F600"]\n')).toThrow(CapabilityFileError);
   });
 });
 

@@ -190,6 +190,52 @@ function parseQuotedMembers(file: string, items: string): string[] {
   );
 }
 
+function parseArrayValue(input: { table: string; key: string; value: string }): string[] {
+  const single = /^\[(.*)\]\s*(#.*)?$/.exec(input.value);
+  if (!single) {
+    throw new CapabilityFileError(`${input.table}.${input.key}`, 'unsupported array form');
+  }
+  return parseQuotedMembers(input.table, single[1] ?? '');
+}
+
+export function listTomlTables(toml: string): string[][] {
+  const tables: string[][] = [];
+  for (const line of toml.split('\n')) {
+    const path = headerLinePath(line);
+    if (path !== null) {
+      tables.push(tablePathSegments(path));
+    } else if (/^\s*\[(?!\[)/.test(line)) {
+      throw new CapabilityFileError('config', 'malformed table header');
+    }
+  }
+  return tables;
+}
+
+export function readTomlTableKey(input: {
+  toml: string;
+  table: string;
+  key: string;
+}): string | null {
+  const lines = input.toml.split('\n');
+  const section = findSection(lines, input.table);
+  if (!section) return null;
+  const keyPattern = new RegExp(`^\\s*${escapeRegExp(input.key)}\\s*=\\s*(.*)$`);
+  for (let index = section.header + 1; index < section.end; index += 1) {
+    const match = keyPattern.exec(lines[index] ?? '');
+    if (match) return (match[1] ?? '').trim();
+  }
+  return null;
+}
+
+export function readTomlArrayMembers(input: {
+  toml: string;
+  table: string;
+  key: string;
+}): string[] {
+  const value = readTomlTableKey(input);
+  return value === null ? [] : parseArrayValue({ ...input, value });
+}
+
 export function setTomlArrayMembership(input: {
   toml: string;
   table: string;
@@ -212,12 +258,7 @@ export function setTomlArrayMembership(input: {
   for (let index = section.header + 1; index < section.end; index += 1) {
     const match = keyPattern.exec(lines[index] ?? '');
     if (!match) continue;
-    const value = (match[2] ?? '').trim();
-    const single = /^\[(.*)\]\s*(#.*)?$/.exec(value);
-    if (!single) {
-      throw new CapabilityFileError(`${input.table}.${input.key}`, 'unsupported array form');
-    }
-    const members = parseQuotedMembers(input.table, single[1] ?? '');
+    const members = parseArrayValue({ ...input, value: (match[2] ?? '').trim() });
     const next = members.filter((entry) => entry !== input.member);
     if (input.present) next.push(input.member);
     lines[index] = `${match[1] ?? ''}${render(next)}`;
