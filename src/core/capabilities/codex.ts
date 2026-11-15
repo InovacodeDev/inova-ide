@@ -25,6 +25,7 @@ const NOT_FOUND_MESSAGE = 'codex não encontrado.';
 const MCP_LIST_FAILED_MESSAGE = 'Não foi possível listar os servidores MCP do Codex.';
 const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do Codex.';
 const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do Codex';
+const NATIVELY_OFF_MESSAGE = 'Este MCP está desligado no config.toml da conta.';
 
 function isDisabled(disabled: readonly CapabilityRef[], ref: CapabilityRef): boolean {
   return disabled.some((entry) => entry.kind === ref.kind && entry.id === ref.id);
@@ -48,6 +49,7 @@ function parseMcpItems(
   return parsed.flatMap((entry: unknown): CapabilityItem[] => {
     if (!isRecord(entry) || typeof entry['name'] !== 'string') return [];
     const id = entry['name'];
+    const nativelyOff = entry['enabled'] === false;
     return [
       {
         kind: 'mcp',
@@ -55,9 +57,9 @@ function parseMcpItems(
         name: id,
         description: null,
         source: 'user',
-        enabled: entry['enabled'] !== false && !isDisabled(disabled, { kind: 'mcp', id }),
-        applyMode: 'launch',
-        unsupportedReason: null,
+        enabled: !nativelyOff && !isDisabled(disabled, { kind: 'mcp', id }),
+        applyMode: nativelyOff ? 'unsupported' : 'launch',
+        unsupportedReason: nativelyOff ? NATIVELY_OFF_MESSAGE : null,
         tokens: null,
         group: null,
       },

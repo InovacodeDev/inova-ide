@@ -58,9 +58,13 @@ describe('codexCapabilities.list', () => {
     expect(category?.error).toBeNull();
     expect(category?.items.map((item) => [item.id, item.enabled, item.applyMode])).toEqual([
       ['docs', true, 'launch'],
-      ['my.server', false, 'launch'],
+      ['my.server', false, 'unsupported'],
       ['search', false, 'launch'],
     ]);
+    expect(category?.items[1]?.unsupportedReason).toBe(
+      'Este MCP está desligado no config.toml da conta.',
+    );
+    expect(category?.items[0]?.unsupportedReason).toBeNull();
   });
 
   it('lists only installed plugins with native enabled state', async () => {
