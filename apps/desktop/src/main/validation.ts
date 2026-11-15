@@ -1,5 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
+import { isCapabilityRef } from '@inova/core/capabilities/types';
+import type { CapabilityKind } from '@inova/core/capabilities/types';
 import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
@@ -580,6 +582,20 @@ export function parseUsageRequest(input: unknown): { accountLabel: string } | un
   return isRecord(input) && isText(input['accountLabel'])
     ? { accountLabel: input['accountLabel'] }
     : undefined;
+}
+
+export function parseCapabilityList(input: unknown): { accountLabel: string } | undefined {
+  return parseUsageRequest(input);
+}
+
+export function parseCapabilityToggle(
+  input: unknown,
+): { accountLabel: string; kind: CapabilityKind; id: string; enabled: boolean } | undefined {
+  if (!isRecord(input) || !isText(input['accountLabel'])) return undefined;
+  const ref: unknown = { kind: input['kind'], id: input['id'] };
+  const enabled = input['enabled'];
+  if (!isCapabilityRef(ref) || typeof enabled !== 'boolean') return undefined;
+  return { accountLabel: input['accountLabel'], kind: ref.kind, id: ref.id, enabled };
 }
 
 const DEFAULT_FILE_SEARCH_LIMIT = 40;

@@ -4,12 +4,20 @@ import {
   mkdir,
   readFile,
   readlink,
-  rename,
   rm,
   symlink,
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
+import {
+  CapabilityFileError,
+  listTomlTables,
+  readTomlTableKey,
+  serialize,
+  tomlTableHeader,
+  writeAtomic,
+} from './capabilities/file-edit.js';
+import { parseMcpItems } from './capabilities/gemini.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
 
@@ -91,13 +99,6 @@ async function readOptionalFile(path: string): Promise<string | null> {
     if (isMissingFile(error)) return null;
     throw error;
   }
-}
-
-async function writeAtomic(file: string, content: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true });
-  const temp = `${file}.inova.tmp`;
-  await writeFile(temp, content, { mode: 0o600 });
-  await rename(temp, file);
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -295,6 +296,15 @@ function stripTomlMcpSections(toml: string): string {
   return kept.join('\n').trimEnd();
 }
 
+function isTomlServerDisabled(toml: string, name: string): boolean {
+  const value = readTomlTableKey({
+    toml,
+    table: tomlTableHeader(['mcp_servers', name]),
+    key: 'enabled',
+  });
+  return value !== null && /^false\b/.test(value);
+}
+
 function formatTomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
 }
@@ -304,6 +314,16 @@ export function formatCodexMcpToml(
   servers: CanonicalMcpMap,
 ): { content: string; incompatible: { name: string; reason: string }[] } {
   const base = stripTomlMcpSections(existingToml);
+  // REGEX: header of the mcp_servers table or of one of its subtables
+  const hasMcpTables = /^\s*\[mcp_servers[.\]]/m.test(existingToml);
+  const disabledNames = new Set(
+    hasMcpTables
+      ? listTomlTables(existingToml)
+          .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
+          .map((segments) => segments[1] ?? '')
+          .filter((name) => isTomlServerDisabled(existingToml, name))
+      : [],
+  );
   const blocks: string[] = [];
   const incompatible: { name: string; reason: string }[] = [];
 
@@ -325,6 +345,7 @@ export function formatCodexMcpToml(
           .join(', ');
         lines.push(`http_headers = { ${pairs} }`);
       }
+      if (disabledNames.has(name)) lines.push('enabled = false');
       blocks.push(lines.join('\n'));
       continue;
     }
@@ -333,6 +354,7 @@ export function formatCodexMcpToml(
     if (server.args && server.args.length > 0) {
       lines.push(`args = [${server.args.map((arg) => JSON.stringify(arg)).join(', ')}]`);
     }
+    if (disabledNames.has(name)) lines.push('enabled = false');
     if (server.env && Object.keys(server.env).length > 0) {
       lines.push('', `[mcp_servers.${key}.env]`);
       for (const [ek, ev] of Object.entries(server.env)) {
@@ -402,6 +424,15 @@ export function mergeOpencodeMcpJson(
   return { content: `${JSON.stringify(rootObj, null, 2)}\n`, incompatible };
 }
 
+function preservedDisabledKeys(entry: unknown): { enabled?: false; disabled?: true } {
+  if (typeof entry !== 'object' || entry === null) return {};
+  const record = entry as Record<string, unknown>;
+  return {
+    ...(record['enabled'] === false ? { enabled: false as const } : {}),
+    ...(record['disabled'] === true ? { disabled: true as const } : {}),
+  };
+}
+
 export function mergeMcpServersJson(
   existingJson: string,
   servers: CanonicalMcpMap,
@@ -415,7 +446,7 @@ export function mergeMcpServersJson(
       ? { ...(rootObj['mcpServers'] as Record<string, unknown>) }
       : {};
   for (const [name, server] of Object.entries(servers)) {
-    existing[name] = server;
+    existing[name] = { ...server, ...preservedDisabledKeys(existing[name]) };
   }
   rootObj['mcpServers'] = existing;
   return `${JSON.stringify(rootObj, null, 2)}\n`;
@@ -516,7 +547,28 @@ async function planAccountMcpTarget(input: {
   if (account.provider === 'codex') {
     const targetPath = join(account.homeDir, 'config.toml');
     const before = (await readOptionalFile(targetPath)) ?? '';
-    const formatted = formatCodexMcpToml(before, servers);
+    let formatted: ReturnType<typeof formatCodexMcpToml>;
+    try {
+      formatted = formatCodexMcpToml(before, servers);
+    } catch (error: unknown) {
+      if (!(error instanceof CapabilityFileError)) throw error;
+      return {
+        rawPath: targetPath,
+        item: {
+          id: `mcp:${account.id}`,
+          scope: 'mcp',
+          provider: account.provider,
+          accountId: account.id,
+          accountLabel: account.label,
+          targetPath,
+          status: 'conflict',
+          reason:
+            'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
+          maskedBefore: maskSecretsInText(before),
+          maskedAfter: maskSecretsInText(before),
+        },
+      };
+    }
     const firstBad = formatted.incompatible[0];
     const status: ProfileSyncStatus =
       firstBad && Object.keys(servers).length === formatted.incompatible.length
@@ -769,6 +821,10 @@ async function backupExistingFile(input: {
   return true;
 }
 
+function writeSerialized(path: string, content: string): Promise<void> {
+  return serialize(path, () => writeAtomic(path, content));
+}
+
 export async function applyProfileSync(input: {
   root: string;
   projectPath: string;
@@ -814,9 +870,19 @@ export async function applyProfileSync(input: {
         skippedIds.push(item.id);
         continue;
       }
-      await backupExistingFile({ targetPath: planned.rawPath, backupDir, index: backupIndex++ });
       const env = { ...(input.baseEnv ?? process.env), HOME: account.homeDir };
+      const listed = await input.runner.run({ command: 'agy', args: ['mcp', 'list'], env });
+      const listedItems =
+        'exitCode' in listed && listed.exitCode === 0 ? parseMcpItems(listed.stdout) : null;
+      if (listedItems === null) {
+        skippedIds.push(item.id);
+        continue;
+      }
+      await backupExistingFile({ targetPath: planned.rawPath, backupDir, index: backupIndex++ });
       let okAll = true;
+      const disabledBefore = new Set(
+        listedItems.filter((mcp) => !mcp.enabled).map((mcp) => mcp.id),
+      );
       for (const [name, server] of Object.entries(servers)) {
         const built = buildAgyMcpAddArgs(name, server);
         if ('incompatibleReason' in built) continue;
@@ -824,6 +890,15 @@ export async function applyProfileSync(input: {
         const result = await input.runner.run({ command: 'agy', args: built.args, env });
         if ('notFound' in result || result.exitCode !== 0) {
           okAll = false;
+          continue;
+        }
+        if (disabledBefore.has(name)) {
+          const disabled = await input.runner.run({
+            command: 'agy',
+            args: ['mcp', 'disable', name],
+            env,
+          });
+          if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
       if (okAll) appliedIds.push(item.id);
@@ -847,13 +922,13 @@ export async function applyProfileSync(input: {
         appliedIds.push(item.id);
         continue;
       } catch {
-        await writeAtomic(planned.rawPath, planned.rawAfter);
+        await writeSerialized(planned.rawPath, planned.rawAfter);
         appliedIds.push(item.id);
         continue;
       }
     }
 
-    await writeAtomic(planned.rawPath, planned.rawAfter);
+    await writeSerialized(planned.rawPath, planned.rawAfter);
     appliedIds.push(item.id);
   }
 

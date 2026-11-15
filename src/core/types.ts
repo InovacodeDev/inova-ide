@@ -1,3 +1,5 @@
+import type { CapabilityRef } from './capabilities/types.js';
+
 export type ProviderId =
   'claude' | 'codex' | 'gemini' | 'deepseek' | 'kimi' | 'grok' | 'qwen' | 'opencode';
 
@@ -11,6 +13,7 @@ export interface Account {
   label: string;
   homeDir: string;
   createdAt: string;
+  disabledCapabilities?: CapabilityRef[];
 }
 
 export interface VerificationCheck {

@@ -1,0 +1,12 @@
+{
+  "theme": "system",
+  "mcp": {
+    "docs": { "type": "remote", "url": "https://example.com/mcp" },
+    "search": { "type": "local", "command": ["search-mcp"], "disabled": true }
+  },
+  "plugins": ["alpha", "-beta", "alpha"],
+  "permissions": [
+    { "action": "skill", "resource": "plan", "effect": "deny" },
+    { "action": "bash", "resource": "*", "effect": "ask" }
+  ]
+}

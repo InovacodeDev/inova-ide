@@ -109,6 +109,11 @@ describe('parseClaudeContextOutput', () => {
   });
 });
 
+test('context args place capability flags before the prompt separator', () => {
+  const args = claudeContextArgs('abc', ['--settings', '{}']);
+  expect(args.slice(-4)).toEqual(['--settings', '{}', '--', '/context']);
+});
+
 test('context args never persist the forked session', () => {
   expect(claudeContextArgs('abc')).toEqual([
     '-p',

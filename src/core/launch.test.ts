@@ -502,3 +502,52 @@ describe('buildLogin', () => {
     });
   });
 });
+
+describe('buildChatTurn with disabled capabilities', () => {
+  const newTurn: ChatTurn = { mode: 'new', sessionId: 's1' };
+  const resumeTurn: ChatTurn = { mode: 'resume', providerSessionId: 'p1' };
+
+  it('puts claude --settings before the prompt separator', () => {
+    const { args } = buildChatTurn({
+      account: {
+        ...claudeAccount,
+        disabledCapabilities: [{ kind: 'connector', id: 'claude.ai Gmail' }],
+      },
+      cwd: '/proj',
+      prompt: 'oi',
+      turn: newTurn,
+      baseEnv: {},
+    });
+    const settings = args.indexOf('--settings');
+    expect(settings).toBeGreaterThan(-1);
+    expect(settings).toBeLessThan(args.indexOf('--'));
+    expect(args.slice(-2)).toEqual(['--', 'oi']);
+  });
+
+  it('puts codex -c flags before the prompt for exec and exec resume', () => {
+    const account: Account = {
+      ...claudeAccount,
+      provider: 'codex',
+      homeDir: '/h/codex',
+      disabledCapabilities: [{ kind: 'mcp', id: 'x' }],
+    };
+    for (const turn of [newTurn, resumeTurn]) {
+      const { args } = buildChatTurn({ account, cwd: '/proj', prompt: '-oi', turn, baseEnv: {} });
+      const flag = args.indexOf('mcp_servers.x.enabled=false');
+      expect(args[flag - 1]).toBe('-c');
+      expect(flag).toBeLessThan(args.indexOf('--'));
+      expect(args.slice(-2)).toEqual(['--', '-oi']);
+    }
+  });
+
+  it('adds no settings flag without disabled capabilities', () => {
+    const { args } = buildChatTurn({
+      account: claudeAccount,
+      cwd: '/proj',
+      prompt: 'oi',
+      turn: newTurn,
+      baseEnv: {},
+    });
+    expect(args).not.toContain('--settings');
+  });
+});

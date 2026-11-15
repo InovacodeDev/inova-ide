@@ -1,0 +1,135 @@
+.capabilities-card {
+  width: min(640px, 100%);
+  max-height: min(680px, 100%);
+}
+
+.capabilities-body {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.capabilities-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.capabilities-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.capabilities-tab {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.capabilities-tab:hover {
+  color: var(--text);
+}
+
+.capabilities-tab[aria-selected='true'] {
+  color: var(--text);
+  border-color: var(--border-control);
+  background: var(--surface-2);
+}
+
+.capabilities-filter {
+  width: 150px;
+}
+
+.capabilities-cost {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.capabilities-warning,
+.capabilities-error,
+.capabilities-empty {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.capabilities-warning {
+  color: var(--warn);
+}
+
+.capabilities-error {
+  color: var(--error);
+}
+
+.capabilities-empty {
+  padding: 24px 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.capabilities-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.capabilities-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.capabilities-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.capabilities-title {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.capabilities-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capabilities-mode,
+.capabilities-tokens {
+  flex: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.capabilities-tokens {
+  min-width: 48px;
+  text-align: right;
+}
+
+.capabilities-footer {
+  justify-content: flex-start;
+  font-size: 12px;
+  color: var(--muted);
+}

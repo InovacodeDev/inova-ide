@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
+import { AccountError, addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type {
   ChatEvent,
   ContextBreakdown,
@@ -9,6 +9,14 @@ import type {
   UsageWindow,
 } from '@inova/core/chat-types';
 import { createCircuitBreakerTracker } from '@inova/core/circuit-breaker';
+import { CapabilityFileError, serialize } from '@inova/core/capabilities/file-edit';
+import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
+import type {
+  CapabilityAdapter,
+  CapabilityContext,
+  CapabilityListing,
+  CapabilityRef,
+} from '@inova/core/capabilities/types';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
@@ -42,7 +50,7 @@ import {
   sliceTranscriptToTurn,
   truncateTranscriptAtTurn,
 } from '@inova/core/handoff';
-import { buildChatTurn, buildLaunch, buildLogin } from '@inova/core/launch';
+import { buildChatTurn, buildLaunch, buildLogin, isolatedEnv } from '@inova/core/launch';
 import type { ChatTurn, LaunchSpec } from '@inova/core/launch';
 import {
   PROVIDER_MODELS,
@@ -84,7 +92,7 @@ import {
   updateSession,
 } from '@inova/core/sessions';
 import { DEFAULT_SETTINGS, getSettings, updateSettings } from '@inova/core/settings';
-import { loadStore } from '@inova/core/store';
+import { loadStore, saveStore, withStoreLock } from '@inova/core/store';
 import type {
   Account,
   ExecutionMode,
@@ -129,6 +137,8 @@ import {
   parseApplyProfileSync,
   parseAttachmentPick,
   parseBinding,
+  parseCapabilityList,
+  parseCapabilityToggle,
   parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
@@ -181,6 +191,7 @@ export interface HandlerDeps {
   updates?: { current: string; check: () => Promise<Result<UpdateInfo>> };
   installUpdate?: () => Promise<Result<null>>;
   baseEnv: () => Promise<NodeJS.ProcessEnv>;
+  capabilityAdapters?: Record<ProviderId, CapabilityAdapter>;
   pickFolder: () => Promise<string | null>;
   pickAttachments: (kind: AttachmentKind) => Promise<PickedAttachment[]>;
 }
@@ -200,6 +211,29 @@ const NOTIFICATION_TOGGLES = {
   failed: 'failed',
   completed: 'completed',
 } as const satisfies Record<InboxAttentionKind, keyof Settings['notifications']>;
+
+const FILE_ERROR_PREFIX = 'Não foi possível alterar o arquivo de configuração: ';
+const FILE_ERROR_REASONS: Record<string, string> = {
+  'invalid JSON': 'JSON inválido',
+  'JSON root is not an object': 'a raiz do JSON não é um objeto',
+  'table defined inline; cannot edit safely': 'tabela definida em linha, edição insegura',
+  'unsupported string escape': 'escape de texto não suportado',
+  'invalid string': 'texto inválido',
+  'array has members other than double-quoted strings':
+    'lista com itens que não são texto entre aspas duplas',
+  'unsupported array form': 'formato de lista não suportado',
+  'malformed table header': 'cabeçalho de tabela malformado',
+};
+
+function fileErrorMessage(error: Error): string {
+  if (!(error instanceof CapabilityFileError)) {
+    const code: unknown = 'code' in error ? error.code : undefined;
+    return typeof code === 'string'
+      ? `Não foi possível alterar o arquivo de configuração (${code}).`
+      : error.message;
+  }
+  return `${FILE_ERROR_PREFIX}${FILE_ERROR_REASONS[error.reason] ?? 'formato não suportado'}`;
+}
 
 export function isExternalWebUrl(url: string): boolean {
   try {
@@ -288,6 +322,108 @@ export function createHandlers(deps: HandlerDeps) {
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
   const modelsCache = new Map<string, ProviderModels>();
+  const capabilityCache = new Map<string, CapabilityListing>();
+
+  function newBackupRoot(): string {
+    return join(
+      deps.root,
+      'backups',
+      'capabilities',
+      new Date().toISOString().replaceAll(':', '-'),
+    );
+  }
+
+  function capabilityAdapterOf(account: Account): CapabilityAdapter {
+    return (deps.capabilityAdapters ?? capabilityAdapters)[account.provider];
+  }
+
+  async function capabilityContext(input: {
+    account: Account;
+    backupRoot: string;
+  }): Promise<CapabilityContext> {
+    const store = await loadStore(deps.root);
+    const account = store.accounts.find((item) => item.id === input.account.id) ?? input.account;
+    const baseEnv = await deps.baseEnv();
+    await providers[account.provider].prepareLaunch(account.homeDir, baseEnv['HOME']);
+    return {
+      account,
+      runner: deps.runner,
+      env: isolatedEnv(account, baseEnv),
+      projectPath: store.projects.find((item) => item.accountId === account.id)?.path ?? null,
+      backupRoot: input.backupRoot,
+    };
+  }
+
+  async function setLaunchCapability(input: {
+    accountId: string;
+    ref: CapabilityRef;
+    enabled: boolean;
+    connectorIds: string[];
+  }): Promise<void> {
+    const { accountId, ref, enabled, connectorIds } = input;
+    await withStoreLock(deps.root, async () => {
+      const store = await loadStore(deps.root);
+      const account = store.accounts.find((item) => item.id === accountId);
+      if (!account) throw new AccountError('not-found', 'Conta não encontrada.');
+      const isRef = (other: CapabilityRef, target: CapabilityRef): boolean =>
+        other.kind === target.kind && other.id === target.id;
+      let disabled = (account.disabledCapabilities ?? []).filter((other) => !isRef(other, ref));
+      if (!enabled) disabled.push(ref);
+      if (ref.kind === 'connector') {
+        const wildcard: CapabilityRef = { kind: 'connector', id: '*' };
+        const allOff =
+          !enabled &&
+          connectorIds.every((connectorId) =>
+            disabled.some((other) => isRef(other, { kind: 'connector', id: connectorId })),
+          );
+        disabled = disabled.filter((other) => !isRef(other, wildcard));
+        if (allOff) disabled.push(wildcard);
+      }
+      account.disabledCapabilities = disabled;
+      await saveStore(deps.root, store);
+    });
+  }
+
+  async function pruneStaleDisabled(accountId: string, listing: CapabilityListing): Promise<void> {
+    const knownIds = new Map(
+      listing.categories
+        .filter((category) => category.error === null)
+        .map((category) => [category.kind, new Set(category.items.map((item) => item.id))]),
+    );
+    const isStale = (ref: CapabilityRef): boolean => {
+      const ids = knownIds.get(ref.kind);
+      if (ids === undefined) return false;
+      return ref.kind === 'connector' && ref.id === '*' ? ids.size === 0 : !ids.has(ref.id);
+    };
+    await withStoreLock(deps.root, async () => {
+      const store = await loadStore(deps.root);
+      const account = store.accounts.find((item) => item.id === accountId);
+      const disabled = account?.disabledCapabilities ?? [];
+      if (!account || !disabled.some(isStale)) return;
+      account.disabledCapabilities = disabled.filter((ref) => !isStale(ref));
+      await saveStore(deps.root, store);
+    });
+  }
+
+  async function listAccountCapabilities(input: {
+    account: Account;
+    backupRoot: string;
+  }): Promise<CapabilityListing> {
+    const { account, backupRoot } = input;
+    const ctx = await capabilityContext({ account, backupRoot });
+    const fresh = await capabilityAdapterOf(account).list(ctx);
+    await pruneStaleDisabled(account.id, fresh);
+    const previous = capabilityCache.get(account.id);
+    const merged: CapabilityListing = {
+      ...fresh,
+      categories: fresh.categories.map((category) => {
+        const stale = previous?.categories.find((item) => item.kind === category.kind);
+        return category.error !== null && stale ? { ...category, items: stale.items } : category;
+      }),
+    };
+    capabilityCache.set(account.id, merged);
+    return merged;
+  }
   const fileListCache = new Map<string, { list: ProjectFileList; expiresAt: number }>();
   const fileListInflight = new Map<string, Promise<ProjectFileList>>();
   const fileListGen = new Map<string, number>();
@@ -1645,6 +1781,7 @@ export function createHandlers(deps: HandlerDeps) {
           );
           const orphaned = sessionIdsOfProjects(store, projectIds);
           await removeAccount({ root: deps.root, label, force });
+          if (account) capabilityCache.delete(account.id);
           removeSessionsRuntimeState(orphaned);
           await removeTranscripts(orphaned);
           return ok(null);
@@ -2659,7 +2796,7 @@ export function createHandlers(deps: HandlerDeps) {
         const spec = buildLaunch({
           account,
           cwd: effectiveCwd(session, project),
-          args: claudeContextArgs(session.providerSessionId),
+          args: claudeContextArgs(session.providerSessionId, capabilityLaunchArgs(account)),
           baseEnv,
         });
         const result = await deps.runner.run({
@@ -2706,6 +2843,56 @@ export function createHandlers(deps: HandlerDeps) {
           if (error instanceof Error) return ok(fallback);
           throw error;
         }
+      }),
+    listCapabilities: (input: unknown): Promise<Result<CapabilityListing>> =>
+      validated(input, parseCapabilityList, async ({ accountLabel }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        return ok(await listAccountCapabilities({ account, backupRoot: newBackupRoot() }));
+      }),
+    setCapabilityEnabled: (input: unknown): Promise<Result<CapabilityListing>> =>
+      validated(input, parseCapabilityToggle, async ({ accountLabel, kind, id, enabled }) => {
+        const account = requireAccount(await loadStore(deps.root), accountLabel);
+        const backupRoot = newBackupRoot();
+        const listing =
+          capabilityCache.get(account.id) ??
+          (await listAccountCapabilities({ account, backupRoot }));
+        const item = listing.categories
+          .flatMap((category) => category.items)
+          .find((candidate) => candidate.kind === kind && candidate.id === id);
+        if (!item) return fail('Item não encontrado.');
+        if (item.applyMode === 'unsupported') {
+          return fail(item.unsupportedReason ?? 'Item não configurável.');
+        }
+        if (item.applyMode === 'launch') {
+          const current =
+            kind === 'connector' ? await listAccountCapabilities({ account, backupRoot }) : listing;
+          await setLaunchCapability({
+            accountId: account.id,
+            ref: { kind, id },
+            enabled,
+            connectorIds: current.categories
+              .flatMap((category) => category.items)
+              .filter((candidate) => candidate.kind === 'connector')
+              .map((candidate) => candidate.id),
+          });
+          return ok(await listAccountCapabilities({ account, backupRoot }));
+        }
+        const ctx = await capabilityContext({ account, backupRoot });
+        try {
+          await serialize(`capabilities:${account.id}`, () =>
+            capabilityAdapterOf(account).setEnabled({ ctx, ref: { kind, id }, enabled }),
+          );
+        } catch (error: unknown) {
+          if (!(error instanceof Error)) throw error;
+          try {
+            await listAccountCapabilities({ account, backupRoot });
+          } catch (refreshError: unknown) {
+            // NOTE: the original adapter error is the one the user must see; a failed refresh keeps the old cache.
+            if (!(refreshError instanceof Error)) throw refreshError;
+          }
+          return fail(fileErrorMessage(error));
+        }
+        return ok(await listAccountCapabilities({ account, backupRoot }));
       }),
     searchFiles: (input: unknown) =>
       validated(input, parseFileSearch, async ({ projectId, query, limit, sessionId }) => {

@@ -9,7 +9,10 @@ const TOTALS_PATTERN = /^\*\*Tokens:\*\*\s*([^/]+?)\s*\/\s*([^\s(]+)/;
 // REGEX: "**Model:** claude-opus-5-5" captures the model id
 const MODEL_PATTERN = /^\*\*Model:\*\*\s*(\S+)/;
 
-export function claudeContextArgs(providerSessionId: string): string[] {
+export function claudeContextArgs(
+  providerSessionId: string,
+  capabilityArgs: readonly string[] = [],
+): string[] {
   return [
     '-p',
     '--output-format',
@@ -18,6 +21,7 @@ export function claudeContextArgs(providerSessionId: string): string[] {
     providerSessionId,
     '--fork-session',
     '--no-session-persistence',
+    ...capabilityArgs,
     '--',
     '/context',
   ];

@@ -38,9 +38,10 @@ export function SettingRow(props: {
 export function Switch(props: {
   id: string;
   checked: boolean;
+  disabled?: boolean;
   onChange: (checked: boolean) => void;
 }) {
-  const { id, checked, onChange } = props;
+  const { id, checked, disabled = false, onChange } = props;
   return (
     <input
       id={id}
@@ -48,6 +49,7 @@ export function Switch(props: {
       role="switch"
       className="switch"
       checked={checked}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.checked)}
     />
   );

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "docs": { "command": "npx", "args": ["-y", "docs-server"] },
+    "search": { "httpUrl": "https://example.com/mcp" }
+  },
+  "mcp": { "excluded": ["search"] },
+  "skills": { "disabled": ["review"] }
+}

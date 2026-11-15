@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
-import { AlertIcon, CheckIcon, ChevronRightIcon, PlusIcon, RefreshIcon, TrashIcon } from './icons';
+import { AccountCapabilitiesModal } from './AccountCapabilitiesModal';
+import {
+  AlertIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  PlusIcon,
+  RefreshIcon,
+  SettingsIcon,
+  TrashIcon,
+} from './icons';
 import {
   PROVIDER_ORDER,
   formatResetDateTime,
@@ -19,6 +28,7 @@ import { ProviderBadge } from './ProviderBadge';
 import { PROVIDER_BINARY, PROVIDER_NAME, accountDisplayName } from './provider-meta';
 import { relativeTime } from './relative-time';
 import { STATUS_TEXT, type UsageState } from './UsageBar';
+import type { WarningCall } from './useWarning';
 import './views-forms.css';
 
 export interface AccountsViewProps {
@@ -26,6 +36,7 @@ export interface AccountsViewProps {
   projects: ProjectView[];
   usage: Record<string, UsageState>;
   loggingInLabel?: string | null;
+  call: WarningCall;
   onLoadUsage: (account: AccountView) => void;
   onLogin: (account: AccountView) => void;
   onRemove: (account: AccountView) => void;
@@ -177,12 +188,14 @@ export function AccountsView(props: AccountsViewProps) {
     projects,
     usage,
     loggingInLabel = null,
+    call,
     onLoadUsage,
     onLogin,
     onRemove,
     onAddAccount,
   } = props;
   const [adding, setAdding] = useState(false);
+  const [configuring, setConfiguring] = useState<AccountView | null>(null);
   const loadRef = useRef(onLoadUsage);
   loadRef.current = onLoadUsage;
 
@@ -338,6 +351,15 @@ export function AccountsView(props: AccountsViewProps) {
                             <button
                               type="button"
                               className="icon-btn"
+                              aria-label="Configurar skills, MCPs e plugins da conta"
+                              data-tooltip="Configurar skills, MCPs e plugins"
+                              onClick={() => setConfiguring(account)}
+                            >
+                              <SettingsIcon size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
                               aria-label={`Deslogar e remover conta ${display}`}
                               data-tooltip="Deslogar e remover conta"
                               onClick={() => onRemove(account)}
@@ -355,6 +377,14 @@ export function AccountsView(props: AccountsViewProps) {
           </div>
         )}
       </div>
+      {configuring ? (
+        <AccountCapabilitiesModal
+          key={configuring.label}
+          account={configuring}
+          call={call}
+          onClose={() => setConfiguring(null)}
+        />
+      ) : null}
     </div>
   );
 }

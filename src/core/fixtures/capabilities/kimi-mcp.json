@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "docs": { "url": "https://example.com/mcp" },
+    "search": { "command": "search-mcp", "enabled": false }
+  }
+}

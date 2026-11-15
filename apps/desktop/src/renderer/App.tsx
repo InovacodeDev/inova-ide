@@ -1556,6 +1556,7 @@ export function App() {
               accounts={accounts}
               projects={projects}
               usage={usage}
+              call={call}
               loggingInLabel={
                 loginModal &&
                 (loginModal.stage === 'starting' ||

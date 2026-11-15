@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { serialize } from './capabilities/file-edit.js';
 import type { CommandRunner } from './providers.js';
 import {
   applyProfileSync,
@@ -18,6 +19,7 @@ import {
   buildClaudeMcpAddJsonArgs,
   formatCodexMcpToml,
   maskSecretsInText,
+  mergeMcpServersJson,
   mergeOpencodeMcpJson,
   previewProfileSync,
 } from './profile-sync.js';
@@ -220,6 +222,40 @@ describe('profile-sync helpers', () => {
     );
   });
 
+  test('apply waits for a pending capability write on the same file', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const claudeHome = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(claudeHome, '.claude.json'),
+      JSON.stringify({ mcpServers: { github: { command: 'npx', args: ['mcp-github'] } } }),
+    );
+    const configPath = join(codexHome, 'config.toml');
+    await writeFile(configPath, 'model = "gpt-5"\n');
+    const accounts = [
+      { id: 'acc-claude', provider: 'claude' as const, label: 'claude-1', homeDir: claudeHome },
+      { id: 'acc-codex', provider: 'codex' as const, label: 'codex-1', homeDir: codexHome },
+    ];
+    let release: () => void = () => undefined;
+    const held = serialize(configPath, () => new Promise<void>((resolve) => (release = resolve)));
+
+    const applying = applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      sourceAccountId: 'acc-claude',
+      approvedIds: ['mcp:acc-codex'],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await readFile(configPath, 'utf8')).not.toContain('[mcp_servers.github]');
+
+    release();
+    await held;
+    await applying;
+    expect(await readFile(configPath, 'utf8')).toContain('[mcp_servers.github]');
+  });
+
   test('preview detects conflicts & masks secrets; apply saves timestamped backup, copies/symlinks rules, and runs agy CLI', async () => {
     const root = await tmp();
     const project = await tmp();
@@ -270,7 +306,10 @@ describe('profile-sync helpers', () => {
     expect(codexMcp?.status).toBe('update');
     expect(codexMcp?.maskedAfter).not.toContain('secret-key-999');
 
-    const run = vi.fn<CommandRunner['run']>(async () => ({ exitCode: 0, stdout: 'added' }));
+    const run = vi.fn<CommandRunner['run']>(async (request) => ({
+      exitCode: 0,
+      stdout: request.args.join(' ') === 'mcp list' ? 'NAME  TYPE  STATUS\n' : 'added',
+    }));
     const applied = await applyProfileSync({
       root,
       projectPath: project,
@@ -303,5 +342,174 @@ describe('profile-sync helpers', () => {
 
     const geminiStats = await lstat(join(project, 'GEMINI.md'));
     expect(geminiStats.isFile()).toBe(true);
+  });
+
+  test('mergeMcpServersJson keeps enabled false and disabled true from the destination entry', () => {
+    const existing = JSON.stringify({
+      mcpServers: {
+        a: { command: 'old', enabled: false },
+        b: { command: 'old', disabled: true },
+        c: { command: 'old', enabled: true, disabled: false },
+      },
+    });
+    const merged = JSON.parse(
+      mergeMcpServersJson(existing, {
+        a: { command: 'x' },
+        b: { command: 'y' },
+        c: { command: 'z' },
+      }),
+    ) as { mcpServers: Record<string, unknown> };
+    expect(merged.mcpServers['a']).toEqual({ command: 'x', enabled: false });
+    expect(merged.mcpServers['b']).toEqual({ command: 'y', disabled: true });
+    expect(merged.mcpServers['c']).toEqual({ command: 'z' });
+  });
+
+  test('formatCodexMcpToml keeps an existing enabled = false line on a rewritten table', () => {
+    const existing = [
+      '[mcp_servers.a]',
+      'command = "old"',
+      'enabled = false',
+      '',
+      '[mcp_servers.b]',
+      'command = "old"',
+      'enabled = true',
+      '',
+    ].join('\n');
+    const result = formatCodexMcpToml(existing, {
+      a: { command: 'npx', args: ['-y', 'srv'] },
+      b: { command: 'npx' },
+    });
+    expect(result.content).toContain(
+      '[mcp_servers.a]\ncommand = "npx"\nargs = ["-y", "srv"]\nenabled = false',
+    );
+    expect(result.content).not.toContain('enabled = true');
+    expect(result.content.match(/enabled/g)).toHaveLength(1);
+  });
+
+  test('applyProfileSync disables an agy MCP server again after re-adding it', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const geminiHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' }, b: { command: 'npx' } } }),
+    );
+    const calls: string[] = [];
+    const run = vi.fn<CommandRunner['run']>(async (request) => {
+      const line = request.args.join(' ');
+      calls.push(line);
+      if (line === 'mcp list') {
+        return {
+          exitCode: 0,
+          stdout: 'NAME  TYPE   STATUS\na     stdio  disabled\nb     stdio  enabled\n',
+        };
+      }
+      return { exitCode: 0, stdout: '' };
+    });
+    const accounts = [
+      { id: 'acc-gemini', provider: 'gemini' as const, label: 'g', homeDir: geminiHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+      runner: { run },
+    });
+    const addA = calls.findIndex((call) => call.startsWith('mcp add') && call.includes(' a '));
+    const disableA = calls.indexOf('mcp disable a');
+    expect(addA).toBeGreaterThanOrEqual(0);
+    expect(disableA).toBeGreaterThan(addA);
+    expect(calls).not.toContain('mcp disable b');
+  });
+
+  test.each([
+    ['non-zero exit', { exitCode: 1, stdout: '' }],
+    ['not found', { notFound: true as const }],
+    ['unparseable output', { exitCode: 0, stdout: 'garbage' }],
+  ])('applyProfileSync skips agy remove and add when mcp list fails: %s', async (_label, reply) => {
+    const root = await tmp();
+    const project = await tmp();
+    const geminiHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const calls: string[] = [];
+    const run = vi.fn<CommandRunner['run']>(async (request) => {
+      calls.push(request.args.join(' '));
+      return reply;
+    });
+    const accounts = [
+      { id: 'acc-gemini', provider: 'gemini' as const, label: 'g', homeDir: geminiHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    const applied = await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+      runner: { run },
+    });
+    expect(calls).toEqual(['mcp list']);
+    expect(applied.appliedIds).not.toContain('mcp:acc-gemini');
+    expect(applied.skippedIds).toContain('mcp:acc-gemini');
+  });
+
+  test('codex sync still works on TOML with a multi-line array of arrays and no MCP tables', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const existing = 'matrix = [\n  ["a", "b"],\n  ["c", "d"],\n]\n';
+    await writeFile(join(codexHome, 'config.toml'), existing);
+    const accounts = [
+      { id: 'acc-codex', provider: 'codex' as const, label: 'c', homeDir: codexHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    expect(preview.items.find((item) => item.id === 'mcp:acc-codex')?.status).toBe('update');
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((item) => item.id),
+    });
+    const written = await readFile(join(codexHome, 'config.toml'), 'utf8');
+    expect(written).toContain(existing.trimEnd());
+    expect(written).toContain('[mcp_servers.a]');
+  });
+
+  test('codex plan reports a conflict when the disabled state cannot be read', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const codexHome = await tmp();
+    await writeFile(
+      join(project, '.mcp.json'),
+      JSON.stringify({ mcpServers: { a: { command: 'npx' } } }),
+    );
+    const existing =
+      '[mcp_servers.a]\ncommand = "old"\nenabled = false\n\n[other]\nmatrix = [\n  ["a"],\n]\n';
+    await writeFile(join(codexHome, 'config.toml'), existing);
+    const accounts = [
+      { id: 'acc-codex', provider: 'codex' as const, label: 'c', homeDir: codexHome },
+    ];
+    const preview = await previewProfileSync({ projectPath: project, accounts });
+    const item = preview.items.find((entry) => entry.id === 'mcp:acc-codex');
+    expect(item?.status).toBe('conflict');
+    expect(item?.reason).toBe(
+      'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
+    );
+    const applied = await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      approvedIds: preview.items.map((entry) => entry.id),
+    });
+    expect(applied.skippedIds).toContain('mcp:acc-codex');
+    expect(await readFile(join(codexHome, 'config.toml'), 'utf8')).toBe(existing);
   });
 });

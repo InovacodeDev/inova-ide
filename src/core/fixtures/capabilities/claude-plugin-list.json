@@ -1,0 +1,9 @@
+[
+  {
+    "id": "superpowers@synced",
+    "version": "7.0.2",
+    "scope": "synced",
+    "enabled": true,
+    "installPath": "/home/user/.claude/plugins/synced/superpowers"
+  }
+]

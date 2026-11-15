@@ -1,0 +1,33 @@
+{
+  "installed": [
+    {
+      "pluginId": "github@openai-curated-remote",
+      "name": "github",
+      "marketplaceName": "openai-curated-remote",
+      "version": "0.1.13",
+      "installed": true,
+      "enabled": true,
+      "installPolicy": "AVAILABLE",
+      "authPolicy": "ON_INSTALL"
+    },
+    {
+      "pluginId": "visualize@openai-curated-remote",
+      "name": "visualize",
+      "marketplaceName": "openai-curated-remote",
+      "version": "1.0.89",
+      "installed": true,
+      "enabled": false,
+      "installPolicy": "INSTALLED_BY_DEFAULT",
+      "authPolicy": "ON_USE"
+    }
+  ],
+  "available": [
+    {
+      "pluginId": "other@openai-curated-remote",
+      "name": "other",
+      "marketplaceName": "openai-curated-remote",
+      "installed": false,
+      "enabled": false
+    }
+  ]
+}

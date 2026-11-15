@@ -1,0 +1,17 @@
+model = "grok-4"
+
+[mcp_servers.docs]
+url = "https://example.com/mcp"
+
+[mcp_servers.search]
+command = "search-mcp"
+enabled = false
+
+[mcp_servers.search.env]
+KEY = "placeholder"
+
+[skills]
+disabled = ["plan"]
+
+[plugins]
+disabled = ["tidy"]

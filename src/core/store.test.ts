@@ -80,6 +80,44 @@ describe('store', () => {
     await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
   });
 
+  it('loadStore preserves disabledCapabilities on an account', async () => {
+    const account = {
+      ...goodAccount,
+      disabledCapabilities: [{ kind: 'mcp', id: 'claude.ai Gmail' }],
+    };
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [account], projects: [] }),
+    );
+    const store = await loadStore(root);
+    expect(store.accounts[0]?.disabledCapabilities).toEqual([
+      { kind: 'mcp', id: 'claude.ai Gmail' },
+    ]);
+  });
+
+  it('loadStore accepts an account without disabledCapabilities', async () => {
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [goodAccount], projects: [] }),
+    );
+    const store = await loadStore(root);
+    expect(store.accounts[0]?.disabledCapabilities).toBeUndefined();
+  });
+
+  it.each([
+    ['an unknown kind', [{ kind: 'tool', id: 'x' }]],
+    ['an empty id', [{ kind: 'mcp', id: '' }]],
+    ['a too long id', [{ kind: 'mcp', id: 'x'.repeat(513) }]],
+    ['a non-array value', { kind: 'mcp', id: 'x' }],
+  ])('loadStore rejects an account with disabledCapabilities of %s', async (_name, value) => {
+    const account = { ...goodAccount, disabledCapabilities: value };
+    await writeFile(
+      join(root, 'store.json'),
+      JSON.stringify({ version: 1, accounts: [account], projects: [] }),
+    );
+    await expect(loadStore(root)).rejects.toBeInstanceOf(StoreCorruptError);
+  });
+
   it.each([
     ['a null entry', null],
     ['a non-string path', { id: 'p1', path: 1, accountId: 'a1' }],

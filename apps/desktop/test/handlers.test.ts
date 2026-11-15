@@ -6,13 +6,15 @@ import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
 import type { ChatEvent } from '@inova/core/chat-types';
+import type { CapabilityAdapter, CapabilityItem } from '@inova/core/capabilities/types';
+import { CapabilityFileError } from '@inova/core/capabilities/file-edit';
 import { createCheckpoint } from '@inova/core/git-checkpoints';
 import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
 import { loadStore } from '@inova/core/store';
-import type { Session, Store } from '@inova/core/types';
+import type { ProviderId, Session, Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
@@ -41,7 +43,12 @@ function unwrap<T>(result: Result<T>): T {
 }
 
 async function setup(
-  options: { withBinary?: boolean; home?: string; withOpenPath?: boolean } = {},
+  options: {
+    withBinary?: boolean;
+    home?: string;
+    withOpenPath?: boolean;
+    capabilityAdapters?: HandlerDeps['capabilityAdapters'];
+  } = {},
 ) {
   const root = await tmp();
   const bin = await tmp();
@@ -102,6 +109,9 @@ async function setup(
   const handlers = createHandlers({
     root,
     notify,
+    ...(options.capabilityAdapters === undefined
+      ? {}
+      : { capabilityAdapters: options.capabilityAdapters }),
     ...(options.withOpenPath === false ? {} : { openPath }),
     runner: { run },
     sessions,
@@ -1196,6 +1206,323 @@ test('listModels returns dynamic agy models for gemini, caches them, and falls b
     { id: 'deepseek/deepseek-reasoner', label: 'deepseek-reasoner', description: 'deepseek' },
     { id: 'openai/gpt-5', label: 'gpt-5', description: 'openai' },
   ]);
+});
+
+function capabilityItem(
+  overrides: Partial<CapabilityItem> & Pick<CapabilityItem, 'kind' | 'id'>,
+): CapabilityItem {
+  return {
+    name: overrides.id,
+    description: null,
+    source: 'user',
+    enabled: true,
+    applyMode: 'launch',
+    unsupportedReason: null,
+    tokens: null,
+    group: null,
+    ...overrides,
+  };
+}
+
+function fakeCapabilityAdapters(adapter: CapabilityAdapter): Record<ProviderId, CapabilityAdapter> {
+  return {
+    claude: adapter,
+    codex: adapter,
+    gemini: adapter,
+    qwen: adapter,
+    opencode: adapter,
+    deepseek: adapter,
+    kimi: adapter,
+    grok: adapter,
+  };
+}
+
+test('listCapabilities builds the context, keeps cached items for a failing category, and rejects bad input', async () => {
+  const list = vi.fn<CapabilityAdapter['list']>();
+  const adapter: CapabilityAdapter = {
+    list,
+    launchArgs: () => [],
+    setEnabled: vi.fn(async () => undefined),
+  };
+  const { root, handlers } = await setup({ capabilityAdapters: fakeCapabilityAdapters(adapter) });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const project = await bindProject({ root, path: root, accountLabel: 'cl' });
+  const skill = capabilityItem({ kind: 'skill', id: 'a' });
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'skill', items: [skill], error: null }],
+    cost: null,
+  });
+  const first = unwrap(await handlers.listCapabilities({ accountLabel: 'cl' }));
+  expect(first.categories[0]?.items).toEqual([skill]);
+  const ctx = list.mock.calls[0]?.[0];
+  expect(ctx?.projectPath).toBe(project.path);
+  expect(ctx?.account.label).toBe('cl');
+  expect(ctx?.backupRoot.startsWith(join(root, 'backups', 'capabilities'))).toBe(true);
+  expect(ctx?.backupRoot).not.toContain(':');
+
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'skill', items: [], error: 'falhou' }],
+    cost: null,
+  });
+  const second = unwrap(await handlers.listCapabilities({ accountLabel: 'cl' }));
+  expect(second.categories[0]).toEqual({ kind: 'skill', items: [skill], error: 'falhou' });
+
+  expect(await handlers.listCapabilities({ accountLabel: 'x' })).toEqual({
+    ok: false,
+    message: 'Conta não encontrada: x.',
+  });
+  expect(await handlers.listCapabilities({})).toEqual(INVALID);
+});
+
+function launchModeAdapter(items: CapabilityItem[]): CapabilityAdapter {
+  return {
+    list: async ({ account }) => {
+      const disabled = account.disabledCapabilities ?? [];
+      return {
+        categories: [
+          {
+            kind: 'skill',
+            items: items.map((item) => ({
+              ...item,
+              enabled: !disabled.some(
+                (ref) => ref.kind === item.kind && (ref.id === item.id || ref.id === '*'),
+              ),
+            })),
+            error: null,
+          },
+        ],
+        cost: null,
+      };
+    },
+    launchArgs: () => [],
+    setEnabled: vi.fn(async () => undefined),
+  };
+}
+
+test('setCapabilityEnabled stores launch toggles and the connector wildcard', async () => {
+  const items = [
+    capabilityItem({ kind: 'skill', id: 'a' }),
+    capabilityItem({ kind: 'connector', id: 'c1' }),
+    capabilityItem({ kind: 'connector', id: 'c2' }),
+  ];
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters(launchModeAdapter(items)),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = (kind: 'skill' | 'connector', id: string, enabled: boolean) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind, id, enabled });
+  const stored = async () => (await loadStore(root)).accounts[0]?.disabledCapabilities;
+
+  const off = unwrap(await toggle('skill', 'a', false));
+  expect(off.categories[0]?.items.find((item) => item.id === 'a')?.enabled).toBe(false);
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'a' }]);
+  await toggle('skill', 'a', false);
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'a' }]);
+
+  await toggle('connector', 'c1', false);
+  expect(await stored()).not.toContainEqual({ kind: 'connector', id: '*' });
+  await toggle('connector', 'c2', false);
+  expect(await stored()).toContainEqual({ kind: 'connector', id: '*' });
+  await toggle('connector', 'c1', true);
+  const finalDisabled = await stored();
+  expect(finalDisabled).not.toContainEqual({ kind: 'connector', id: '*' });
+  expect(finalDisabled).not.toContainEqual({ kind: 'connector', id: 'c1' });
+  expect(finalDisabled).toContainEqual({ kind: 'connector', id: 'c2' });
+  expect(await toggle('skill', 'missing', false)).toEqual({
+    ok: false,
+    message: 'Item não encontrado.',
+  });
+});
+
+test('listCapabilities prunes stored disabled refs whose items vanished from a successful category', async () => {
+  const skills = ['a', 'b'].map((id) => capabilityItem({ kind: 'skill', id }));
+  const connectors = ['c1', 'c2'].map((id) => capabilityItem({ kind: 'connector', id }));
+  const full = {
+    categories: [
+      { kind: 'skill' as const, items: skills, error: null },
+      { kind: 'connector' as const, items: connectors, error: null },
+    ],
+    cost: null,
+  };
+  const list = vi.fn<CapabilityAdapter['list']>(async () => full);
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({
+      list,
+      launchArgs: () => [],
+      setEnabled: vi.fn(async () => undefined),
+    }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = (kind: 'skill' | 'connector', id: string) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind, id, enabled: false });
+  for (const [kind, id] of [
+    ['skill', 'a'],
+    ['skill', 'b'],
+    ['connector', 'c1'],
+    ['connector', 'c2'],
+  ] as const) {
+    await toggle(kind, id);
+  }
+  const stored = async () => (await loadStore(root)).accounts[0]?.disabledCapabilities;
+  expect(await stored()).toContainEqual({ kind: 'connector', id: '*' });
+
+  list.mockResolvedValueOnce({
+    categories: [
+      { kind: 'skill', items: [capabilityItem({ kind: 'skill', id: 'b' })], error: null },
+      { kind: 'connector', items: [], error: 'falhou' },
+    ],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([
+    { kind: 'skill', id: 'b' },
+    { kind: 'connector', id: 'c1' },
+    { kind: 'connector', id: 'c2' },
+    { kind: 'connector', id: '*' },
+  ]);
+
+  list.mockResolvedValueOnce({
+    categories: [
+      { kind: 'skill', items: [capabilityItem({ kind: 'skill', id: 'b' })], error: null },
+      { kind: 'connector', items: [capabilityItem({ kind: 'connector', id: 'c2' })], error: null },
+    ],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([
+    { kind: 'skill', id: 'b' },
+    { kind: 'connector', id: 'c2' },
+    { kind: 'connector', id: '*' },
+  ]);
+
+  list.mockResolvedValueOnce({
+    categories: [{ kind: 'connector', items: [], error: null }],
+    cost: null,
+  });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  expect(await stored()).toEqual([{ kind: 'skill', id: 'b' }]);
+});
+
+test('setCapabilityEnabled does not add the wildcard when a connector appeared after the last listing', async () => {
+  const connector = (id: string) => capabilityItem({ kind: 'connector', id });
+  const twoConnectors = {
+    categories: [
+      { kind: 'connector' as const, items: [connector('A'), connector('B')], error: null },
+    ],
+    cost: null,
+  };
+  const list = vi
+    .fn<CapabilityAdapter['list']>()
+    .mockResolvedValueOnce(twoConnectors)
+    .mockResolvedValueOnce(twoConnectors)
+    .mockResolvedValue({
+      categories: [
+        {
+          kind: 'connector',
+          items: [connector('A'), connector('B'), connector('C')],
+          error: null,
+        },
+      ],
+      cost: null,
+    });
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({
+      list,
+      launchArgs: () => [],
+      setEnabled: vi.fn(async () => undefined),
+    }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  const toggle = (id: string) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind: 'connector', id, enabled: false });
+  await toggle('A');
+  await toggle('B');
+  const disabled = (await loadStore(root)).accounts[0]?.disabledCapabilities;
+  expect(disabled).toEqual([
+    { kind: 'connector', id: 'A' },
+    { kind: 'connector', id: 'B' },
+  ]);
+});
+
+test('setCapabilityEnabled translates file errors without paths and survives a failing re-list', async () => {
+  const items = [capabilityItem({ kind: 'mcp', id: 'm', applyMode: 'account-file' })];
+  const listing = { categories: [{ kind: 'mcp' as const, items, error: null }], cost: null };
+  const list = vi.fn<CapabilityAdapter['list']>(async () => listing);
+  const setEnabled = vi.fn<CapabilityAdapter['setEnabled']>();
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({ list, launchArgs: () => [], setEnabled }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const toggle = () =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind: 'mcp', id: 'm', enabled: false });
+  const prefix = 'Não foi possível alterar o arquivo de configuração: ';
+
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/.claude.json', 'invalid JSON'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}JSON inválido` });
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/c.toml', 'something new'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}formato não suportado` });
+  setEnabled.mockRejectedValueOnce(new Error('Mensagem do adaptador'));
+  expect(await toggle()).toEqual({ ok: false, message: 'Mensagem do adaptador' });
+  const eacces = Object.assign(
+    new Error("EACCES: permission denied, open '/home/u/.claude.json'"),
+    {
+      code: 'EACCES',
+    },
+  );
+  setEnabled.mockRejectedValueOnce(eacces);
+  expect(await toggle()).toEqual({
+    ok: false,
+    message: 'Não foi possível alterar o arquivo de configuração (EACCES).',
+  });
+
+  setEnabled.mockRejectedValueOnce(new CapabilityFileError('/home/u/c.toml', 'invalid JSON'));
+  list.mockRejectedValueOnce(new Error('re-list quebrou'));
+  expect(await toggle()).toEqual({ ok: false, message: `${prefix}JSON inválido` });
+});
+
+test('setCapabilityEnabled reports unsupported items and file adapter failures', async () => {
+  const items = [
+    capabilityItem({
+      kind: 'plugin',
+      id: 'p',
+      applyMode: 'unsupported',
+      unsupportedReason: 'Desligue o plugin superpowers',
+    }),
+    capabilityItem({ kind: 'mcp', id: 'm', applyMode: 'account-file' }),
+  ];
+  const setEnabled = vi.fn<CapabilityAdapter['setEnabled']>();
+  const list = vi.fn<CapabilityAdapter['list']>(async () => ({
+    categories: [{ kind: 'mcp', items, error: null }],
+    cost: null,
+  }));
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({ list, launchArgs: () => [], setEnabled }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  const input = { accountLabel: 'cl', enabled: false };
+
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'plugin', id: 'p' })).toEqual({
+    ok: false,
+    message: 'Desligue o plugin superpowers',
+  });
+  expect(setEnabled).not.toHaveBeenCalled();
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'tool', id: 'p' })).toEqual(INVALID);
+
+  setEnabled.mockRejectedValueOnce(new Error('Arquivo inválido'));
+  const listsBefore = list.mock.calls.length;
+  expect(await handlers.setCapabilityEnabled({ ...input, kind: 'mcp', id: 'm' })).toEqual({
+    ok: false,
+    message: 'Arquivo inválido',
+  });
+  expect(list.mock.calls.length).toBe(listsBefore + 1);
+  expect((await loadStore(root)).accounts[0]?.disabledCapabilities).toBeUndefined();
+
+  const success = unwrap(await handlers.setCapabilityEnabled({ ...input, kind: 'mcp', id: 'm' }));
+  expect(setEnabled).toHaveBeenLastCalledWith(
+    expect.objectContaining({ ref: { kind: 'mcp', id: 'm' }, enabled: false }),
+  );
+  expect(success.categories[0]?.items).toHaveLength(2);
 });
 
 test('searchFiles ranks workspace files, caches briefly, and invalidates after turn completion', async () => {

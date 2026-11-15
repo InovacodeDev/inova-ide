@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { capabilityLaunchArgs } from './core/capabilities/index.js';
 import { buildLaunch } from './core/launch.js';
 import { bindProject, realPathOf, resolveProject, unbindProject } from './core/projects.js';
 import { providers } from './core/providers.js';
@@ -36,5 +37,13 @@ export async function runProject(ctx: Context, args: string[]): Promise<number> 
     return 2;
   }
   await providers[account.provider].prepareLaunch(account.homeDir, ctx.env['HOME']);
-  return launch(ctx, buildLaunch({ account, cwd: ctx.cwd, args, baseEnv: ctx.env }));
+  return launch(
+    ctx,
+    buildLaunch({
+      account,
+      cwd: ctx.cwd,
+      args: [...capabilityLaunchArgs(account), ...args],
+      baseEnv: ctx.env,
+    }),
+  );
 }
