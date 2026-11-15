@@ -33,6 +33,11 @@
 }
 
 .agents-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
   height: 32px;
   padding: 0 12px;
   border-radius: var(--radius-pill);
@@ -40,6 +45,7 @@
   background: transparent;
   color: var(--muted);
   font-size: 13px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

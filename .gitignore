@@ -5,6 +5,10 @@ dist
 .claude-flow/
 .superpowers/
 .vitest/
+.codex/
+.cursor/
+.gemini/
+.github/hooks/
 apps/desktop/out
 apps/desktop/resources/whisper/
 release/

@@ -88,6 +88,9 @@
 }
 
 .footer-manage {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
   min-height: 30px;
   margin-left: auto;
   padding: 0 8px;
@@ -95,6 +98,7 @@
   border: 0;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

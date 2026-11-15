@@ -115,6 +115,7 @@
 .footer-version {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: 6px;
   min-height: 30px;
   padding: 0 8px;
@@ -122,6 +123,7 @@
   border: 0;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 

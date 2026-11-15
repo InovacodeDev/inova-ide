@@ -588,6 +588,7 @@
   background: color-mix(in srgb, var(--surface) 60%, transparent);
   color: var(--text-2);
   text-align: left;
+  white-space: normal;
   cursor: pointer;
   display: flex;
   flex-direction: column;

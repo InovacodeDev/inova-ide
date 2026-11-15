@@ -441,6 +441,7 @@
   background: var(--surface);
   color: var(--text);
   text-align: left;
+  white-space: normal;
   cursor: pointer;
 }
 

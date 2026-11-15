@@ -35,6 +35,9 @@
   font-size: 13px;
   font-weight: 500;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings-nav-item:hover {

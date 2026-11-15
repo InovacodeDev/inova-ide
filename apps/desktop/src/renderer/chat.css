@@ -726,12 +726,17 @@
 }
 
 .chat-effort-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
   padding: 4px 9px;
   border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--muted);
   font-size: 11.5px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -1275,6 +1280,7 @@
   background: transparent;
   color: var(--text);
   text-align: left;
+  white-space: normal;
   cursor: pointer;
 }
 
@@ -1899,6 +1905,12 @@
 }
 
 .chat-empty-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);

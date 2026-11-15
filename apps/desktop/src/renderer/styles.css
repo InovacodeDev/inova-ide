@@ -23,6 +23,7 @@ button {
   font: inherit;
   cursor: pointer;
   color: inherit;
+  white-space: nowrap;
 }
 
 input,

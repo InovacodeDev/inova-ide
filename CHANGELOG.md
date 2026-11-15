@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Abas do modal "Configurar conta" (`Skills`, `Conectores`, `Plugins`) agora permanecem em uma linha única com rolagem horizontal quando necessário, alinhadas ao campo de filtro.
+- Padrão global `white-space: nowrap` aplicado aos botões de ação, abas, filtros e pílulas do desktop (`styles.css` e `tokens.css`), mantendo `.btn-multiline` e cartões descritivos isolados.
+
 ## [0.7.0] - 2026-11-15
 
 ### Adicionado

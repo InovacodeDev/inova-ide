@@ -23,8 +23,8 @@ export function CapabilityTabs(props: {
             className="capabilities-tab"
             onClick={() => onSelect(kind)}
           >
-            {label}{' '}
-            <span className="mono">
+            <span>{label}</span>
+            <span className="capabilities-tab-count mono">
               {listing.categories.find((entry) => entry.kind === kind)?.items.length}
             </span>
           </button>
