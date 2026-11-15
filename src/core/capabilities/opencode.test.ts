@@ -51,6 +51,37 @@ async function readConfig(ctx: CapabilityContext) {
   return JSON.parse(await readFile(file, 'utf8'));
 }
 
+describe('opencodeCapabilities skills', () => {
+  it('lists skill folders honoring skill deny permissions', async () => {
+    await withHome(async (ctx) => {
+      const dir = join(ctx.env['HOME'] ?? '', '.config', 'opencode', 'skills');
+      for (const name of ['plan', 'review']) {
+        await mkdir(join(dir, name), { recursive: true });
+        await writeFile(join(dir, name, 'SKILL.md'), '# x');
+      }
+      const items = (await categoryOf(ctx, 'skill'))?.items ?? [];
+      expect(items.map((item) => [item.id, item.enabled, item.applyMode]).sort()).toEqual([
+        ['plan', false, 'global-file'],
+        ['review', true, 'global-file'],
+      ]);
+    });
+  });
+
+  it('adds a deny rule on disable and removes it on enable, keeping other rules', async () => {
+    await withHome(async (ctx) => {
+      await setEnabled(ctx, 'skill', 'review')(false);
+      await setEnabled(ctx, 'skill', 'review')(false);
+      const rule = { action: 'skill', resource: 'review', effect: 'deny' };
+      const bash = { action: 'bash', resource: '*', effect: 'ask' };
+      const plan = { action: 'skill', resource: 'plan', effect: 'deny' };
+      expect((await readConfig(ctx)).permissions).toEqual([plan, bash, rule]);
+      await setEnabled(ctx, 'skill', 'plan')(true);
+      await setEnabled(ctx, 'skill', 'review')(true);
+      expect((await readConfig(ctx)).permissions).toEqual([bash]);
+    });
+  });
+});
+
 describe('opencodeCapabilities plugins', () => {
   it('merges the plugins array and the plugin folder, honoring the - prefix', async () => {
     await withHome(async (ctx) => {

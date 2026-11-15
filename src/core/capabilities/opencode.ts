@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { readIfExists, serialize, updateJsonFile } from './file-edit.js';
-import { baseItem, isRecord, pluginNamesIn } from './shared.js';
+import { baseItem, isRecord, pluginNamesIn, skillsIn } from './shared.js';
 import type {
   CapabilityAdapter,
   CapabilityCategoryResult,
@@ -14,7 +14,8 @@ const NO_HOME_MESSAGE = 'HOME não definido.';
 const INVALID_CONFIG_MESSAGE = 'O opencode.json do OpenCode é inválido.';
 const UNSUPPORTED_KIND_MESSAGE = 'OpenCode não suporta desligar este item.';
 const PLUGIN_LIST_FAILED_MESSAGE = 'Não foi possível listar os plugins do OpenCode';
-const CATEGORY_KINDS = ['mcp', 'plugin'] as const;
+const SKILL_LIST_FAILED_MESSAGE = 'Não foi possível listar as skills do OpenCode';
+const CATEGORY_KINDS = ['skill', 'mcp', 'plugin'] as const;
 
 type Config = Record<string, unknown>;
 
@@ -86,7 +87,56 @@ async function list(ctx: CapabilityContext): Promise<CapabilityListing> {
   const config = await readConfig(dir);
   if (config === null) return failed(INVALID_CONFIG_MESSAGE);
   const mcp: CapabilityCategoryResult = { kind: 'mcp', items: mcpItems(config), error: null };
-  return { categories: [mcp, await pluginCategory({ dir, config })], cost: null };
+  const [skill, plugin] = await Promise.all([
+    skillCategory({ dir, config }),
+    pluginCategory({ dir, config }),
+  ]);
+  return { categories: [skill, mcp, plugin], cost: null };
+}
+
+function isSkillDeny(rule: unknown, id: string): boolean {
+  return (
+    isRecord(rule) &&
+    rule['action'] === 'skill' &&
+    rule['resource'] === id &&
+    rule['effect'] === 'deny'
+  );
+}
+
+function permissionRules(config: Config): unknown[] {
+  const rules: unknown = config['permissions'];
+  return Array.isArray(rules) ? rules : [];
+}
+
+async function skillCategory(input: {
+  dir: string;
+  config: Config;
+}): Promise<CapabilityCategoryResult> {
+  try {
+    const rules = permissionRules(input.config);
+    const skills = await skillsIn(join(input.dir, 'skills'));
+    const items = skills.map((skill) =>
+      globalItem(
+        baseItem({
+          kind: 'skill',
+          id: skill.id,
+          enabled: !rules.some((rule) => isSkillDeny(rule, skill.id)),
+          description: skill.description,
+        }),
+      ),
+    );
+    return { kind: 'skill', items, error: null };
+  } catch (error: unknown) {
+    const code = isRecord(error) ? error['code'] : undefined;
+    if (typeof code !== 'string') throw error;
+    return { kind: 'skill', items: [], error: `${SKILL_LIST_FAILED_MESSAGE} (${code}).` };
+  }
+}
+
+function withSkillDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
+  const rest = permissionRules(input.root).filter((rule) => !isSkillDeny(rule, input.id));
+  const deny = { action: 'skill', resource: input.id, effect: 'deny' };
+  return { ...input.root, permissions: input.enabled ? rest : [...rest, deny] };
 }
 
 function withPluginDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
@@ -109,6 +159,7 @@ function configUpdateFor(input: SetEnabledInput): ((root: Config) => Config) | n
   const { ref, enabled } = input;
   if (ref.kind === 'mcp') return (root) => withMcpDisabled({ root, id: ref.id, enabled });
   if (ref.kind === 'plugin') return (root) => withPluginDisabled({ root, id: ref.id, enabled });
+  if (ref.kind === 'skill') return (root) => withSkillDisabled({ root, id: ref.id, enabled });
   return null;
 }
 
