@@ -110,9 +110,9 @@ Se o **[spike]** mostrar que `agy --settings` aceita desligar MCP, mude MCP para
 | --- | --- | --- | --- |
 | MCP | `mcpServers` em `~/.qwen/settings.json` | `mcp.excluded` (lista) no `settings.json` da conta | `account-file` |
 | Extensões (plugins) | Pastas `~/.qwen/extensions/*/qwen-extension.json` | Só pelo comando `qwen extensions disable <nome>` / `enable <nome>` fora do Inova. Motivo na UI: "O Inova ainda não consegue ler o estado das extensões do Qwen. Use qwen extensions enable/disable." | `unsupported` |
+| Skills | Pastas de skills de usuário em `~/.qwen` **[spike]** | `skills.disabled` (lista) no `settings.json` da conta | `account-file` |
 
 As flags `--allowed-mcp-server-names` e `-e` do Qwen são listas de permitidos. Para usá-las, o Inova precisaria saber a lista completa em cada turno. Por isso, o Qwen usa só `account-file`.
-| Skills | Pastas de skills de usuário em `~/.qwen` **[spike]** | `skills.disabled` (lista) no `settings.json` da conta | `account-file` |
 
 ### OpenCode (`XDG_DATA_HOME` por conta)
 
