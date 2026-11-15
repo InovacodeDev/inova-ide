@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import type { CapabilityItem, CapabilityListing } from '../src/shared/api';
 import {
   applyModeLabel,
+  displayEnabled,
   filterItems,
   sortItems,
   visibleTabs,
@@ -72,5 +73,30 @@ describe('applyModeLabel', () => {
     expect(applyModeLabel('account-file')).toBe('Na conta');
     expect(applyModeLabel('global-file')).toBe('Global');
     expect(applyModeLabel('unsupported')).toBe('Não configurável');
+  });
+});
+
+describe('displayEnabled', () => {
+  const disabledPlugin = item({
+    kind: 'plugin',
+    id: 'superpowers@market',
+    name: 'Superpowers',
+    enabled: false,
+  });
+  const grouped = item({ group: 'superpowers', applyMode: 'unsupported', enabled: true });
+
+  test('shows a plugin skill as off when its plugin is disabled (id before @)', () => {
+    expect(displayEnabled({ item: grouped, plugins: [disabledPlugin] })).toBe(false);
+  });
+
+  test('matches the plugin by name', () => {
+    const byName = item({ group: 'Superpowers', applyMode: 'unsupported', enabled: true });
+    expect(displayEnabled({ item: byName, plugins: [disabledPlugin] })).toBe(false);
+  });
+
+  test('uses the item state when no plugin matches or the item is not a plugin skill', () => {
+    expect(displayEnabled({ item: grouped, plugins: [] })).toBe(true);
+    const launchSkill = item({ group: 'superpowers', enabled: true });
+    expect(displayEnabled({ item: launchSkill, plugins: [disabledPlugin] })).toBe(true);
   });
 });

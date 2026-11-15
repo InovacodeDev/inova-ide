@@ -53,3 +53,16 @@ export function filterItems(input: {
       (item.description ?? '').toLowerCase().includes(query),
   );
 }
+
+export function displayEnabled(input: {
+  item: CapabilityItem;
+  plugins: readonly CapabilityItem[];
+}): boolean {
+  const { item, plugins } = input;
+  const { group } = item;
+  if (group === null || item.applyMode !== 'unsupported') return item.enabled;
+  const plugin = plugins.find(
+    (candidate) => candidate.name === group || candidate.id.split('@')[0] === group,
+  );
+  return plugin === undefined ? item.enabled : plugin.enabled;
+}
