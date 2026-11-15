@@ -1,5 +1,5 @@
-.capabilities-card {
-  width: min(640px, 100%);
+.modal-card.capabilities-card {
+  width: min(720px, 100%);
   max-height: min(680px, 100%);
 }
 
@@ -14,16 +14,16 @@
 
 .capabilities-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 12px;
+  gap: 12px;
 }
 
 .capabilities-tabs {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   gap: 4px;
   overflow-x: auto;
@@ -78,7 +78,7 @@
 }
 
 .capabilities-filter {
-  flex: 0 1 160px;
+  flex: 0 1 180px;
   min-width: 110px;
   height: 32px;
   font-size: 12.5px;

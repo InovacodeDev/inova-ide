@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Modal "Configurar conta" ampliado para `720px` (`.modal-card.capabilities-card`) com barra de abas e campo de busca travados na mesma linha.
+
 ## [0.7.1] - 2026-11-15
 
 ### Corrigido
