@@ -170,6 +170,31 @@ describe('opencodeCapabilities mcp', () => {
     }, '{oops');
   });
 
+  it('reads and writes the V2 mcp.servers map', async () => {
+    const v2 = JSON.stringify({
+      mcp: { servers: { docs: { type: 'remote', url: 'https://example.com/mcp' } } },
+    });
+    await withHome(async (ctx) => {
+      const category = await categoryOf(ctx, 'mcp');
+      expect(category?.items.map((item) => [item.id, item.enabled])).toEqual([['docs', true]]);
+      await setEnabled(ctx, 'mcp', 'docs')(false);
+      expect((await readConfig(ctx)).mcp).toEqual({
+        servers: { docs: { type: 'remote', url: 'https://example.com/mcp', disabled: true } },
+      });
+      await expect(setEnabled(ctx, 'mcp', 'servers')(false)).rejects.toThrow(
+        'Item não encontrado: servers.',
+      );
+    }, v2);
+  });
+
+  it('skips non-object values under a flat mcp map', async () => {
+    const flat = JSON.stringify({ mcp: { enabled: true, docs: { type: 'remote' } } });
+    await withHome(async (ctx) => {
+      const category = await categoryOf(ctx, 'mcp');
+      expect(category?.items.map((item) => item.id)).toEqual(['docs']);
+    }, flat);
+  });
+
   it('reports HOME não definido when HOME is missing', async () => {
     await withHome(async (ctx) => {
       const noHome = { ...ctx, env: {} };

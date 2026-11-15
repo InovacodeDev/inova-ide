@@ -40,13 +40,21 @@ function globalItem(item: CapabilityItem): CapabilityItem {
   return { ...item, applyMode: 'global-file' };
 }
 
+function mcpServers(config: Config): Config {
+  const mcp = config['mcp'];
+  if (!isRecord(mcp)) return {};
+  const nested = mcp['servers'];
+  return isRecord(nested) ? nested : mcp;
+}
+
 function mcpItems(config: Config): CapabilityItem[] {
-  const servers = isRecord(config['mcp']) ? config['mcp'] : {};
-  return Object.entries(servers).map(([id, server]) =>
-    globalItem(
-      baseItem({ kind: 'mcp', id, enabled: !(isRecord(server) && server['disabled'] === true) }),
-    ),
-  );
+  return Object.entries(mcpServers(config))
+    .filter(([, server]) => isRecord(server))
+    .map(([id, server]) =>
+      globalItem(
+        baseItem({ kind: 'mcp', id, enabled: !(isRecord(server) && server['disabled'] === true) }),
+      ),
+    );
 }
 
 function pluginEntries(config: Config): string[] {
@@ -144,12 +152,16 @@ function withPluginDisabled(input: { root: Config; id: string; enabled: boolean 
 }
 
 function withMcpDisabled(input: { root: Config; id: string; enabled: boolean }): Config {
-  const servers = isRecord(input.root['mcp']) ? input.root['mcp'] : {};
+  const servers = mcpServers(input.root);
   const current = servers[input.id];
   if (!isRecord(current)) throw new Error(`Item não encontrado: ${input.id}.`);
   const { disabled: _previous, ...rest } = current;
   const server = input.enabled ? rest : { ...rest, disabled: true };
-  return { ...input.root, mcp: { ...servers, [input.id]: server } };
+  const updated = { ...servers, [input.id]: server };
+  const mcp = input.root['mcp'];
+  const mcpUpdated =
+    isRecord(mcp) && isRecord(mcp['servers']) ? { ...mcp, servers: updated } : updated;
+  return { ...input.root, mcp: mcpUpdated };
 }
 
 function configUpdateFor(input: SetEnabledInput): ((root: Config) => Config) | null {
