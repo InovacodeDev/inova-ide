@@ -2164,11 +2164,13 @@ export function createHandlers(deps: HandlerDeps) {
           return fail(item.unsupportedReason ?? 'Item não configurável.');
         }
         if (item.applyMode === 'launch') {
+          const current =
+            kind === 'connector' ? await listAccountCapabilities({ account, backupRoot }) : listing;
           await setLaunchCapability({
             accountId: account.id,
             ref: { kind, id },
             enabled,
-            connectorIds: listing.categories
+            connectorIds: current.categories
               .flatMap((category) => category.items)
               .filter((candidate) => candidate.kind === 'connector')
               .map((candidate) => candidate.id),

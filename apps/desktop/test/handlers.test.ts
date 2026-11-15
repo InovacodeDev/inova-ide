@@ -1330,6 +1330,48 @@ test('setCapabilityEnabled stores launch toggles and the connector wildcard', as
   });
 });
 
+test('setCapabilityEnabled does not add the wildcard when a connector appeared after the last listing', async () => {
+  const connector = (id: string) => capabilityItem({ kind: 'connector', id });
+  const twoConnectors = {
+    categories: [
+      { kind: 'connector' as const, items: [connector('A'), connector('B')], error: null },
+    ],
+    cost: null,
+  };
+  const list = vi
+    .fn<CapabilityAdapter['list']>()
+    .mockResolvedValueOnce(twoConnectors)
+    .mockResolvedValueOnce(twoConnectors)
+    .mockResolvedValue({
+      categories: [
+        {
+          kind: 'connector',
+          items: [connector('A'), connector('B'), connector('C')],
+          error: null,
+        },
+      ],
+      cost: null,
+    });
+  const { root, handlers } = await setup({
+    capabilityAdapters: fakeCapabilityAdapters({
+      list,
+      launchArgs: () => [],
+      setEnabled: vi.fn(async () => undefined),
+    }),
+  });
+  await addAccount({ root, provider: 'claude', label: 'cl' });
+  await handlers.listCapabilities({ accountLabel: 'cl' });
+  const toggle = (id: string) =>
+    handlers.setCapabilityEnabled({ accountLabel: 'cl', kind: 'connector', id, enabled: false });
+  await toggle('A');
+  await toggle('B');
+  const disabled = (await loadStore(root)).accounts[0]?.disabledCapabilities;
+  expect(disabled).toEqual([
+    { kind: 'connector', id: 'A' },
+    { kind: 'connector', id: 'B' },
+  ]);
+});
+
 test('setCapabilityEnabled reports unsupported items and file adapter failures', async () => {
   const items = [
     capabilityItem({
