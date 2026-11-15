@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  readFile,
+  realpath,
+  rename,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 export class CapabilityFileError extends Error {
@@ -18,11 +27,25 @@ export function isMissingFile(error: unknown): boolean {
   );
 }
 
+async function existingTarget(file: string): Promise<{ path: string; mode: number } | null> {
+  try {
+    const path = await realpath(file);
+    return { path, mode: (await stat(path)).mode & 0o777 };
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+}
+
 export async function writeAtomic(file: string, content: string): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
-  const temp = `${file}.inova.tmp`;
-  await writeFile(temp, content, { mode: 0o600 });
-  await rename(temp, file);
+  const existing = await existingTarget(file);
+  const target = existing?.path ?? file;
+  const mode = existing?.mode ?? 0o600;
+  const temp = `${target}.inova.tmp`;
+  await writeFile(temp, content, { mode });
+  await chmod(temp, mode);
+  await rename(temp, target);
 }
 
 export async function readIfExists(file: string): Promise<string | null> {

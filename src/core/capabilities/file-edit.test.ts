@@ -1,4 +1,15 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,6 +26,7 @@ import {
   tomlTableHeader,
   updateJsonFile,
   updateTomlFile,
+  writeAtomic,
 } from './file-edit.js';
 
 let dir: string;
@@ -25,6 +37,29 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+});
+
+describe('writeAtomic', () => {
+  it('writes through a symlink and keeps the link', async () => {
+    const target = join(dir, 'real.json');
+    const link = join(dir, 'link.json');
+    await writeFile(target, 'old');
+    await symlink(target, link);
+    await writeAtomic(link, 'new');
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    expect(await readFile(target, 'utf8')).toBe('new');
+  });
+
+  it('keeps the mode of an existing file and uses 0600 for a new one', async () => {
+    const existing = join(dir, 'a.json');
+    await writeFile(existing, 'old', { mode: 0o644 });
+    await chmod(existing, 0o644);
+    await writeAtomic(existing, 'new');
+    expect((await stat(existing)).mode & 0o777).toBe(0o644);
+    const created = join(dir, 'b.json');
+    await writeAtomic(created, 'x');
+    expect((await stat(created)).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe('backupFile', () => {
