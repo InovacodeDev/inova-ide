@@ -9,7 +9,9 @@ import {
   getSession,
   getWorkspace,
   listSessions,
+  recordSessionTurnUsage,
   removeSessionsOfProjects,
+  saveMissingSessionUsageTotals,
   saveWorkspace,
   SessionError,
   sessionsToAutoArchive,
@@ -384,6 +386,56 @@ describe('sessions', () => {
     });
     expect(detachedChild.parentId).toBe(created.id);
     expect(detachedChild.detachedFromParent).toBe(true);
+
+    await recordSessionTurnUsage({
+      root,
+      sessionId: detachedChild.id,
+      turn: {
+        costUsd: 0.12,
+        durationMs: 900,
+        usage: {
+          inputTokens: 500,
+          outputTokens: 100,
+          cacheReadTokens: 1200,
+          cacheWriteTokens: 300,
+        },
+      },
+    });
+    const tracked = await getSession({ root, sessionId: detachedChild.id });
+    expect(tracked.usageTotals).toEqual({
+      costUsd: 0.12,
+      costTurns: 1,
+      turns: 1,
+      durationMs: 900,
+      inputTokens: 500,
+      outputTokens: 100,
+      cacheReadTokens: 1200,
+      cacheWriteTokens: 300,
+    });
+
+    const missing = await createSession({ root, projectId: 'p1', title: 'Legado' });
+    const legacyStore = await loadStore(root);
+    const targetLegacy = legacyStore.sessions?.find((s) => s.id === missing.id);
+    if (targetLegacy) delete targetLegacy.usageTotals;
+    await saveStore(root, legacyStore);
+
+    const entries = new Map([
+      [
+        missing.id,
+        {
+          costUsd: 0.5,
+          costTurns: 2,
+          turns: 2,
+          durationMs: 1200,
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      ],
+    ]);
+    expect(await saveMissingSessionUsageTotals({ root, entries })).toBe(true);
+    expect((await getSession({ root, sessionId: missing.id })).usageTotals?.costUsd).toBe(0.5);
   });
 });
 

@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isCapabilityRef } from './capabilities/types.js';
+import { isSessionUsageTotals } from './cost-tracking.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
@@ -95,6 +96,7 @@ function isSession(value: unknown): boolean {
     effort,
     mode,
     worktree,
+    usageTotals,
     archivedAt,
   } = value;
   return (
@@ -115,6 +117,7 @@ function isSession(value: unknown): boolean {
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (mode === undefined || mode === null || isExecutionMode(mode)) &&
     (worktree === undefined || worktree === null || isWorktree(worktree)) &&
+    (usageTotals === undefined || usageTotals === null || isSessionUsageTotals(usageTotals)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
 }

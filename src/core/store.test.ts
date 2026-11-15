@@ -210,6 +210,22 @@ describe('store', () => {
     ['a missing providerSessionId', { ...goodSession, providerSessionId: undefined }],
     ['a missing updatedAt', { ...goodSession, updatedAt: undefined }],
     ['an invalid execution mode', { ...goodSession, mode: 'turbo-invalid' }],
+    [
+      'invalid usageTotals',
+      {
+        ...goodSession,
+        usageTotals: {
+          costUsd: -1,
+          costTurns: 0,
+          turns: 0,
+          durationMs: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    ],
   ])('loadStore rejects sessions with %s', async (_name, session) => {
     const sessions = typeof session === 'string' ? session : [session];
     await writeFile(

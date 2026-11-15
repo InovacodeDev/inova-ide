@@ -63,6 +63,13 @@ export interface SubagentSnapshot {
   totalTokens: number;
 }
 
+export interface TurnTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 export type ChatEvent =
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'user'; text: string; at: string }
@@ -74,6 +81,7 @@ export type ChatEvent =
   | { kind: 'tool-result'; toolId: string; output: string; isError: boolean }
   | { kind: 'usage-limits'; windows: UsageWindow[] }
   | { kind: 'context'; usedTokens: number; windowTokens: number | null; model: string | null }
+  | ({ kind: 'turn-usage' } & TurnTokenUsage)
   | ({ kind: 'subagent' } & SubagentSnapshot)
   | {
       kind: 'checkpoint';

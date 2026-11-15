@@ -24,9 +24,9 @@ Este documento registra as 20 dores identificadas na pesquisa da conversa e acom
   - **Solução implementada:** Botão **Revisar diff** em 1 clique na aba **Git** e no modal de diff que cria uma subsessão isolada e limpa (`detachedFromParent: true`), compartilha o worktree ativo, força o modo `read-only`/`plan` mais restrito do provedor, prioriza outra conta ativa (outro provedor primeiro) e oferece o botão **Enviar para sessão pai** nos achados do revisor.
   - **Arquivos principais:** `src/core/modes.ts`, `src/core/handoff.ts`, `src/core/sessions.ts`, `apps/desktop/src/main/handlers.ts`, `apps/desktop/src/renderer/SessionDetails.tsx`, `apps/desktop/src/renderer/SessionDiffModal.tsx`, `apps/desktop/src/renderer/ChatView.tsx`, `apps/desktop/src/renderer/App.tsx`.
 
-- [ ] **5. Falta de visibilidade financeira por sessão e projeto**
+- [x] **5. Falta de visibilidade financeira por sessão e projeto**
   - **Problema:** Desenvolvedores não enxergam quanto cada tarefa ou sessão custou em USD e em tokens de cache, entrada e saída.
-  - **Solução planejada:** Rastreador de custo em USD e contagem de tokens por turno salvo no store local e exibido por sessão e por projeto no inspetor.
+  - **Solução implementada:** Rastreador incremental `usageTotals` por sessão em `store.json` (`recordSessionTurnUsage` e backfill em `listSessions`), extração multi-provedor em `src/core/cost-tracking.ts`, eventos `turn-usage` em `apps/desktop/src/main/chat.ts` e `handlers.ts`, e painel **Custos e tokens** na aba `Contexto` de `SessionDetails.tsx` com totais da sessão, total do projeto e detalhamento por turno (`App.tsx`, `CompareView.tsx`).
 
 ## Próximas 15 Dores do Backlog (Itens 6 a 20)
 

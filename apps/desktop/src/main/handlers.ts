@@ -5,9 +5,11 @@ import { AccountError, addAccount, findAccount, removeAccount } from '@inova/cor
 import type {
   ChatEvent,
   ContextBreakdown,
+  TurnTokenUsage,
   UsageSnapshot,
   UsageWindow,
 } from '@inova/core/chat-types';
+import { aggregateTranscriptUsage } from '@inova/core/cost-tracking';
 import { createCircuitBreakerTracker } from '@inova/core/circuit-breaker';
 import { CapabilityFileError, serialize } from '@inova/core/capabilities/file-edit';
 import { capabilityAdapters, capabilityLaunchArgs } from '@inova/core/capabilities/index';
@@ -87,7 +89,9 @@ import {
   effectiveCwd,
   getDefaultModes,
   getWorkspace,
+  recordSessionTurnUsage,
   resolveSessionAccount,
+  saveMissingSessionUsageTotals,
   saveWorkspace,
   sessionsToAutoArchive,
   setDefaultProviderMode,
@@ -105,6 +109,7 @@ import type {
   QueuedTurn,
   RateLimitFailoverPolicy,
   Session,
+  SessionUsageTotals,
   Settings,
   Store,
   VerificationCheck,
@@ -454,6 +459,7 @@ export function createHandlers(deps: HandlerDeps) {
   >();
   const failoverTriedAccounts = new Map<string, Set<string>>();
   const pendingFailoverSessions = new Set<string>();
+  const pendingTurnUsage = new Map<string, TurnTokenUsage>();
   let cachedFailoverPolicy: RateLimitFailoverPolicy = 'off';
   let cachedFailoverPolicyLoaded = false;
   let cachedSessionSettings: Settings['sessions'] = { ...DEFAULT_SETTINGS.sessions };
@@ -677,6 +683,7 @@ export function createHandlers(deps: HandlerDeps) {
       activeTurnInputs.delete(id);
       failoverTriedAccounts.delete(id);
       pendingFailoverSessions.delete(id);
+      pendingTurnUsage.delete(id);
       turnQueue.cancelBySession(id);
       setQueuePaused({ sessionId: id, paused: false });
     }
@@ -1451,8 +1458,18 @@ export function createHandlers(deps: HandlerDeps) {
         }
       }
     }
+    if (event.kind === 'turn-usage') {
+      pendingTurnUsage.set(sessionId, {
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens,
+        cacheReadTokens: event.cacheReadTokens,
+        cacheWriteTokens: event.cacheWriteTokens,
+      });
+    }
     if (event.kind === 'done') {
       turnOwners.delete(sessionId);
+      const turnUsage = pendingTurnUsage.get(sessionId) ?? null;
+      pendingTurnUsage.delete(sessionId);
       const wasCancelled = cancelledTurns.delete(sessionId);
       const failedInput = activeTurnInputs.get(sessionId);
       activeTurnInputs.delete(sessionId);
@@ -1473,6 +1490,19 @@ export function createHandlers(deps: HandlerDeps) {
         });
         return;
       }
+      void serialized(() =>
+        recordSessionTurnUsage({
+          root: deps.root,
+          sessionId,
+          turn: {
+            costUsd: event.costUsd,
+            durationMs: event.durationMs,
+            usage: turnUsage,
+          },
+        }),
+      ).catch((error: unknown) => {
+        console.error(`inova: failed to record usage for ${sessionId}`, error);
+      });
       const { costTripReason, turnTripReason } = circuitBreaker.recordDone({
         sessionId,
         costUsd: event.costUsd,
@@ -1874,8 +1904,23 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     listSessions: (input: unknown): Promise<Result<Session[]>> =>
       validated(input, parseProjectRef, async ({ projectId }) => {
-        const store = await loadStore(deps.root);
-        return ok(sessionsOf(store).filter((session) => session.projectId === projectId));
+        await storeQueue;
+        let store = await loadStore(deps.root);
+        let projectSessions = sessionsOf(store).filter(
+          (session) => session.projectId === projectId,
+        );
+        const missing = projectSessions.filter((session) => session.usageTotals === undefined);
+        if (missing.length > 0) {
+          const entries = new Map<string, SessionUsageTotals>();
+          for (const session of missing) {
+            const events = await readTranscriptEvents(session.id);
+            entries.set(session.id, aggregateTranscriptUsage(events).totals);
+          }
+          await serialized(() => saveMissingSessionUsageTotals({ root: deps.root, entries }));
+          store = await loadStore(deps.root);
+          projectSessions = sessionsOf(store).filter((session) => session.projectId === projectId);
+        }
+        return ok(projectSessions);
       }),
     createSession: (input: unknown): Promise<Result<Session>> =>
       validated(input, parseNewSession, ({ projectId, parentId, isolatedWorktree }) =>
@@ -2802,6 +2847,7 @@ export function createHandlers(deps: HandlerDeps) {
               providerSessionId: sessionId,
               accountIdOverride: account.id === project.accountId ? null : account.id,
               worktree: null,
+              usageTotals: aggregateTranscriptUsage(events).totals,
             });
             await writeTranscriptEvents(session.id, events);
             created.push(session);

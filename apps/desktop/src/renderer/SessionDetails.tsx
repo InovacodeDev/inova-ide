@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { SubagentSnapshot, SubagentStatus } from '@inova/core/chat-types';
+import { formatCostUsd, type TurnUsageEntry } from '@inova/core/cost-tracking';
 import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
-import type { ProviderId } from '@inova/core/types';
+import type { ProviderId, SessionUsageTotals } from '@inova/core/types';
 import type { ContextInfo } from './chat-reducer';
 import {
   categoryLabel,
@@ -205,10 +206,115 @@ function ContextBreakdownPanel({
   );
 }
 
+function formatUsageCost(totals: SessionUsageTotals | null | undefined): string {
+  if (!totals || totals.turns === 0) return '$0.0000';
+  if (totals.costTurns === 0) return '—';
+  const base = formatCostUsd(totals.costUsd);
+  return totals.costTurns < totals.turns ? `${base} (parcial)` : base;
+}
+
+function SessionUsagePanel({
+  sessionUsage,
+  projectUsage,
+  projectSessionCount = 0,
+  turnUsages = [],
+}: {
+  sessionUsage: SessionUsageTotals | null | undefined;
+  projectUsage: SessionUsageTotals | null | undefined;
+  projectSessionCount?: number;
+  turnUsages?: readonly TurnUsageEntry[];
+}) {
+  const sessionTotals = sessionUsage ?? {
+    costUsd: 0,
+    costTurns: 0,
+    turns: 0,
+    durationMs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const projectTotals = projectUsage ?? sessionTotals;
+
+  return (
+    <div className="session-usage-panel">
+      <div className="session-usage-block">
+        <div className="session-usage-head">
+          <span className="session-details-subhead">Custos e tokens (sessão)</span>
+          <span className="session-usage-cost mono">{formatUsageCost(sessionTotals)}</span>
+        </div>
+        <dl className="session-usage-grid mono">
+          <div>
+            <dt>Entrada</dt>
+            <dd>{formatTokens(sessionTotals.inputTokens)}</dd>
+          </div>
+          <div>
+            <dt>Saída</dt>
+            <dd>{formatTokens(sessionTotals.outputTokens)}</dd>
+          </div>
+          <div>
+            <dt>Cache leitura</dt>
+            <dd>{formatTokens(sessionTotals.cacheReadTokens)}</dd>
+          </div>
+          <div>
+            <dt>Cache escrita</dt>
+            <dd>{formatTokens(sessionTotals.cacheWriteTokens)}</dd>
+          </div>
+        </dl>
+      </div>
+      <div className="session-usage-block">
+        <div className="session-usage-head">
+          <span className="session-details-subhead">
+            Total do projeto ({projectSessionCount}{' '}
+            {projectSessionCount === 1 ? 'sessão' : 'sessões'})
+          </span>
+          <span className="session-usage-cost mono">{formatUsageCost(projectTotals)}</span>
+        </div>
+        <div className="session-usage-project-tokens mono">
+          <span>Ent: {formatTokens(projectTotals.inputTokens)}</span>
+          <span>Saí: {formatTokens(projectTotals.outputTokens)}</span>
+          <span>
+            Cache: {formatTokens(projectTotals.cacheReadTokens + projectTotals.cacheWriteTokens)}
+          </span>
+        </div>
+      </div>
+      {turnUsages.length > 0 ? (
+        <details className="context-breakdown-section">
+          <summary className="context-breakdown-row">
+            <span className="context-breakdown-name">Por turno ({turnUsages.length})</span>
+            <span className="context-breakdown-tokens mono">{sessionTotals.turns} turnos</span>
+          </summary>
+          <ul className="session-usage-turns">
+            {turnUsages.map((turn, index) => (
+              <li key={`${turn.turnIndex}-${index}`} className="session-usage-turn-row">
+                <div className="session-usage-turn-top">
+                  <span className="session-usage-turn-title">
+                    #{index + 1} {turn.promptPreview || '(turno sem título)'}
+                  </span>
+                  <span className="mono">{formatCostUsd(turn.costUsd)}</span>
+                </div>
+                <div className="session-usage-turn-meta mono">
+                  <span>Ent {formatTokens(turn.inputTokens)}</span>
+                  <span>Saí {formatTokens(turn.outputTokens)}</span>
+                  <span>Cache {formatTokens(turn.cacheReadTokens + turn.cacheWriteTokens)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 interface SessionDetailsProps {
   sessionId: string;
   subagents?: SubagentSnapshot[];
   context?: ContextInfo;
+  sessionUsage?: SessionUsageTotals | null;
+  projectUsage?: SessionUsageTotals | null;
+  projectSessionCount?: number;
+  turnUsages?: readonly TurnUsageEntry[];
   collapsed: boolean;
   kind?: 'session' | 'subsession';
   sectionName?: string | null;
@@ -243,6 +349,10 @@ export function SessionDetails({
   sessionId,
   subagents = [],
   context,
+  sessionUsage,
+  projectUsage,
+  projectSessionCount,
+  turnUsages,
   collapsed,
   kind = 'session',
   sectionName = null,
@@ -356,6 +466,12 @@ export function SessionDetails({
                 usedTokens={context?.usedTokens ?? null}
               />
             ) : null}
+            <SessionUsagePanel
+              sessionUsage={sessionUsage}
+              projectUsage={projectUsage}
+              projectSessionCount={projectSessionCount}
+              turnUsages={turnUsages}
+            />
             {onSaveSessionPinnedMemory || onSaveProjectPinnedMemory ? (
               <div className="pinned-memory-group">
                 {onSaveSessionPinnedMemory ? (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatCostUsd } from '@inova/core/cost-tracking';
 import { EFFORT_LABEL, PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
@@ -69,11 +70,6 @@ function folderName(path: string): string {
 function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return '—';
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
-}
-
-function formatCost(cost: number | null | undefined): string {
-  if (cost === null || cost === undefined) return '—';
-  return `$${cost.toFixed(4)}`;
 }
 
 function SideConfigCard({
@@ -221,7 +217,7 @@ function ComparisonColumn({
         <div className="compare-col-metrics">
           <span>{STATUS_LABEL[status]}</span>
           <span>{formatDuration(metrics?.durationMs)}</span>
-          <span>{formatCost(metrics?.costUsd)}</span>
+          <span>{formatCostUsd(metrics?.costUsd)}</span>
         </div>
       </div>
       <div className="compare-col-body">

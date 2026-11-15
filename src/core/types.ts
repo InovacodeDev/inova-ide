@@ -40,6 +40,17 @@ export interface SessionWorktree {
   createdAt: string;
 }
 
+export interface SessionUsageTotals {
+  costUsd: number;
+  costTurns: number;
+  turns: number;
+  durationMs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 export interface Session {
   id: string;
   projectId: string;
@@ -57,6 +68,7 @@ export interface Session {
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
+  usageTotals?: SessionUsageTotals | null;
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;

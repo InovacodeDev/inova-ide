@@ -4,6 +4,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { createChatParser } from '@inova/core/chat-events';
 import type { ChatParser } from '@inova/core/chat-events';
 import type { ChatEvent, UsageWindow, VerificationCheckResult } from '@inova/core/chat-types';
+import { extractTurnUsageFromLine } from '@inova/core/cost-tracking';
 import type { LaunchSpec } from '@inova/core/launch';
 import type { ProviderId } from '@inova/core/types';
 
@@ -196,6 +197,21 @@ function eventOf(record: Json): ChatEvent | undefined {
         ? { kind: 'context', usedTokens, windowTokens, model }
         : undefined;
     }
+    case 'turn-usage': {
+      const { inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens } = record;
+      return typeof inputTokens === 'number' &&
+        typeof outputTokens === 'number' &&
+        typeof cacheReadTokens === 'number' &&
+        typeof cacheWriteTokens === 'number'
+        ? {
+            kind: 'turn-usage',
+            inputTokens,
+            outputTokens,
+            cacheReadTokens,
+            cacheWriteTokens,
+          }
+        : undefined;
+    }
     case 'subagent':
       return subagentOf(record);
     case 'checkpoint': {
@@ -354,6 +370,10 @@ export function createChatRunner(deps: {
     let pending = '';
 
     const handleLine = (line: string): void => {
+      const turnUsage = extractTurnUsageFromLine(line);
+      if (turnUsage !== null) {
+        deps.emit(sessionId, { kind: 'turn-usage', ...turnUsage });
+      }
       for (const event of parser.parse(line)) {
         if (event.kind === 'done') turn.doneSeen = true;
         deps.emit(sessionId, event);

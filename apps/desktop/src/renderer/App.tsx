@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
+import type { TurnTokenUsage } from '@inova/core/chat-types';
+import {
+  aggregateTranscriptUsage,
+  sumSessionUsageTotals,
+  type TurnUsageEntry,
+} from '@inova/core/cost-tracking';
 import { MAX_PINNED_MEMORY_CHARS, buildParentFixPrompt } from '@inova/core/handoff';
 import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import { PROVIDER_MODES, resolveExecutionMode } from '@inova/core/modes';
@@ -141,6 +147,12 @@ export function App() {
   const [compareMetrics, setCompareMetrics] = useState<
     Record<string, { costUsd: number | null; durationMs: number | null }>
   >({});
+  const [turnUsagesBySession, setTurnUsagesBySession] = useState<Record<string, TurnUsageEntry[]>>(
+    {},
+  );
+  const pendingTurnUsageRef = useRef(
+    new Map<string, { promptPreview: string; usage: TurnTokenUsage | null }>(),
+  );
   const [windowFocused, setWindowFocused] = useState(() =>
     typeof document !== 'undefined' ? document.hasFocus() : true,
   );
@@ -261,6 +273,10 @@ export function App() {
       const result = await call(() => window.inova.loadTranscript({ sessionId }));
       if (result) {
         dispatchChat({ sessionId, action: { type: mode, events: result.value } });
+        setTurnUsagesBySession((current) => ({
+          ...current,
+          [sessionId]: aggregateTranscriptUsage(result.value).turnEntries,
+        }));
       }
     },
     [call],
@@ -319,9 +335,48 @@ export function App() {
 
   useEffect(() => {
     return window.inova.onChatEvent(({ sessionId, event }) => {
-      if (event.kind === 'user') dispatchChat({ sessionId, action: { type: 'started' } });
+      if (event.kind === 'user') {
+        dispatchChat({ sessionId, action: { type: 'started' } });
+        const firstLine =
+          event.text
+            .split('\n')
+            .find((line) => line.trim() !== '')
+            ?.trim() ?? '';
+        const promptPreview = firstLine.length <= 72 ? firstLine : `${firstLine.slice(0, 71)}…`;
+        pendingTurnUsageRef.current.set(sessionId, { promptPreview, usage: null });
+      }
+      if (event.kind === 'turn-usage') {
+        const current = pendingTurnUsageRef.current.get(sessionId) ?? {
+          promptPreview: '',
+          usage: null,
+        };
+        current.usage = {
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          cacheReadTokens: event.cacheReadTokens,
+          cacheWriteTokens: event.cacheWriteTokens,
+        };
+        pendingTurnUsageRef.current.set(sessionId, current);
+      }
       dispatchChat({ sessionId, action: { type: 'event', event } });
       if (event.kind !== 'done') return;
+      const pendingTurn = pendingTurnUsageRef.current.get(sessionId);
+      pendingTurnUsageRef.current.delete(sessionId);
+      setTurnUsagesBySession((current) => {
+        const previous = current[sessionId] ?? [];
+        const entry: TurnUsageEntry = {
+          turnIndex: previous.length,
+          promptPreview: pendingTurn?.promptPreview ?? '',
+          isError: event.isError,
+          costUsd: event.costUsd,
+          durationMs: event.durationMs,
+          inputTokens: pendingTurn?.usage?.inputTokens ?? 0,
+          outputTokens: pendingTurn?.usage?.outputTokens ?? 0,
+          cacheReadTokens: pendingTurn?.usage?.cacheReadTokens ?? 0,
+          cacheWriteTokens: pendingTurn?.usage?.cacheWriteTokens ?? 0,
+        };
+        return { ...current, [sessionId]: [...previous, entry] };
+      });
       if (event.isError) void reloadAccounts();
       setCompareMetrics((current) => ({
         ...current,
@@ -1822,6 +1877,12 @@ export function App() {
                   sessionId={activeSession.id}
                   subagents={chats[activeSession.id]?.subagents}
                   context={chats[activeSession.id]?.context}
+                  sessionUsage={activeSession.usageTotals ?? null}
+                  projectUsage={sumSessionUsageTotals(
+                    (sessions[activeProject.id] ?? []).map((item) => item.usageTotals),
+                  )}
+                  projectSessionCount={(sessions[activeProject.id] ?? []).length}
+                  turnUsages={turnUsagesBySession[activeSession.id]}
                   collapsed={detailsCollapsed}
                   kind={activeSession.parentId ? 'subsession' : 'session'}
                   sectionName={folderName(activeProject.path)}

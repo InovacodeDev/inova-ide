@@ -198,6 +198,13 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
     },
     { kind: 'feedback', turnIndex: 2, value: 'down' },
     { kind: 'feedback', turnIndex: 0, value: null },
+    {
+      kind: 'turn-usage',
+      inputTokens: 100,
+      outputTokens: 50,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 25,
+    },
     { kind: 'error', message: 'm' },
     { kind: 'done', isError: false, costUsd: null, durationMs: 3 },
   ];
@@ -208,6 +215,7 @@ test('parseTranscriptLine accepts every persisted event kind and rejects malform
     '[]',
     '{"kind":"text"}',
     '{"kind":"done","isError":"x"}',
+    '{"kind":"turn-usage","inputTokens":"bad"}',
     '{"kind":"usage-limits","windows":[{"kind":"x"}]}',
     '{"kind":"feedback","turnIndex":0,"value":"meh"}',
     '{"kind":"feedback","turnIndex":-1,"value":"up"}',

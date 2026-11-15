@@ -252,6 +252,7 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
     }
     case 'session':
     case 'usage-limits':
+    case 'turn-usage':
       return state;
   }
 }

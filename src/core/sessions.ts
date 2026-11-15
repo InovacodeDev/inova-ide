@@ -1,4 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import {
+  EMPTY_SESSION_USAGE_TOTALS,
+  addTurnToUsageTotals,
+  type TurnCostDelta,
+} from './cost-tracking.js';
 import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
@@ -10,6 +15,7 @@ import type {
   Project,
   ProviderId,
   Session,
+  SessionUsageTotals,
   SessionWorktree,
   Store,
   Workspace,
@@ -247,6 +253,7 @@ export async function createSession(ctx: {
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
+  usageTotals?: SessionUsageTotals | null;
   now?: () => Date;
 }): Promise<Session> {
   return withStoreLock(ctx.root, async () => {
@@ -308,6 +315,7 @@ export async function createSession(ctx: {
       effort: resolvedEffort,
       mode: inheritedMode,
       worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
+      usageTotals: ctx.usageTotals ?? { ...EMPTY_SESSION_USAGE_TOTALS },
       createdAt: timestamp,
       updatedAt: timestamp,
       archivedAt: null,
@@ -466,5 +474,42 @@ export async function setDefaultProviderMode(ctx: {
     store.defaultModes = { ...(store.defaultModes ?? {}), [ctx.provider]: ctx.mode };
     await saveStore(ctx.root, store);
     return { ...store.defaultModes };
+  });
+}
+
+export async function recordSessionTurnUsage(ctx: {
+  root: string;
+  sessionId: string;
+  turn: TurnCostDelta;
+}): Promise<void> {
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const session = sessionsOf(store).find((item) => item.id === ctx.sessionId);
+    if (!session) return;
+    session.usageTotals = addTurnToUsageTotals(
+      session.usageTotals ?? EMPTY_SESSION_USAGE_TOTALS,
+      ctx.turn,
+    );
+    await saveStore(ctx.root, store);
+  });
+}
+
+export async function saveMissingSessionUsageTotals(ctx: {
+  root: string;
+  entries: ReadonlyMap<string, SessionUsageTotals>;
+}): Promise<boolean> {
+  if (ctx.entries.size === 0) return false;
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    let updated = false;
+    for (const session of sessionsOf(store)) {
+      if (session.usageTotals !== undefined) continue;
+      const computed = ctx.entries.get(session.id);
+      if (!computed) continue;
+      session.usageTotals = computed;
+      updated = true;
+    }
+    if (updated) await saveStore(ctx.root, store);
+    return updated;
   });
 }

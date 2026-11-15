@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Botão "Revisar diff (adversarial)" na aba `Git` do inspetor e comando na paleta para abrir sub-sessão isolada somente-leitura usando outra conta ou provedor.
+- Painel "Custos e tokens" na aba `Contexto` do inspetor com gasto em USD e tokens (entrada, saída e cache) por sessão, total do projeto e detalhamento por turno, persistidos localmente em `store.json`.
+
 ## [0.6.3] - 2026-11-15
 
 ### Adicionado

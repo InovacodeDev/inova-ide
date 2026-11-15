@@ -13,7 +13,7 @@ import { bindProject } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
-import { loadStore } from '@inova/core/store';
+import { loadStore, saveStore } from '@inova/core/store';
 import type { ProviderId, Session, Store } from '@inova/core/types';
 import type { UsageDeps } from '@inova/core/usage';
 import type { ChatRunner } from '../src/main/chat.js';
@@ -3327,4 +3327,107 @@ test('reviewSessionDiff creates clean read-only/plan subsession on idle cross-pr
   const currentFallbackReview = unwrap(await handlers.reviewSessionDiff({ sessionId: parent.id }));
   expect(currentFallbackReview.session.accountIdOverride).toBe(claudeMain.id);
   expect(currentFallbackReview.session.mode).toBe('plan');
+});
+
+test('tracks cumulative USD cost and tokens per session, preserves across clear/fork without double count, and backfills legacy transcripts', async () => {
+  const { root, handlers } = await setup();
+  const { project, session } = await seedSession(root);
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'turno 1' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'turn-usage',
+    inputTokens: 120,
+    outputTokens: 45,
+    cacheReadTokens: 800,
+    cacheWriteTokens: 200,
+  });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: 0.125,
+    durationMs: 1100,
+  });
+
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: 'turno 2 sem usd' }));
+  handlers.handleChatEvent(session.id, {
+    kind: 'turn-usage',
+    inputTokens: 80,
+    outputTokens: 15,
+    cacheReadTokens: 400,
+    cacheWriteTokens: 0,
+  });
+  handlers.handleChatEvent(session.id, {
+    kind: 'done',
+    isError: false,
+    costUsd: null,
+    durationMs: 400,
+  });
+  await flush(handlers, session.id);
+
+  const sessionsAfterTurns = unwrap(await handlers.listSessions({ projectId: project.id }));
+  const tracked = sessionsAfterTurns.find((item) => item.id === session.id);
+  expect(tracked?.usageTotals).toEqual({
+    costUsd: 0.125,
+    costTurns: 1,
+    turns: 2,
+    durationMs: 1500,
+    inputTokens: 200,
+    outputTokens: 60,
+    cacheReadTokens: 1200,
+    cacheWriteTokens: 200,
+  });
+
+  const forked = unwrap(await handlers.forkSession({ sessionId: session.id, turnIndex: 1 }));
+  expect(forked.session.usageTotals).toEqual({
+    costUsd: 0,
+    costTurns: 0,
+    turns: 0,
+    durationMs: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  });
+
+  unwrap(await handlers.clearSession({ sessionId: session.id }));
+  const afterClear = unwrap(await handlers.listSessions({ projectId: project.id })).find(
+    (item) => item.id === session.id,
+  );
+  expect(afterClear?.usageTotals?.costUsd).toBe(0.125);
+
+  const legacy = await createSession({ root, projectId: project.id, title: 'Sessão antiga' });
+  const legacyStore = await loadStore(root);
+  const legacyEntry = legacyStore.sessions?.find((item) => item.id === legacy.id);
+  if (legacyEntry) delete legacyEntry.usageTotals;
+  await saveStore(root, legacyStore);
+
+  await mkdir(join(root, 'sessions'), { recursive: true });
+  await writeFile(
+    join(root, 'sessions', `${legacy.id}.jsonl`),
+    [
+      JSON.stringify({ kind: 'user', text: 'antigo', at: '2026-01-01T00:00:00.000Z' }),
+      JSON.stringify({
+        kind: 'turn-usage',
+        inputTokens: 50,
+        outputTokens: 10,
+        cacheReadTokens: 100,
+        cacheWriteTokens: 0,
+      }),
+      JSON.stringify({ kind: 'done', isError: false, costUsd: 0.04, durationMs: 300 }),
+    ].join('\n') + '\n',
+  );
+
+  const backfilled = unwrap(await handlers.listSessions({ projectId: project.id })).find(
+    (item) => item.id === legacy.id,
+  );
+  expect(backfilled?.usageTotals).toEqual({
+    costUsd: 0.04,
+    costTurns: 1,
+    turns: 1,
+    durationMs: 300,
+    inputTokens: 50,
+    outputTokens: 10,
+    cacheReadTokens: 100,
+    cacheWriteTokens: 0,
+  });
 });
