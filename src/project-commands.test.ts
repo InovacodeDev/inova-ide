@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { main } from './main.js';
+import { loadStore, saveStore } from './core/store.js';
 import { makeHarness, useTmpRoot } from './test-harness.js';
 
 describe('inova project and run commands', () => {
@@ -47,6 +48,21 @@ describe('inova project and run commands', () => {
     expect(await tmp.run(h, ['run', '--', '--resume'])).toBe(3);
     expect(h.spawned[0]?.args).toEqual(['--resume']);
     expect(h.spawned[0]?.cwd).toBe(tmp.root());
+  });
+
+  it('run puts launch flags for disabled capabilities before the user args', async () => {
+    const h = makeHarness();
+    await tmp.run(h, ['account', 'add', 'claude', 'pessoal']);
+    await tmp.run(h, ['project', 'bind', 'pessoal']);
+    const store = await loadStore(tmp.root());
+    const [account] = store.accounts;
+    if (!account) throw new Error('missing account');
+    account.disabledCapabilities = [{ kind: 'connector', id: 'claude.ai Gmail' }];
+    await saveStore(tmp.root(), store);
+    expect(await tmp.run(h, ['run', '--', '--resume'])).toBe(0);
+    const args = h.spawned[0]?.args ?? [];
+    expect(args[0]).toBe('--settings');
+    expect(args.at(-1)).toBe('--resume');
   });
 
   it('project bind resolves a relative path against the working directory', async () => {

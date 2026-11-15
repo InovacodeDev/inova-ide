@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
+import { capabilityLaunchArgs } from '@inova/core/capabilities/index';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
 import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
@@ -2005,7 +2006,7 @@ export function createHandlers(deps: HandlerDeps) {
         const spec = buildLaunch({
           account,
           cwd: effectiveCwd(session, project),
-          args: claudeContextArgs(session.providerSessionId),
+          args: claudeContextArgs(session.providerSessionId, capabilityLaunchArgs(account)),
           baseEnv,
         });
         const result = await deps.runner.run({
