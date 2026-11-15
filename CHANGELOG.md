@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.8.0] - 2026-11-15
+
 ### Adicionado
 
 - Base de internacionalização (`pt-BR` e `en-US`) em `Settings['appearance'].locale` (`auto`, `pt-BR`, `en-US`) com seletor na aba Aparência, detecção por idioma do sistema e sincronização de `document.documentElement.lang`.
