@@ -3,6 +3,8 @@ import {
   parseApplyProfileSync,
   parseAttachmentPick,
   parseBinding,
+  parseCapabilityList,
+  parseCapabilityToggle,
   parseComparisonRef,
   parseDefaultMode,
   parseFileSearch,
@@ -153,6 +155,19 @@ test('workspace needs safe ids and a null or string active id', () => {
 test('usage requests require their fields', () => {
   expect(parseUsageRequest({ accountLabel: 'a' })).toEqual({ accountLabel: 'a' });
   expect(parseUsageRequest({ accountLabel: '' })).toBeUndefined();
+});
+
+test('capability inputs validate label, kind, id and enabled', () => {
+  expect(parseCapabilityList({ accountLabel: 'a' })).toEqual({ accountLabel: 'a' });
+  expect(parseCapabilityList({})).toBeUndefined();
+  const valid = { accountLabel: 'a', kind: 'skill', id: 'x', enabled: false };
+  expect(parseCapabilityToggle(valid)).toEqual(valid);
+  expect(parseCapabilityToggle({ ...valid, kind: 'tool' })).toBeUndefined();
+  expect(parseCapabilityToggle({ ...valid, id: '' })).toBeUndefined();
+  expect(parseCapabilityToggle({ ...valid, id: 'a'.repeat(513) })).toBeUndefined();
+  expect(parseCapabilityToggle({ ...valid, id: 'a'.repeat(512) })).toBeDefined();
+  expect(parseCapabilityToggle({ ...valid, enabled: 'no' })).toBeUndefined();
+  expect(parseCapabilityToggle({ ...valid, accountLabel: '' })).toBeUndefined();
 });
 
 test('extra fields are ignored', () => {

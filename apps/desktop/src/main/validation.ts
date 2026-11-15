@@ -1,5 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { AccountError, findAccount } from '@inova/core/accounts';
+import { isCapabilityRef } from '@inova/core/capabilities/types';
+import type { CapabilityKind } from '@inova/core/capabilities/types';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
 import { WorktreeError } from '@inova/core/git-worktree';
@@ -560,6 +562,24 @@ export function parseUsageRequest(input: unknown): { accountLabel: string } | un
   return isRecord(input) && isText(input['accountLabel'])
     ? { accountLabel: input['accountLabel'] }
     : undefined;
+}
+
+export function parseCapabilityList(input: unknown): { accountLabel: string } | undefined {
+  return parseUsageRequest(input);
+}
+
+export function parseCapabilityToggle(
+  input: unknown,
+): { accountLabel: string; kind: CapabilityKind; id: string; enabled: boolean } | undefined {
+  if (!isRecord(input) || !isText(input['accountLabel'])) return undefined;
+  const { kind, id, enabled } = input;
+  if (!isCapabilityRef({ kind, id }) || typeof enabled !== 'boolean') return undefined;
+  return {
+    accountLabel: input['accountLabel'],
+    kind: kind as CapabilityKind,
+    id: id as string,
+    enabled,
+  };
 }
 
 const DEFAULT_FILE_SEARCH_LIMIT = 40;
