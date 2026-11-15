@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CapabilityItem, CapabilityListing } from '../shared/api';
+import { shouldApplyListing } from './capabilities-state';
 import type { WarningCall } from './useWarning';
 
 const listingCache = new Map<string, CapabilityListing>();
@@ -15,9 +16,24 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
   );
   const [loading, setLoading] = useState(true);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const latestRequest = useRef(0);
+  const mounted = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const store = useCallback(
-    (next: CapabilityListing) => {
+    (requestId: number, next: CapabilityListing) => {
+      const apply = shouldApplyListing({
+        requestId,
+        latestRequestId: latestRequest.current,
+        mounted: mounted.current,
+      });
+      if (!apply) return;
       listingCache.set(accountLabel, next);
       setListing(next);
     },
@@ -25,25 +41,31 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
   );
 
   const refresh = useCallback(async () => {
+    latestRequest.current += 1;
+    const requestId = latestRequest.current;
     const loaded = await call(() => window.inova.listCapabilities({ accountLabel }));
-    if (loaded) store(loaded.value);
+    if (loaded) store(requestId, loaded.value);
   }, [accountLabel, call, store]);
 
   useEffect(() => {
-    let active = true;
+    setListing(listingCache.get(accountLabel) ?? null);
+    setPendingKey(null);
     setLoading(true);
     void refresh().finally(() => {
-      if (active) setLoading(false);
+      if (mounted.current) setLoading(false);
     });
     return () => {
-      active = false;
+      latestRequest.current += 1;
     };
-  }, [refresh]);
+  }, [accountLabel, refresh]);
 
   const toggle = useCallback(
     async (input: { item: CapabilityItem; enabled: boolean }) => {
+      if (pendingKey !== null) return;
       const { item, enabled } = input;
       setPendingKey(capabilityKey(item));
+      latestRequest.current += 1;
+      const requestId = latestRequest.current;
       try {
         const updated = await call(() =>
           window.inova.setCapabilityEnabled({
@@ -53,13 +75,13 @@ export function useCapabilities(input: { accountLabel: string; call: WarningCall
             enabled,
           }),
         );
-        if (updated) store(updated.value);
-        else await refresh();
+        if (updated) store(requestId, updated.value);
+        else if (mounted.current) await refresh();
       } finally {
-        setPendingKey(null);
+        if (mounted.current) setPendingKey(null);
       }
     },
-    [accountLabel, call, refresh, store],
+    [accountLabel, call, pendingKey, refresh, store],
   );
 
   return { listing, loading, pendingKey, toggle };
