@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useI18n } from './I18nContext';
 import { CloseIcon, SplitViewIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
@@ -20,6 +21,10 @@ interface TabBarProps {
 export function TabBar(props: TabBarProps) {
   const { tabs, active, paneIds, statusOf, queuedCountOf, onActivate, onClose, onSplit } = props;
   const { locale, t } = useI18n();
+  const activeTabRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
   const tabIds = tabs.map((tab) => tab.sessionId);
   const focusableId = tabIds.includes(active ?? '') ? active : (tabIds[0] ?? null);
   return (
@@ -42,7 +47,11 @@ export function TabBar(props: TabBarProps) {
         const inPane = paneIds.includes(tab.sessionId);
         const tabClass = selected ? ' tab-bar-tab-active' : inPane ? ' tab-bar-tab-pane' : '';
         return (
-          <div key={tab.sessionId} className={`tab-bar-tab${tabClass}`}>
+          <div
+            key={tab.sessionId}
+            ref={selected ? activeTabRef : undefined}
+            className={`tab-bar-tab${tabClass}`}
+          >
             <button
               type="button"
               role="tab"

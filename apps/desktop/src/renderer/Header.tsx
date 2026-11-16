@@ -45,7 +45,14 @@ export function Header({
           Inova<span className="app-name-accent">IDE</span>
         </span>
       </div>
-      <div className="app-header-tabs">
+      <div
+        className="app-header-tabs"
+        onWheel={(event) => {
+          if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+            event.currentTarget.scrollLeft += event.deltaY;
+          }
+        }}
+      >
         {tabs && tabs.length > 0 && statusOf && onActivateTab && onCloseTab ? (
           <TabBar
             tabs={tabs}
