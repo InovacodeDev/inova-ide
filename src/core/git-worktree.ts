@@ -79,6 +79,7 @@ export interface WorktreeStatus {
 export async function getWorktreeStatus(input: {
   worktreePath: string;
   baseCommit: string;
+  paths?: readonly string[];
 }): Promise<WorktreeStatus> {
   const verified = await tryRunGit({
     cwd: input.worktreePath,
@@ -108,18 +109,33 @@ export async function getWorktreeStatus(input: {
     cwd: input.worktreePath,
     args: ['diff', '--name-only', input.baseCommit, snapshot.tree],
   });
-  const changedFiles = namesRes.stdout
+  const allChangedFiles = namesRes.stdout
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line !== '');
+  const scope = input.paths ? new Set(input.paths) : null;
+  const changedFiles = scope ? allChangedFiles.filter((file) => scope.has(file)) : allChangedFiles;
+  if (scope && changedFiles.length === 0) {
+    return { branch, changedFiles: [], diffStat: '', diff: '', dirty: false };
+  }
+  const pathspec = scope ? ['--', ...changedFiles.map((file) => `:(top,literal)${file}`)] : [];
   const statRes = await runGit({
     cwd: input.worktreePath,
-    args: ['diff', '--stat', input.baseCommit, snapshot.tree],
+    args: ['diff', '--stat', input.baseCommit, snapshot.tree, ...pathspec],
   });
   const diffRes = await runGit({
     cwd: input.worktreePath,
-    args: ['diff', '--binary', input.baseCommit, snapshot.tree],
+    args: ['diff', '--binary', input.baseCommit, snapshot.tree, ...pathspec],
   });
+  if (scope) {
+    return {
+      branch,
+      changedFiles,
+      diffStat: statRes.stdout.trim(),
+      diff: diffRes.stdout,
+      dirty: true,
+    };
+  }
   const dirtyRes = await runGit({
     cwd: input.worktreePath,
     args: ['status', '--porcelain'],

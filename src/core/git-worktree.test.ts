@@ -103,6 +103,31 @@ describe('git-worktree', () => {
     expect(branches.trim()).toBe('');
   });
 
+  test('limits status, stat and diff to the given repo paths', async () => {
+    const repo = await initRepo();
+    await writeFile(join(repo, 'app.txt'), 'changed\n');
+    await writeFile(join(repo, 'new file.txt'), 'brand new\n');
+    await writeFile(join(repo, 'other.txt'), 'not mine\n');
+
+    const scoped = await getWorktreeStatus({
+      worktreePath: repo,
+      baseCommit: 'HEAD',
+      paths: ['new file.txt', 'missing.txt'],
+    });
+    expect(scoped.changedFiles).toEqual(['new file.txt']);
+    expect(scoped.dirty).toBe(true);
+    expect(scoped.diff).toContain('+brand new');
+    expect(scoped.diff).not.toContain('other.txt');
+    expect(scoped.diff).not.toContain('app.txt');
+    expect(scoped.diffStat).toContain('new file.txt');
+
+    const empty = await getWorktreeStatus({ worktreePath: repo, baseCommit: 'HEAD', paths: [] });
+    expect(empty).toMatchObject({ changedFiles: [], diff: '', diffStat: '', dirty: false });
+
+    const full = await getWorktreeStatus({ worktreePath: repo, baseCommit: 'HEAD' });
+    expect(full.changedFiles.sort()).toEqual(['app.txt', 'new file.txt', 'other.txt']);
+  });
+
   test('refuses applyWorktreeToProject when main repo has uncommitted changes', async () => {
     const root = await makeTempDir('inova-wt-root-');
     const repo = await initRepo();
