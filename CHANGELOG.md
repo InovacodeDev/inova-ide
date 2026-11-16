@@ -6,6 +6,25 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Visão dividida: abra uma aba ao lado da aba atual pelo botão de colunas na barra de abas; cada painel tem barra própria com foco e botão de fechar.
+- Reordenação das abas por arrastar e soltar no header; a ordem é salva no workspace.
+- Ações do circuit breaker de contexto: `Compactar e continuar` (primária, via `/compact`), `Limpar e continuar` (secundária, com resumo de handoff) e `Restaurar último checkpoint` (texto, cor de erro). As duas primeiras preparam o pedido de continuação no composer.
+- Painel de git da sessão mostra só os arquivos editados por aquela sessão quando ela não tem worktree própria.
+- Ditado por voz com VAD, servidor persistente e polimento Eloquent, com configuração local via Docker.
+
+### Alterado
+
+- Sem limite de abas abertas; abas encolhem até `100px` e o header rola na horizontal (também com a roda do mouse).
+- Botões de dividir e fechar fixos na extrema direita da aba.
+
+### Corrigido
+
+- Janela de contexto do Claude lida de `result.modelUsage.contextWindow`: sessões com 1M (ex.: `claude-opus-5-5`) não disparam mais o circuit breaker em 180k.
+- Circuit breaker de contexto agora interrompe o turno em andamento e não dispara no turno de `/compact`.
+- Arquivos com acentos no nome aparecem no status de git filtrado.
+
 ## [0.8.1] - 2026-11-15
 
 ### Alterado
