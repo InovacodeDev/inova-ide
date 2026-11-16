@@ -11,6 +11,7 @@ export interface Tab {
 export interface TabsState {
   tabs: Tab[];
   active: string | null;
+  split: [string, string] | null;
 }
 
 export type TabsAction =
@@ -19,20 +20,52 @@ export type TabsAction =
   | { type: 'activate'; sessionId: string }
   | { type: 'exited'; sessionId: string }
   | { type: 'rename'; sessionId: string; title: string }
-  | { type: 'rebind'; sessionId: string; provider: ProviderId | null };
+  | { type: 'rebind'; sessionId: string; provider: ProviderId | null }
+  | { type: 'split'; sessionId: string }
+  | { type: 'unsplit'; sessionId: string };
 
-export const MAX_OPEN_TABS = 3;
+export const initialTabsState: TabsState = { tabs: [], active: null, split: null };
 
-export function canOpenTab(state: TabsState, sessionId: string): boolean {
-  return state.tabs.length < MAX_OPEN_TABS || state.tabs.some((tab) => tab.sessionId === sessionId);
+export function visibleSessionIds(state: TabsState): string[] {
+  if (state.split) return [...state.split];
+  return state.active === null ? [] : [state.active];
+}
+
+function focusPane(state: TabsState, sessionId: string): TabsState {
+  const { split, active } = state;
+  if (!split || split.includes(sessionId)) return { ...state, active: sessionId };
+  const focusedIndex = split.indexOf(active ?? '');
+  const paneIndex = focusedIndex === -1 ? 0 : focusedIndex;
+  const panes: [string, string] = paneIndex === 0 ? [sessionId, split[1]] : [split[0], sessionId];
+  return { ...state, active: sessionId, split: panes };
+}
+
+function openSplit(state: TabsState, sessionId: string): TabsState {
+  const { split, active } = state;
+  if (active === null || active === sessionId) return state;
+  if (!split) return { ...state, active: sessionId, split: [active, sessionId] };
+  if (split.includes(sessionId)) return { ...state, active: sessionId };
+  const panes: [string, string] = split[0] === active ? [active, sessionId] : [sessionId, active];
+  return { ...state, active: sessionId, split: panes };
+}
+
+function closeSplitPane(state: TabsState, sessionId: string): TabsState {
+  const { split } = state;
+  if (!split?.includes(sessionId)) return state;
+  const remaining = split[0] === sessionId ? split[1] : split[0];
+  return { ...state, active: remaining, split: null };
 }
 
 function closeTab(state: TabsState, sessionId: string): TabsState {
+  if (state.split?.includes(sessionId)) {
+    const unsplit = closeSplitPane(state, sessionId);
+    return { ...unsplit, tabs: state.tabs.filter((tab) => tab.sessionId !== sessionId) };
+  }
   const index = state.tabs.findIndex((tab) => tab.sessionId === sessionId);
   const tabs = state.tabs.filter((tab) => tab.sessionId !== sessionId);
   if (state.active !== sessionId) return { ...state, tabs };
   const neighbor = tabs[index - 1] ?? tabs[index] ?? null;
-  return { tabs, active: neighbor?.sessionId ?? null };
+  return { ...state, tabs, active: neighbor?.sessionId ?? null };
 }
 
 function updateTab(state: TabsState, sessionId: string, patch: Partial<Tab>): TabsState {
@@ -54,23 +87,25 @@ export function adjacentSessionId(input: { state: TabsState; delta: 1 | -1 }): s
 export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
   if (action.type === 'open') {
     const { sessionId } = action.tab;
-    if (state.tabs.some((tab) => tab.sessionId === sessionId)) {
-      return { ...state, active: sessionId };
-    }
-    if (!canOpenTab(state, sessionId)) return state;
-    return { tabs: [...state.tabs, { ...action.tab, exited: false }], active: sessionId };
+    if (state.tabs.some((tab) => tab.sessionId === sessionId)) return focusPane(state, sessionId);
+    const opened = { ...state, tabs: [...state.tabs, { ...action.tab, exited: false }] };
+    return focusPane(opened, sessionId);
   }
   if (!state.tabs.some((tab) => tab.sessionId === action.sessionId)) return state;
   switch (action.type) {
     case 'close':
       return closeTab(state, action.sessionId);
     case 'activate':
-      return { ...state, active: action.sessionId };
+      return focusPane(state, action.sessionId);
     case 'exited':
       return updateTab(state, action.sessionId, { exited: true });
     case 'rename':
       return updateTab(state, action.sessionId, { title: action.title });
     case 'rebind':
       return updateTab(state, action.sessionId, { provider: action.provider });
+    case 'split':
+      return openSplit(state, action.sessionId);
+    case 'unsplit':
+      return closeSplitPane(state, action.sessionId);
   }
 }

@@ -16,6 +16,8 @@ interface HeaderProps {
   queuedCountOf?: (sessionId: string) => number;
   onActivateTab?: (sessionId: string) => void;
   onCloseTab?: (tab: Tab) => void;
+  paneIds?: string[];
+  onSplitTab?: (sessionId: string) => void;
 }
 
 export function Header({
@@ -30,6 +32,8 @@ export function Header({
   queuedCountOf,
   onActivateTab,
   onCloseTab,
+  paneIds = [],
+  onSplitTab,
 }: HeaderProps) {
   const { t } = useI18n();
   return (
@@ -46,10 +50,12 @@ export function Header({
           <TabBar
             tabs={tabs}
             active={inWorkspace ? (activeTabId ?? null) : null}
+            paneIds={inWorkspace ? paneIds : []}
             statusOf={statusOf}
             queuedCountOf={queuedCountOf}
             onActivate={onActivateTab}
             onClose={onCloseTab}
+            onSplit={onSplitTab}
           />
         ) : null}
       </div>

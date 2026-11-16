@@ -1,5 +1,5 @@
 import { useI18n } from './I18nContext';
-import { CloseIcon } from './icons';
+import { CloseIcon, SplitViewIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { queueCountLabel } from './queue-state';
 import type { SessionStatus } from './session-status';
@@ -9,14 +9,16 @@ import type { Tab } from './tabs';
 interface TabBarProps {
   tabs: Tab[];
   active: string | null;
+  paneIds: string[];
   statusOf: (sessionId: string) => SessionStatus | undefined;
   queuedCountOf?: (sessionId: string) => number;
   onActivate(sessionId: string): void;
   onClose(tab: Tab): void;
+  onSplit?(sessionId: string): void;
 }
 
 export function TabBar(props: TabBarProps) {
-  const { tabs, active, statusOf, queuedCountOf, onActivate, onClose } = props;
+  const { tabs, active, paneIds, statusOf, queuedCountOf, onActivate, onClose, onSplit } = props;
   const { locale, t } = useI18n();
   const tabIds = tabs.map((tab) => tab.sessionId);
   const focusableId = tabIds.includes(active ?? '') ? active : (tabIds[0] ?? null);
@@ -37,11 +39,10 @@ export function TabBar(props: TabBarProps) {
       {tabs.map((tab) => {
         const selected = tab.sessionId === active;
         const queuedCount = queuedCountOf?.(tab.sessionId) ?? 0;
+        const inPane = paneIds.includes(tab.sessionId);
+        const tabClass = selected ? ' tab-bar-tab-active' : inPane ? ' tab-bar-tab-pane' : '';
         return (
-          <div
-            key={tab.sessionId}
-            className={`tab-bar-tab${selected ? ' tab-bar-tab-active' : ''}`}
-          >
+          <div key={tab.sessionId} className={`tab-bar-tab${tabClass}`}>
             <button
               type="button"
               role="tab"
@@ -66,6 +67,17 @@ export function TabBar(props: TabBarProps) {
                 </span>
               )}
             </button>
+            {onSplit && active !== null && !inPane && (
+              <button
+                type="button"
+                className="icon-btn tab-bar-close tab-bar-split"
+                aria-label={t('tabs.openToSide', { title: tab.title })}
+                data-tooltip={t('tabs.openToSide', { title: tab.title })}
+                onClick={() => onSplit(tab.sessionId)}
+              >
+                <SplitViewIcon size={12} />
+              </button>
+            )}
             <button
               type="button"
               className="icon-btn tab-bar-close"

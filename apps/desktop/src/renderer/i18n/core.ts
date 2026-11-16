@@ -39,7 +39,8 @@ export const CORE_PT_BR = {
   'tabs.running': 'Executando',
   'tabs.queued': '{count} na fila',
   'tabs.closeTab': 'Fechar {title}',
-  'tabs.limitReached': 'Limite de 3 abas. Feche uma aba.',
+  'tabs.openToSide': 'Abrir {title} ao lado',
+  'tabs.closePane': 'Fechar painel de {title}',
 
   'update.availableTitle': 'Nova versão v{version} disponível',
   'update.viewNotes': 'Ver novidades',
@@ -222,7 +223,8 @@ export const CORE_EN_US: Record<CoreKey, string> = {
   'tabs.running': 'Running',
   'tabs.queued': '{count} queued',
   'tabs.closeTab': 'Close {title}',
-  'tabs.limitReached': 'Limit of 3 tabs. Close a tab.',
+  'tabs.openToSide': 'Open {title} to the side',
+  'tabs.closePane': 'Close {title} pane',
 
   'update.availableTitle': 'New version v{version} available',
   'update.viewNotes': 'Release notes',

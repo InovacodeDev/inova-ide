@@ -38,6 +38,7 @@ import { Lock } from 'pulsoicon-react/icons/lock';
 import { MessageCircle } from 'pulsoicon-react/icons/message-circle';
 import { Mic } from 'pulsoicon-react/icons/mic';
 import { Pencil } from 'pulsoicon-react/icons/pencil';
+import { Columns2 } from 'pulsoicon-react/icons/columns-2';
 import { PanelLeftClose } from 'pulsoicon-react/icons/panel-left-close';
 import { PanelLeftOpen } from 'pulsoicon-react/icons/panel-left-open';
 import { PanelRightClose } from 'pulsoicon-react/icons/panel-right-close';
@@ -255,6 +256,10 @@ export function SidebarExpandIcon({ size = 16 }: IconProps) {
 
 export function PanelRightCloseIcon({ size = 16 }: IconProps) {
   return <PanelRightClose size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function SplitViewIcon({ size = 16 }: IconProps) {
+  return <Columns2 size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function PanelRightOpenIcon({ size = 16 }: IconProps) {

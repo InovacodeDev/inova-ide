@@ -45,7 +45,8 @@ import { buildFailoverNotice, type FailoverNotice } from './failover-notice';
 import { HandoffModal } from './HandoffModal';
 import { ImportSessionModal, type ImportRequest } from './ImportSessionModal';
 import { Header } from './Header';
-import { AlertIcon } from './icons';
+import { AlertIcon, CloseIcon } from './icons';
+import { ProviderBadge } from './ProviderBadge';
 import { LoginModal, type LoginModalState } from './LoginModal';
 import { NewSessionView, type NewSessionTarget } from './NewSessionView';
 import { ProfileSyncModal } from './ProfileSyncModal';
@@ -68,7 +69,13 @@ import { useUpdates } from './useUpdates';
 import { refreshableUsageLabels, settleUsage, USAGE_REFRESH_INTERVAL_MS } from './usage-refresh';
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
 import { Sidebar, type View } from './Sidebar';
-import { adjacentSessionId, canOpenTab, tabsReducer, type Tab } from './tabs';
+import {
+  adjacentSessionId,
+  initialTabsState,
+  tabsReducer,
+  visibleSessionIds,
+  type Tab,
+} from './tabs';
 import { TooltipLayer } from './TooltipLayer';
 import { useGlobalShortcuts } from './useGlobalShortcuts';
 import { useSettings } from './useSettings';
@@ -194,19 +201,13 @@ export function App() {
   const t = (key: TranslationKey, params?: TranslationParams) => translate(locale, key, params);
   const sidebarCollapsed = settings?.appearance.sidebarCollapsed ?? false;
   const detailsCollapsed = settings?.appearance.detailsCollapsed ?? false;
-  const [tabs, dispatch] = useReducer(tabsReducer, { tabs: [], active: null });
+  const [tabs, dispatch] = useReducer(tabsReducer, initialTabsState);
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
 
   const latest = useRef({ accounts, projects, sessions, chats, tabs });
   useEffect(() => {
     latest.current = { accounts, projects, sessions, chats, tabs };
   });
-
-  const ensureTabRoom = (sessionId: string): boolean => {
-    if (canOpenTab(latest.current.tabs, sessionId)) return true;
-    warn('Limite de 3 abas. Feche uma aba.');
-    return false;
-  };
 
   const reloadAccounts = useCallback(async () => {
     const result = await call(() => window.inova.listAccounts());
@@ -548,7 +549,6 @@ export function App() {
   };
 
   const openChatTab = async (session: Session, knownProject?: ProjectView) => {
-    if (!ensureTabRoom(session.id)) return;
     const project =
       knownProject ??
       latest.current.projects.find((candidate) => candidate.id === session.projectId);
@@ -579,7 +579,6 @@ export function App() {
     parent: Session | null;
     isolatedWorktree?: boolean;
   }) => {
-    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.createSession({
         projectId: input.project.id,
@@ -601,7 +600,6 @@ export function App() {
   );
 
   const importSessions = async (input: { project: ProjectView; requests: ImportRequest[] }) => {
-    if (!ensureTabRoom('')) return;
     const imported: Session[] = [];
     for (const request of input.requests) {
       const result = await call(() =>
@@ -792,7 +790,6 @@ export function App() {
     targetAccountId?: string;
     copyWorktreeFiles: boolean;
   }) => {
-    if (!ensureTabRoom('')) return;
     const result = await call(() =>
       window.inova.forkSession({
         sessionId: input.session.id,
@@ -874,7 +871,6 @@ export function App() {
     targetAccountId: string;
     createWorktree: boolean;
   }) => {
-    if (!ensureTabRoom('')) return;
     const pendingPrompt = busyConflicts[input.session.id]?.prompt;
     const result = await call(() =>
       window.inova.handoffSession({
@@ -895,7 +891,6 @@ export function App() {
 
   const reviewSessionDiff = async (session: Session) => {
     if (reviewingDiff) return;
-    if (!ensureTabRoom('')) return;
     setReviewingDiff(true);
     try {
       const res = await window.inova.reviewSessionDiff({ sessionId: session.id });
@@ -922,7 +917,6 @@ export function App() {
       setNotice(translate(localeRef.current, 'app.parentNotFoundNotice'));
       return;
     }
-    if (!ensureTabRoom(parent.id)) return;
     await openChatTab(parent);
     seedComposer(parent.id, buildParentFixPrompt(findings));
     setNotice(translate(localeRef.current, 'app.sentToParentNotice'));
@@ -984,6 +978,12 @@ export function App() {
   const activateTab = (sessionId: string) => {
     setView('workspace');
     dispatch({ type: 'activate', sessionId });
+    void window.inova.markInboxRead({ sessionId });
+  };
+
+  const splitTab = (sessionId: string) => {
+    setView('workspace');
+    dispatch({ type: 'split', sessionId });
     void window.inova.markInboxRead({ sessionId });
   };
 
@@ -1354,6 +1354,7 @@ export function App() {
 
   const activeTab = tabs.tabs.find((tab) => tab.sessionId === tabs.active);
   const inWorkspace = view === 'workspace';
+  const paneIds = visibleSessionIds(tabs);
 
   const sessionById = new Map(
     Object.values(sessions)
@@ -1683,6 +1684,8 @@ export function App() {
           }
           onActivateTab={activateTab}
           onCloseTab={requestCloseTab}
+          paneIds={paneIds}
+          onSplitTab={splitTab}
         />
         <div className="app-body">
           <Sidebar
@@ -1844,172 +1847,209 @@ export function App() {
                 <p className="hint">{t('app.emptySessionHint')}</p>
               )}
               <div className="session-stage">
-                {tabs.tabs.map((tab) => {
-                  const tabSession = sessionById.get(tab.sessionId);
-                  const tabProject = projectOf(tab.sessionId);
-                  const tabAccount = effectiveAccountOf(tabSession, tabProject);
-                  const tabProvider = tabAccount?.provider ?? tab.provider;
-                  const tabAccountLabel = tabAccount?.label ?? tabProject?.accountLabel;
-                  const tabCatalog =
-                    (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
-                    PROVIDER_MODELS[tabProvider ?? 'claude'];
-                  const tabModelConfig = settings
-                    ? resolveModelConfig({
-                        provider: tabProvider ?? 'claude',
-                        model: tabSession?.model ?? null,
-                        effort: tabSession?.effort ?? null,
-                        settings,
-                      })
-                    : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
-                  const tabState = chats[tab.sessionId] ?? initialChatState;
-                  const tabQueuedTurns = turnQueue.filter(
-                    (item) => item.sessionId === tab.sessionId,
-                  );
-                  const tabWaitingForAccount =
-                    tabQueuedTurns.length > 0 &&
-                    isAccountBusyElsewhere({
-                      sessionId: tab.sessionId,
-                      accountId: tabAccount?.id,
-                      runningAccounts: new Map(
-                        Object.entries(chats)
-                          .filter(([, chat]) => chat.running)
-                          .map(([sessionId]) => [
-                            sessionId,
-                            effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))
-                              ?.id,
-                          ]),
-                      ),
-                    });
-                  const alternativeAccounts = accounts.filter(
-                    (candidate) => candidate.id !== tabAccount?.id,
-                  );
-                  const tabFailoverNotice = failoverNotices[tab.sessionId] ?? null;
-                  const tabFailoverFromId = tabFailoverNotice?.fromAccountId ?? null;
-                  return (
-                    <ChatView
-                      key={tab.sessionId}
-                      ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
-                      sessionId={tab.sessionId}
-                      projectId={tabProject?.id ?? null}
-                      state={tabState}
-                      visible={inWorkspace && tab.sessionId === tabs.active}
-                      provider={tabProvider}
-                      accountDisplay={accountDisplayOf(tabAccount, tabProject)}
-                      model={tabModelConfig.model}
-                      effort={tabModelConfig.effort}
-                      mode={tabSession?.mode ?? null}
-                      defaultModes={defaultModes}
-                      inWorktree={Boolean(tabSession?.worktree)}
-                      workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
-                      voiceHints={[
-                        ...(tabProject ? [folderName(tabProject.path)] : []),
-                        ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
-                      ]}
-                      dictationLanguage={settings?.voice.language}
-                      collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
-                      catalog={tabCatalog}
-                      readOnly={archivedIds.has(tab.sessionId)}
-                      queuedTurns={tabQueuedTurns}
-                      queuePaused={pausedQueueIds.includes(tab.sessionId)}
-                      queueWaitingForAccount={tabWaitingForAccount}
-                      busyConflict={busyConflicts[tab.sessionId] ?? null}
-                      failoverNotice={tabFailoverNotice}
-                      alternativeAccounts={alternativeAccounts}
-                      onChangeModelConfig={(patch) =>
-                        void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
-                      }
-                      onChangeMode={(mode) =>
-                        void updateSessionModelConfig({ sessionId: tab.sessionId, patch: { mode } })
-                      }
-                      onSetDefaultMode={(mode) => {
-                        if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
-                      }}
-                      onRestoreCheckpoint={(cp) =>
-                        setPendingRestore({
-                          sessionId: tab.sessionId,
-                          ref: cp.ref,
-                          skippedLargeFiles: cp.skippedLargeFiles,
+                <div className="session-panes">
+                  {tabs.tabs.map((tab) => {
+                    const tabSession = sessionById.get(tab.sessionId);
+                    const tabProject = projectOf(tab.sessionId);
+                    const tabAccount = effectiveAccountOf(tabSession, tabProject);
+                    const tabProvider = tabAccount?.provider ?? tab.provider;
+                    const tabAccountLabel = tabAccount?.label ?? tabProject?.accountLabel;
+                    const tabCatalog =
+                      (tabAccountLabel ? modelsByAccount[tabAccountLabel] : undefined) ??
+                      PROVIDER_MODELS[tabProvider ?? 'claude'];
+                    const tabModelConfig = settings
+                      ? resolveModelConfig({
+                          provider: tabProvider ?? 'claude',
+                          model: tabSession?.model ?? null,
+                          effort: tabSession?.effort ?? null,
+                          settings,
                         })
-                      }
-                      onForkTurn={
-                        tabSession
-                          ? (turnIndex) => {
-                              const totalUserTurns = tabState.items.filter(
-                                (item) => item.type === 'user',
-                              ).length;
-                              setPendingFork({
-                                session: tabSession,
-                                turnIndex,
-                                isLatestTurn: turnIndex >= totalUserTurns - 1,
-                              });
-                            }
-                          : undefined
-                      }
-                      onRewindTurn={(turnIndex) =>
-                        setPendingRewind({ sessionId: tab.sessionId, turnIndex })
-                      }
-                      onRegenerate={(extraDirs) =>
-                        setPendingRewind({
-                          sessionId: tab.sessionId,
-                          turnIndex:
-                            tabState.items.filter((item) => item.type === 'user').length - 1,
-                          resend: { extraDirs },
-                        })
-                      }
-                      composerSeed={pendingComposerText[tab.sessionId] ?? null}
-                      onComposerSeedApplied={() =>
-                        setPendingComposerText((current) =>
-                          Object.fromEntries(
-                            Object.entries(current).filter(([id]) => id !== tab.sessionId),
-                          ),
-                        )
-                      }
-                      onSendToParent={
-                        tabSession &&
-                        tabSession.parentId !== null &&
-                        (sessions[tabSession.projectId] ?? []).some(
-                          (item) => item.id === tabSession.parentId && item.archivedAt === null,
-                        )
-                          ? (findings) => void sendFindingsToParent(tabSession, findings)
-                          : undefined
-                      }
-                      onClearSession={() => void clearConversation(tab.sessionId)}
-                      onFeedback={({ turnIndex, value }) =>
-                        void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
-                      }
-                      onWarn={warn}
-                      onOpenHandoff={tabSession ? () => setPendingHandoff(tabSession) : undefined}
-                      onEnqueuePrompt={(input) =>
-                        void enqueuePrompt({
-                          sessionId: tab.sessionId,
-                          extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
-                          ...input,
-                        })
-                      }
-                      onResumeQueue={() => void resumeQueue(tab.sessionId)}
-                      onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
-                      onSwitchAccountAndRetry={({ accountId, prompt }) =>
-                        void switchAccountAndRetry({
-                          sessionId: tab.sessionId,
-                          accountId,
-                          prompt,
-                        })
-                      }
-                      onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
-                      onAcceptFailover={() => clearFailoverNotice(tab.sessionId)}
-                      onRevertFailover={
-                        tabFailoverFromId
-                          ? () => void revertFailoverAccount(tab.sessionId, tabFailoverFromId)
-                          : undefined
-                      }
-                      onPinNote={(note) => void pinSessionNote(tab.sessionId, note)}
-                      onSend={(prompt, extraDirs) =>
-                        void sendMessage(tab.sessionId, prompt, extraDirs)
-                      }
-                      onCancel={() => window.inova.cancelTurn(tab.sessionId)}
-                    />
-                  );
-                })}
+                      : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
+                    const tabState = chats[tab.sessionId] ?? initialChatState;
+                    const tabQueuedTurns = turnQueue.filter(
+                      (item) => item.sessionId === tab.sessionId,
+                    );
+                    const tabWaitingForAccount =
+                      tabQueuedTurns.length > 0 &&
+                      isAccountBusyElsewhere({
+                        sessionId: tab.sessionId,
+                        accountId: tabAccount?.id,
+                        runningAccounts: new Map(
+                          Object.entries(chats)
+                            .filter(([, chat]) => chat.running)
+                            .map(([sessionId]) => [
+                              sessionId,
+                              effectiveAccountOf(sessionById.get(sessionId), projectOf(sessionId))
+                                ?.id,
+                            ]),
+                        ),
+                      });
+                    const alternativeAccounts = accounts.filter(
+                      (candidate) => candidate.id !== tabAccount?.id,
+                    );
+                    const tabFailoverNotice = failoverNotices[tab.sessionId] ?? null;
+                    const tabFailoverFromId = tabFailoverNotice?.fromAccountId ?? null;
+                    const paneIndex = paneIds.indexOf(tab.sessionId);
+                    const focusedPane = tabs.split !== null && tab.sessionId === tabs.active;
+                    const focusPaneHandler =
+                      tabs.split !== null && !focusedPane
+                        ? () => activateTab(tab.sessionId)
+                        : undefined;
+                    return (
+                      <div
+                        key={tab.sessionId}
+                        className={`session-pane${focusedPane ? ' session-pane-focused' : ''}${paneIndex === 1 ? ' session-pane-second' : ''}`}
+                        style={paneIndex === -1 ? { display: 'none' } : { order: paneIndex }}
+                        onMouseDownCapture={focusPaneHandler}
+                        onFocusCapture={focusPaneHandler}
+                      >
+                        {tabs.split !== null && (
+                          <div className="session-pane-bar">
+                            <ProviderBadge provider={tabProvider} size={16} />
+                            <span className="session-pane-title">{tab.title}</span>
+                            <button
+                              type="button"
+                              className="icon-btn session-pane-close"
+                              aria-label={t('tabs.closePane', { title: tab.title })}
+                              data-tooltip={t('tabs.closePane', { title: tab.title })}
+                              onClick={() =>
+                                dispatch({ type: 'unsplit', sessionId: tab.sessionId })
+                              }
+                            >
+                              <CloseIcon size={12} />
+                            </button>
+                          </div>
+                        )}
+                        <ChatView
+                          ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
+                          sessionId={tab.sessionId}
+                          projectId={tabProject?.id ?? null}
+                          state={tabState}
+                          visible={inWorkspace && paneIndex !== -1}
+                          provider={tabProvider}
+                          accountDisplay={accountDisplayOf(tabAccount, tabProject)}
+                          model={tabModelConfig.model}
+                          effort={tabModelConfig.effort}
+                          mode={tabSession?.mode ?? null}
+                          defaultModes={defaultModes}
+                          inWorktree={Boolean(tabSession?.worktree)}
+                          workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
+                          voiceHints={[
+                            ...(tabProject ? [folderName(tabProject.path)] : []),
+                            ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
+                          ]}
+                          dictationLanguage={settings?.voice.language}
+                          collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
+                          catalog={tabCatalog}
+                          readOnly={archivedIds.has(tab.sessionId)}
+                          queuedTurns={tabQueuedTurns}
+                          queuePaused={pausedQueueIds.includes(tab.sessionId)}
+                          queueWaitingForAccount={tabWaitingForAccount}
+                          busyConflict={busyConflicts[tab.sessionId] ?? null}
+                          failoverNotice={tabFailoverNotice}
+                          alternativeAccounts={alternativeAccounts}
+                          onChangeModelConfig={(patch) =>
+                            void updateSessionModelConfig({ sessionId: tab.sessionId, patch })
+                          }
+                          onChangeMode={(mode) =>
+                            void updateSessionModelConfig({
+                              sessionId: tab.sessionId,
+                              patch: { mode },
+                            })
+                          }
+                          onSetDefaultMode={(mode) => {
+                            if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
+                          }}
+                          onRestoreCheckpoint={(cp) =>
+                            setPendingRestore({
+                              sessionId: tab.sessionId,
+                              ref: cp.ref,
+                              skippedLargeFiles: cp.skippedLargeFiles,
+                            })
+                          }
+                          onForkTurn={
+                            tabSession
+                              ? (turnIndex) => {
+                                  const totalUserTurns = tabState.items.filter(
+                                    (item) => item.type === 'user',
+                                  ).length;
+                                  setPendingFork({
+                                    session: tabSession,
+                                    turnIndex,
+                                    isLatestTurn: turnIndex >= totalUserTurns - 1,
+                                  });
+                                }
+                              : undefined
+                          }
+                          onRewindTurn={(turnIndex) =>
+                            setPendingRewind({ sessionId: tab.sessionId, turnIndex })
+                          }
+                          onRegenerate={(extraDirs) =>
+                            setPendingRewind({
+                              sessionId: tab.sessionId,
+                              turnIndex:
+                                tabState.items.filter((item) => item.type === 'user').length - 1,
+                              resend: { extraDirs },
+                            })
+                          }
+                          composerSeed={pendingComposerText[tab.sessionId] ?? null}
+                          onComposerSeedApplied={() =>
+                            setPendingComposerText((current) =>
+                              Object.fromEntries(
+                                Object.entries(current).filter(([id]) => id !== tab.sessionId),
+                              ),
+                            )
+                          }
+                          onSendToParent={
+                            tabSession &&
+                            tabSession.parentId !== null &&
+                            (sessions[tabSession.projectId] ?? []).some(
+                              (item) => item.id === tabSession.parentId && item.archivedAt === null,
+                            )
+                              ? (findings) => void sendFindingsToParent(tabSession, findings)
+                              : undefined
+                          }
+                          onClearSession={() => void clearConversation(tab.sessionId)}
+                          onFeedback={({ turnIndex, value }) =>
+                            void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
+                          }
+                          onWarn={warn}
+                          onOpenHandoff={
+                            tabSession ? () => setPendingHandoff(tabSession) : undefined
+                          }
+                          onEnqueuePrompt={(input) =>
+                            void enqueuePrompt({
+                              sessionId: tab.sessionId,
+                              extraDirs: busyConflicts[tab.sessionId]?.extraDirs,
+                              ...input,
+                            })
+                          }
+                          onResumeQueue={() => void resumeQueue(tab.sessionId)}
+                          onCancelQueuedTurn={(turnId) => void cancelQueuedTurn(turnId)}
+                          onSwitchAccountAndRetry={({ accountId, prompt }) =>
+                            void switchAccountAndRetry({
+                              sessionId: tab.sessionId,
+                              accountId,
+                              prompt,
+                            })
+                          }
+                          onDismissBusyConflict={() => clearBusyConflict(tab.sessionId)}
+                          onAcceptFailover={() => clearFailoverNotice(tab.sessionId)}
+                          onRevertFailover={
+                            tabFailoverFromId
+                              ? () => void revertFailoverAccount(tab.sessionId, tabFailoverFromId)
+                              : undefined
+                          }
+                          onPinNote={(note) => void pinSessionNote(tab.sessionId, note)}
+                          onSend={(prompt, extraDirs) =>
+                            void sendMessage(tab.sessionId, prompt, extraDirs)
+                          }
+                          onCancel={() => window.inova.cancelTurn(tab.sessionId)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
                 {activeSession && activeProject && (
                   <SessionDetails
                     sessionId={activeSession.id}

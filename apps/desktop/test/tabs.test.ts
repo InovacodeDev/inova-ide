@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'vitest';
-import { adjacentSessionId, canOpenTab, tabsReducer, type TabsState } from '../src/renderer/tabs';
+import {
+  adjacentSessionId,
+  initialTabsState,
+  tabsReducer,
+  visibleSessionIds,
+  type TabsState,
+} from '../src/renderer/tabs';
 
-const empty: TabsState = { tabs: [], active: null };
+const empty: TabsState = initialTabsState;
 const open = (state: TabsState, id: string): TabsState =>
   tabsReducer(state, {
     type: 'open',
@@ -32,7 +38,7 @@ describe('tabsReducer', () => {
     const first = tabsReducer({ ...three, active: 'a' }, { type: 'close', sessionId: 'a' });
     expect(first.active).toBe('b');
     const last = tabsReducer(open(empty, 'a'), { type: 'close', sessionId: 'a' });
-    expect(last).toEqual({ tabs: [], active: null });
+    expect(last).toEqual({ tabs: [], active: null, split: null });
   });
 
   test('closing an inactive tab keeps the active one', () => {
@@ -96,28 +102,79 @@ describe('adjacentSessionId', () => {
   });
 });
 
-describe('tab limit', () => {
+describe('unlimited tabs', () => {
+  test('opens more than three tabs', () => {
+    const state = ['a', 'b', 'c', 'd', 'e'].reduce(open, empty);
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(state.active).toBe('e');
+  });
+});
+
+describe('split view', () => {
   const three = open(open(open(empty, 'a'), 'b'), 'c');
+  const split = (state: TabsState, sessionId: string) =>
+    tabsReducer(state, { type: 'split', sessionId });
 
-  test('canOpenTab is false for a new id when full', () => {
-    expect(canOpenTab(three, 'd')).toBe(false);
-  });
-
-  test('canOpenTab is true for an existing id when full', () => {
-    expect(canOpenTab(three, 'a')).toBe(true);
-  });
-
-  test('canOpenTab is true with room left', () => {
-    expect(canOpenTab(open(open(empty, 'a'), 'b'), 'c')).toBe(true);
-  });
-
-  test('opening a fourth tab returns the same state', () => {
-    expect(open(three, 'd')).toBe(three);
-  });
-
-  test('opening an existing tab when full activates it', () => {
-    const state = open(three, 'a');
-    expect(state.tabs).toHaveLength(3);
+  test('shows the active tab and the chosen tab side by side and focuses the new pane', () => {
+    const state = split(three, 'a');
+    expect(state.split).toEqual(['c', 'a']);
     expect(state.active).toBe('a');
+    expect(visibleSessionIds(state)).toEqual(['c', 'a']);
+  });
+
+  test('ignores a split of the active tab or without an active tab', () => {
+    expect(split(three, 'c')).toBe(three);
+    const unfocused: TabsState = { ...three, active: null };
+    expect(split(unfocused, 'a')).toBe(unfocused);
+  });
+
+  test('a second split replaces the unfocused pane', () => {
+    const state = split(tabsReducer(split(three, 'a'), { type: 'activate', sessionId: 'c' }), 'b');
+    expect(state.split).toEqual(['c', 'b']);
+    expect(state.active).toBe('b');
+  });
+
+  test('activating a visible pane only moves the focus', () => {
+    const state = tabsReducer(split(three, 'a'), { type: 'activate', sessionId: 'c' });
+    expect(state.split).toEqual(['c', 'a']);
+    expect(state.active).toBe('c');
+  });
+
+  test('activating a hidden tab replaces the focused pane', () => {
+    const state = tabsReducer(split(three, 'a'), { type: 'activate', sessionId: 'b' });
+    expect(state.split).toEqual(['c', 'b']);
+    expect(state.active).toBe('b');
+  });
+
+  test('opening a new tab replaces the focused pane', () => {
+    const state = open(split(three, 'a'), 'd');
+    expect(state.split).toEqual(['c', 'd']);
+    expect(state.active).toBe('d');
+    expect(state.tabs).toHaveLength(4);
+  });
+
+  test('unsplit closes the pane and focuses the other one', () => {
+    const state = tabsReducer(split(three, 'a'), { type: 'unsplit', sessionId: 'a' });
+    expect(state.split).toBeNull();
+    expect(state.active).toBe('c');
+    expect(state.tabs).toHaveLength(3);
+  });
+
+  test('closing a tab in a pane ends the split and keeps the other pane', () => {
+    const state = tabsReducer(split(three, 'a'), { type: 'close', sessionId: 'c' });
+    expect(state.split).toBeNull();
+    expect(state.active).toBe('a');
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['a', 'b']);
+  });
+
+  test('closing a hidden tab keeps the split', () => {
+    const state = tabsReducer(split(three, 'a'), { type: 'close', sessionId: 'b' });
+    expect(state.split).toEqual(['c', 'a']);
+    expect(state.active).toBe('a');
+  });
+
+  test('without split only the active tab is visible', () => {
+    expect(visibleSessionIds(three)).toEqual(['c']);
+    expect(visibleSessionIds(empty)).toEqual([]);
   });
 });

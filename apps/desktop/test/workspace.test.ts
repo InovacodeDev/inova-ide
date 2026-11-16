@@ -36,6 +36,7 @@ describe('workspaceFromTabs', () => {
     const state: TabsState = {
       tabs: [tab('a'), tab('b')],
       active: 'b',
+      split: null,
     };
     expect(workspaceFromTabs({ state, lastChatActive: null })).toEqual({
       openSessionIds: ['a', 'b'],
@@ -44,12 +45,12 @@ describe('workspaceFromTabs', () => {
   });
 
   test('falls back to the last active chat when active is null', () => {
-    const state: TabsState = { tabs: [tab('a'), tab('b')], active: null };
+    const state: TabsState = { tabs: [tab('a'), tab('b')], active: null, split: null };
     expect(workspaceFromTabs({ state, lastChatActive: 'a' }).activeSessionId).toBe('a');
   });
 
   test('returns null active when no chat tab matches', () => {
-    const state: TabsState = { tabs: [], active: null };
+    const state: TabsState = { tabs: [], active: null, split: null };
     expect(workspaceFromTabs({ state, lastChatActive: 'gone' })).toEqual({
       openSessionIds: [],
       activeSessionId: null,
@@ -80,21 +81,15 @@ describe('restoreTabs', () => {
     expect(result.activeSessionId).toBe('b');
   });
 
-  test('caps restored tabs at three and keeps the saved active tab when kept', () => {
-    const many = { p: ['a', 'b', 'c', 'd', 'e'].map(session) };
-    const kept = restoreTabs({
-      workspace: { openSessionIds: ['a', 'b', 'c', 'd', 'e'], activeSessionId: 'b' },
-      sessions: many,
+  test('restores every saved tab without a cap', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    const result = restoreTabs({
+      workspace: { openSessionIds: ids, activeSessionId: 'e' },
+      sessions: { p: ids.map(session) },
       projects: [project],
     });
-    expect(kept.tabs.map((t) => t.sessionId)).toEqual(['a', 'b', 'c']);
-    expect(kept.activeSessionId).toBe('b');
-    const dropped = restoreTabs({
-      workspace: { openSessionIds: ['a', 'b', 'c', 'd', 'e'], activeSessionId: 'e' },
-      sessions: many,
-      projects: [project],
-    });
-    expect(dropped.activeSessionId).toBe('a');
+    expect(result.tabs.map((t) => t.sessionId)).toEqual(ids);
+    expect(result.activeSessionId).toBe('e');
   });
 
   test('returns nothing for an empty workspace', () => {
