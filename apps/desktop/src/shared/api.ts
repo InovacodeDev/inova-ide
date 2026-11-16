@@ -228,9 +228,9 @@ export interface OpenFilePathInput {
 }
 
 export interface InovaApi {
-  readFilePreview?(input: ReadFilePreviewInput): Promise<Result<FilePreview>>;
-  pickViewerFiles?(): Promise<Result<string[]>>;
-  openFilePath?(input: OpenFilePathInput): Promise<Result<null>>;
+  readFilePreview(input: ReadFilePreviewInput): Promise<Result<FilePreview>>;
+  pickViewerFiles(): Promise<Result<string[]>>;
+  openFilePath(input: OpenFilePathInput): Promise<Result<null>>;
   listAccounts(): Promise<Result<AccountView[]>>;
   addAccount(input: { provider: string; label: string }): Promise<Result<AccountView>>;
   removeAccount(input: { label: string; force: boolean }): Promise<Result<null>>;

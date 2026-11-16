@@ -102,6 +102,9 @@ export function registerIpc(deps: {
   handle(CHANNELS.downloadVoiceModel, (input) => voice.downloadVoiceModel(input));
   handle(CHANNELS.deleteVoiceModel, (input) => voice.deleteVoiceModel(input));
   handle(CHANNELS.transcribeAudio, (input) => voice.transcribeAudio(input));
+  handle(CHANNELS.readFilePreview, (input) => handlers.readFilePreview(input));
+  handle(CHANNELS.pickViewerFiles, () => handlers.pickViewerFiles());
+  handle(CHANNELS.openFilePath, (input) => handlers.openFilePath(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);

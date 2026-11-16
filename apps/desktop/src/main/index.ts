@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -8,7 +8,7 @@ import { getSettings } from '@inova/core/settings';
 import { dataRoot } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
-import { Notification, app, BrowserWindow, dialog, shell } from 'electron';
+import { Notification, app, BrowserWindow, dialog, protocol, shell } from 'electron';
 import * as pty from 'node-pty';
 import { CHANNELS } from '../shared/api.js';
 import type { AttachmentKind, PickedAttachment } from '../shared/api.js';
@@ -17,6 +17,7 @@ import type { SpawnChild } from './chat.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
+import { createPreviewRegistry } from './preview-protocol.js';
 import { killProcessGroup } from './process-group.js';
 import {
   INSTALL_TIMEOUT_MS,
@@ -142,6 +143,13 @@ async function pickFolder(): Promise<string | null> {
   return result.canceled ? null : (result.filePaths[0] ?? null);
 }
 
+async function pickViewerFiles(): Promise<string[]> {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+  });
+  return result.canceled ? [] : result.filePaths;
+}
+
 const ATTACHMENT_FILTERS: Readonly<Record<AttachmentKind, Electron.FileFilter[]>> = {
   images: [
     {
@@ -222,8 +230,40 @@ async function runSelftest(): Promise<void> {
 
 app.setName('InovaIDE');
 
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'inova-preview',
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
+
 void app.whenReady().then(async () => {
   if (process.env['INOVA_SELFTEST'] !== '1') {
+    const previewRegistry = createPreviewRegistry();
+    protocol.handle('inova-preview', async (request) => {
+      const resolved = await previewRegistry.resolveRequest(request.url);
+      if (!resolved) {
+        return new Response('Acesso negado ou recurso não encontrado.', {
+          status: 403,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+      try {
+        const data = await readFile(resolved.filePath);
+        return new Response(data, {
+          status: 200,
+          headers: {
+            'Content-Type': resolved.mimeType,
+            'Cache-Control': 'no-store',
+          },
+        });
+      } catch {
+        return new Response('Arquivo não encontrado.', {
+          status: 404,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        });
+      }
+    });
     const notifier = createNotifier({
       platform: process.platform,
       isSupported: () => Notification.isSupported(),
@@ -386,6 +426,8 @@ void app.whenReady().then(async () => {
       baseEnv,
       pickFolder,
       pickAttachments,
+      pickViewerFiles,
+      previewRegistry,
     });
     handlers = created;
     const autoArchive = (): void => {
