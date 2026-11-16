@@ -152,7 +152,7 @@ function CodeViewer({ code, lang, filePath, targetLine, sizeBytes }: CodeViewerP
         targetElement.classList.remove('file-viewer-line-active');
       };
     }
-  }, [matches, currentMatchIdx]);
+  }, [matches, currentMatchIdx, highlightedHtml]);
 
   useEffect(() => {
     if (!targetLine || targetLine <= 0) return;
