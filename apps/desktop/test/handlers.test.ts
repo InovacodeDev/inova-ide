@@ -2953,6 +2953,30 @@ test('circuit breaker pauses queue on session cost limit until resumeSessionQueu
   expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
 });
 
+test('context circuit breaker does not stop a /compact turn', async () => {
+  const { root, handlers, cancel, emitted } = await setup();
+  const { session } = await seedSession(root);
+  unwrap(await handlers.updateSettings({ sessions: { maxContextPercent: 80 } }));
+  unwrap(await handlers.sendMessage({ sessionId: session.id, prompt: '/compact' }));
+
+  handlers.handleChatEvent(session.id, {
+    kind: 'context',
+    usedTokens: 95_000,
+    windowTokens: 100_000,
+    model: null,
+  });
+
+  expect(cancel).not.toHaveBeenCalled();
+  expect(
+    emitted.some(
+      (item) =>
+        item.sessionId === session.id &&
+        item.event.kind === 'error' &&
+        item.event.message.startsWith('CIRCUIT_BREAKER:'),
+    ),
+  ).toBe(false);
+});
+
 test('circuit breaker stops the turn and pauses queue when context usage exceeds limit', async () => {
   const { handlers, cancel, send, chatInUse, emitted, session, accountId } =
     await startQueuedSession();

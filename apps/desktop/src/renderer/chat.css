@@ -1627,7 +1627,19 @@
 .chat-error-actions {
   margin-top: 8px;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.chat-error-actions .chat-error-text-action {
+  border-color: transparent;
+  background: none;
+  color: var(--error);
+}
+
+.chat-error-actions .chat-error-text-action:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
 }
 
 .chat-diff-stat-add {

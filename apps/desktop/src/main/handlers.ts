@@ -664,6 +664,11 @@ export function createHandlers(deps: HandlerDeps) {
     return projectId !== undefined && projectAutoVerify.get(projectId) === true;
   }
 
+  function isCompactTurn(sessionId: string): boolean {
+    const prompt = activeTurnInputs.get(sessionId)?.prompt;
+    return prompt !== undefined && splitLeadingSlash(prompt.trim())?.name === 'compact';
+  }
+
   function emitCircuitBreakerError(sessionId: string, message: string): void {
     const errorEvent: ChatEvent = { kind: 'error', message };
     deps.emit(sessionId, errorEvent);
@@ -1407,7 +1412,7 @@ export function createHandlers(deps: HandlerDeps) {
         });
       }
     }
-    if (event.kind === 'context') {
+    if (event.kind === 'context' && !isCompactTurn(sessionId)) {
       const reason = circuitBreaker.recordContext({
         sessionId,
         usedTokens: event.usedTokens,

@@ -9,6 +9,7 @@ import {
 import { MAX_PINNED_MEMORY_CHARS, buildParentFixPrompt } from '@inova/core/handoff';
 import { PROVIDER_MODELS, resolveModelConfig, type ProviderModels } from '@inova/core/models';
 import { PROVIDER_MODES, resolveExecutionMode } from '@inova/core/modes';
+import { nativeSlashCommands } from '@inova/core/slash-commands';
 import type {
   EffortLevel,
   ExecutionMode,
@@ -155,6 +156,7 @@ export function App() {
     resend?: { extraDirs: string[] };
   } | null>(null);
   const [pendingComposerText, setPendingComposerText] = useState<Record<string, string>>({});
+  const [pendingCompactContinue, setPendingCompactContinue] = useState<Record<string, string>>({});
   const [pendingHandoff, setPendingHandoff] = useState<Session | null>(null);
   const [selectedComparisonGroupId, setSelectedComparisonGroupId] = useState<string | null>(null);
   const [profileSyncProject, setProfileSyncProject] = useState<ProjectView | null>(null);
@@ -808,6 +810,26 @@ export function App() {
   const seedComposer = (sessionId: string, text: string) =>
     setPendingComposerText((current) => ({ ...current, [sessionId]: text }));
 
+  useEffect(() => {
+    const finished = Object.entries(pendingCompactContinue).filter(
+      ([sessionId]) => chats[sessionId]?.running === false,
+    );
+    if (finished.length === 0) return;
+    const seeds = finished.filter(
+      ([sessionId]) => chats[sessionId]?.items.at(-1)?.type !== 'error',
+    );
+    setPendingCompactContinue((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([sessionId]) =>
+          finished.every(([doneId]) => doneId !== sessionId),
+        ),
+      ),
+    );
+    if (seeds.length > 0) {
+      setPendingComposerText((current) => ({ ...current, ...Object.fromEntries(seeds) }));
+    }
+  }, [chats, pendingCompactContinue]);
+
   const confirmRewindTurn = async (input: { sessionId: string; turnIndex: number }) => {
     const result = await call(() => window.inova.rewindSession(input));
     if (!result) return;
@@ -821,20 +843,28 @@ export function App() {
     await loadChat(sessionId, 'replace');
   };
 
-  const clearAndContinue = async (sessionId: string) => {
+  const continuePromptFor = (sessionId: string): string => {
     const lastRequest = (latest.current.chats[sessionId]?.items ?? [])
       .flatMap((item) => (item.type === 'user' ? [item.text.trim()] : []))
       .filter((text) => text !== '')
       .at(-1);
+    return lastRequest === undefined
+      ? t('chat.continuePrompt')
+      : t('chat.continuePromptWithRequest', { request: lastRequest });
+  };
+
+  const clearAndContinue = async (sessionId: string) => {
+    const prompt = continuePromptFor(sessionId);
     const result = await call(() => window.inova.clearSession({ sessionId, keepContext: true }));
     if (!result) return;
     await loadChat(sessionId, 'replace');
-    seedComposer(
-      sessionId,
-      lastRequest === undefined
-        ? t('chat.continuePrompt')
-        : t('chat.continuePromptWithRequest', { request: lastRequest }),
-    );
+    seedComposer(sessionId, prompt);
+  };
+
+  const compactAndContinue = async (sessionId: string) => {
+    const prompt = continuePromptFor(sessionId);
+    if (!(await sendMessage(sessionId, '/compact'))) return;
+    setPendingCompactContinue((current) => ({ ...current, [sessionId]: prompt }));
   };
 
   const regenerateLastTurn = async (input: { sessionId: string; extraDirs: string[] }) => {
@@ -2038,6 +2068,14 @@ export function App() {
                           }
                           onClearSession={() => void clearConversation(tab.sessionId)}
                           onClearAndContinue={() => void clearAndContinue(tab.sessionId)}
+                          onCompactAndContinue={
+                            tabProvider &&
+                            nativeSlashCommands(tabProvider).some(
+                              (command) => command.name === 'compact',
+                            )
+                              ? () => void compactAndContinue(tab.sessionId)
+                              : undefined
+                          }
                           onFeedback={({ turnIndex, value }) =>
                             void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
                           }

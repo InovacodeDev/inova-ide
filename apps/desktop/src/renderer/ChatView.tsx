@@ -137,6 +137,7 @@ export interface ChatViewProps {
   onRegenerate?: (extraDirs: string[]) => void;
   onClearSession?: () => void;
   onClearAndContinue?: () => void;
+  onCompactAndContinue?: () => void;
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
@@ -429,6 +430,7 @@ interface MessageProps {
   queuePaused?: boolean;
   onResumeQueue?: () => void;
   onClearAndContinue?: () => void;
+  onCompactAndContinue?: () => void;
 }
 
 interface AgentMetaProps {
@@ -550,6 +552,7 @@ function Message({
   queuePaused = false,
   onResumeQueue,
   onClearAndContinue,
+  onCompactAndContinue,
 }: MessageProps) {
   const { t, locale } = useI18n();
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
@@ -693,11 +696,13 @@ function Message({
         </div>
       );
     case 'error': {
-      const canClearAndContinue =
-        Boolean(onClearAndContinue) && isContextCircuitBreakerMessage(item.message);
+      const contextTrip = isContextCircuitBreakerMessage(item.message);
+      const canCompactAndContinue = contextTrip && Boolean(onCompactAndContinue);
+      const canClearAndContinue = contextTrip && Boolean(onClearAndContinue);
+      const hasContextAction = canCompactAndContinue || canClearAndContinue;
       const showCircuitActions =
         isCircuitBreakerMessage(item.message) &&
-        (canClearAndContinue ||
+        (hasContextAction ||
           (queuePaused && Boolean(onResumeQueue)) ||
           (Boolean(latestCheckpoint) && Boolean(onRestoreCheckpoint)));
       const displayError =
@@ -720,10 +725,21 @@ function Message({
             ) : null}
             {showCircuitActions ? (
               <div className="chat-error-actions">
-                {canClearAndContinue ? (
+                {canCompactAndContinue ? (
                   <button
                     type="button"
                     className="btn btn-sm btn-primary"
+                    disabled={busy}
+                    data-tooltip={t('chat.compactAndContinueTooltip')}
+                    onClick={onCompactAndContinue}
+                  >
+                    {t('chat.compactAndContinue')}
+                  </button>
+                ) : null}
+                {canClearAndContinue ? (
+                  <button
+                    type="button"
+                    className={canCompactAndContinue ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
                     disabled={busy}
                     data-tooltip={t('chat.clearAndContinueTooltip')}
                     onClick={onClearAndContinue}
@@ -734,7 +750,7 @@ function Message({
                 {queuePaused && onResumeQueue ? (
                   <button
                     type="button"
-                    className={canClearAndContinue ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
+                    className={hasContextAction ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
                     disabled={busy}
                     onClick={onResumeQueue}
                   >
@@ -744,7 +760,7 @@ function Message({
                 {latestCheckpoint && onRestoreCheckpoint ? (
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn btn-sm chat-error-text-action"
                     disabled={busy}
                     onClick={() => onRestoreCheckpoint(latestCheckpoint)}
                   >
@@ -929,6 +945,7 @@ export function ChatView({
   onRegenerate,
   onClearSession,
   onClearAndContinue,
+  onCompactAndContinue,
   onFeedback,
   onWarn,
   onOpenHandoff,
@@ -1382,6 +1399,7 @@ export function ChatView({
         queuePaused={queuePaused}
         onResumeQueue={onResumeQueue}
         onClearAndContinue={readOnly ? undefined : onClearAndContinue}
+        onCompactAndContinue={readOnly ? undefined : onCompactAndContinue}
         onFixVerification={(fixPrompt) => {
           if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
         }}

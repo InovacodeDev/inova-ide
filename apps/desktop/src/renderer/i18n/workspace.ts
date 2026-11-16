@@ -549,6 +549,9 @@ export const WORKSPACE_PT_BR = {
   'chat.checkpointPreservedFiles': '{count} arquivo(s) >10MB preservado(s)',
   'chat.continueOtherAccount': 'Continuar com resumo em outra conta',
   'chat.resumeQueue': 'Retomar fila',
+  'chat.compactAndContinue': 'Compactar e continuar',
+  'chat.compactAndContinueTooltip':
+    'Resume a conversa com /compact e, ao terminar, prepara o pedido de continuação',
   'chat.clearAndContinue': 'Limpar e continuar',
   'chat.clearAndContinueTooltip':
     'Limpa a conversa, leva um resumo dela para a próxima mensagem e prepara o pedido de continuação',
@@ -1253,6 +1256,9 @@ export const WORKSPACE_EN_US: Record<WorkspaceKey, string> = {
   'chat.checkpointPreservedFiles': '{count} file(s) >10MB preserved',
   'chat.continueOtherAccount': 'Continue with summary in another account',
   'chat.resumeQueue': 'Resume queue',
+  'chat.compactAndContinue': 'Compact and continue',
+  'chat.compactAndContinueTooltip':
+    'Summarizes the conversation with /compact and, when done, prepares the continue request',
   'chat.clearAndContinue': 'Clear and continue',
   'chat.clearAndContinueTooltip':
     'Clears the conversation, carries a summary into the next message, and prepares the continue request',
