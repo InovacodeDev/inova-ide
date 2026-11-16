@@ -1,4 +1,7 @@
+import { realpath } from 'node:fs/promises';
+import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import type { ChatEvent } from './chat-types.js';
+import { tryRunGit } from './git-exec.js';
 
 const PATH_EDIT_TOOLS = new Set([
   'edit',
@@ -33,6 +36,11 @@ const PATCH_KEYS = ['patch', 'patchText', 'patch_text', 'input'] as const;
 // REGEX: captures the target path of apply_patch headers ("*** Update File: x", "*** Move to: y") and unified diff "+++ b/x" lines.
 const PATCH_PATH_PATTERN =
   /^(?:\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)|\+\+\+ b\/(.+)|--- a\/(.+))$/gm;
+
+export interface RepoPathRoot {
+  dir: string;
+  prefix: string;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -99,4 +107,62 @@ export function extractEditedPaths(events: readonly ChatEvent[]): string[] {
     for (const path of pathsFromToolUse(event.name, event.input)) paths.add(path);
   }
   return [...paths];
+}
+
+function insideRoot(root: RepoPathRoot, absolutePath: string): string | null {
+  const rel = relative(root.dir, absolutePath);
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) return null;
+  return posix.join(root.prefix, rel.split(sep).join('/'));
+}
+
+export function toRepoRelativePaths(input: {
+  paths: readonly string[];
+  cwd: string;
+  roots: readonly RepoPathRoot[];
+}): string[] {
+  const result = new Set<string>();
+  for (const path of input.paths) {
+    const absolutePath = isAbsolute(path) ? path : resolve(input.cwd, path);
+    for (const root of input.roots) {
+      const repoPath = insideRoot(root, absolutePath);
+      if (repoPath !== null) {
+        result.add(repoPath);
+        break;
+      }
+    }
+  }
+  return [...result];
+}
+
+async function realpathOrSelf(path: string): Promise<string> {
+  return realpath(path).catch(() => path);
+}
+
+export async function sessionEditedRepoPaths(input: {
+  cwd: string;
+  events: readonly ChatEvent[];
+}): Promise<string[]> {
+  const paths = extractEditedPaths(input.events);
+  if (paths.length === 0) return [];
+  const [toplevel, prefix] = await Promise.all([
+    tryRunGit({ cwd: input.cwd, args: ['rev-parse', '--show-toplevel'] }),
+    tryRunGit({ cwd: input.cwd, args: ['rev-parse', '--show-prefix'] }),
+  ]);
+  if (!toplevel.ok || !prefix.ok) return [];
+  const repoDir = toplevel.stdout.trim();
+  const cwdPrefix = prefix.stdout.trim();
+  const [realCwd, realRepoDir] = await Promise.all([
+    realpathOrSelf(input.cwd),
+    realpathOrSelf(repoDir),
+  ]);
+  return toRepoRelativePaths({
+    paths,
+    cwd: input.cwd,
+    roots: [
+      { dir: input.cwd, prefix: cwdPrefix },
+      { dir: realCwd, prefix: cwdPrefix },
+      { dir: repoDir, prefix: '' },
+      { dir: realRepoDir, prefix: '' },
+    ],
+  });
 }
