@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'vitest';
 import type { UpdateInfo } from '../src/shared/api';
 import {
+  UPGRADE_COMMAND,
+  WINGET_UPGRADE_COMMAND,
   changelogTitle,
   installStageView,
   isUpdateDismissed,
   publishedChangelog,
   shouldShowUpdateToast,
   shouldShowWhatsNew,
+  upgradeCommandForPlatform,
 } from '../src/renderer/update-state';
 
 const available: UpdateInfo = {
@@ -108,5 +111,13 @@ describe('installStageView', () => {
     expect(percents).toEqual([...percents].sort((a, b) => a - b));
     expect(new Set(percents).size).toBe(percents.length);
     expect(percents.at(-1)).toBe(100);
+  });
+});
+
+describe('upgradeCommandForPlatform', () => {
+  test('returns Homebrew on macOS, Winget on Windows and null on Linux', () => {
+    expect(upgradeCommandForPlatform('MacIntel')).toBe(UPGRADE_COMMAND);
+    expect(upgradeCommandForPlatform('Win32')).toBe(WINGET_UPGRADE_COMMAND);
+    expect(upgradeCommandForPlatform('Linux x86_64')).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { getSettings } from '@inova/core/settings';
@@ -17,7 +18,12 @@ import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { killProcessGroup } from './process-group.js';
-import { INSTALL_TIMEOUT_MS, createUpdateInstaller, createUpdateService } from './updates.js';
+import {
+  INSTALL_TIMEOUT_MS,
+  WINGET_PACKAGE_ID,
+  createUpdateInstaller,
+  createUpdateService,
+} from './updates.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { findBinary, loginShellPath } from './shell-env.js';
@@ -272,6 +278,80 @@ void app.whenReady().then(async () => {
       relaunch: () => {
         app.relaunch();
         app.quit();
+      },
+      quit: () => app.quit(),
+      isWinInstalled: (execPath) => existsSync(join(dirname(execPath), 'Uninstall InovaIDE.exe')),
+      findWinget: async () => {
+        const env = await baseEnv();
+        const candidates = [
+          'winget.exe',
+          ...(process.env['LOCALAPPDATA']
+            ? [join(process.env['LOCALAPPDATA'], 'Microsoft', 'WindowsApps', 'winget.exe')]
+            : []),
+        ];
+        for (const candidate of candidates) {
+          try {
+            await execFileAsync(candidate, ['--version'], { env, timeout: SHELL_TIMEOUT_MS });
+            return candidate;
+          } catch {
+            continue;
+          }
+        }
+        return undefined;
+      },
+      runOutput: async (file, args) => {
+        const { stdout } = await execFileAsync(file, args, {
+          env: await baseEnv(),
+          timeout: INSTALL_TIMEOUT_MS,
+          encoding: 'utf8',
+        });
+        return stdout;
+      },
+      spawnWinUpgrade: ({ winget, execPath, pid }) => {
+        const psPath = join(
+          process.env['SystemRoot'] ?? 'C:\\Windows',
+          'System32',
+          'WindowsPowerShell',
+          'v1.0',
+          'powershell.exe',
+        );
+        const script = [
+          '$pidToWait = [int]$env:INOVA_WAIT_PID',
+          'if ($pidToWait -gt 0) { while (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 250 } }',
+          `& $env:INOVA_WINGET_BIN upgrade --id ${WINGET_PACKAGE_ID} --exact --silent --accept-package-agreements --accept-source-agreements`,
+          'if ($env:INOVA_APP_EXE -and (Test-Path -LiteralPath $env:INOVA_APP_EXE)) { Start-Process -FilePath $env:INOVA_APP_EXE }',
+        ].join('; ');
+        return new Promise((resolve, reject) => {
+          const child = spawn(
+            psPath,
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-WindowStyle',
+              'Hidden',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-Command',
+              script,
+            ],
+            {
+              detached: true,
+              stdio: 'ignore',
+              windowsHide: true,
+              env: {
+                ...process.env,
+                INOVA_WINGET_BIN: winget,
+                INOVA_APP_EXE: execPath,
+                INOVA_WAIT_PID: String(pid),
+              },
+            },
+          );
+          child.once('spawn', () => {
+            child.unref();
+            resolve();
+          });
+          child.once('error', reject);
+        });
       },
       onProgress: (stage) => sendToWindow(CHANNELS.updateProgress, stage),
     });

@@ -4,11 +4,11 @@ Workspace desktop e CLI multi-conta para Claude, Codex e Gemini.
 
 ## Plataformas Suportadas
 
-| Plataforma            | Arquitetura | Formato de Distribuição                               |
-| --------------------- | ----------- | ----------------------------------------------------- |
-| macOS (Apple Silicon) | `arm64`     | Homebrew Cask (`InovaIDE.app` + CLI `inova`) e `.dmg` |
-| Windows               | `x64`       | Instalador `.exe` (NSIS) e arquivo portátil `.zip`    |
-| Linux                 | `x64`       | `.AppImage`, `.deb` e `.tar.gz`                       |
+| Plataforma            | Arquitetura | Formato de Distribuição                                  |
+| --------------------- | ----------- | -------------------------------------------------------- |
+| macOS (Apple Silicon) | `arm64`     | Homebrew Cask (`InovaIDE.app` + CLI `inova`) e `.dmg`    |
+| Windows               | `x64`       | Winget (`InovacodeDev.InovaIDE`), `.exe` (NSIS) e `.zip` |
+| Linux                 | `x64`       | `.AppImage`, `.deb` e `.tar.gz`                          |
 
 ## Instalação e Atualização
 
@@ -42,7 +42,25 @@ Para remover o aplicativo e apagar todos os dados em `~/.inova`:
 brew uninstall --cask --zap inova-ide
 ```
 
-### Windows e Linux
+### Windows (Winget)
+
+```powershell
+winget install InovacodeDev.InovaIDE
+```
+
+Para atualizar para a versão mais recente:
+
+```powershell
+winget upgrade InovacodeDev.InovaIDE
+```
+
+Para remover o aplicativo mantendo contas e sessões em `~/.inova`:
+
+```powershell
+winget uninstall InovacodeDev.InovaIDE
+```
+
+### Windows e Linux (Downloads Diretos)
 
 Baixe o instalador ou pacote correspondente em [GitHub Releases](https://github.com/InovacodeDev/inova-ide/releases):
 
@@ -53,8 +71,8 @@ Cada artefato acompanha um arquivo `.sha256` para verificação de integridade.
 
 ## Comandos da CLI (`inova`)
 
-No macOS via Homebrew, o binário `inova` é linkado automaticamente no `PATH`.
-Em pacotes portáteis de Windows e Linux, o wrapper fica em `resources/bin/`.
+No macOS via Homebrew e no Windows via instalador `.exe` / Winget, o comando `inova` é adicionado automaticamente ao `PATH`.
+Em pacotes portáteis de Windows (`.zip`) e Linux, o wrapper fica em `resources/bin/`.
 
 ```text
 inova account add <claude|codex|gemini> <label>
@@ -97,4 +115,4 @@ pnpm package:win
 pnpm package:linux
 ```
 
-Para instruções completas de release e manutenção do tap Homebrew, consulte [docs/release-homebrew.md](docs/release-homebrew.md).
+Para instruções completas de release e manutenção de pacotes, consulte [docs/release-homebrew.md](docs/release-homebrew.md) e [docs/release-winget.md](docs/release-winget.md).

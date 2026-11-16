@@ -100,13 +100,31 @@ jobs:
           sh apps/desktop/scripts/smoke-linux.sh \
             "release/InovaIDE-${{ needs.validate.outputs.version }}-linux-x64.tar.gz" \
             "${{ needs.validate.outputs.version }}"
-      - name: Smoke test Windows zip
+      - name: Smoke test Windows packages
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           apps/desktop/scripts/smoke-win.ps1 `
             -ZipPath "release/InovaIDE-${{ needs.validate.outputs.version }}-win-x64.zip" `
+            -ExePath "release/InovaIDE-${{ needs.validate.outputs.version }}-win-x64.exe" `
             -ExpectedVersion "${{ needs.validate.outputs.version }}"
+      - name: Generate and validate Winget manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $manifestDir = node scripts/winget-manifest.mjs `
+            --version "${{ needs.validate.outputs.version }}" `
+            --sha256-file "release/InovaIDE-${{ needs.validate.outputs.version }}-win-x64.exe.sha256" `
+            --out-dir "winget-manifest/${{ needs.validate.outputs.version }}"
+          if (Get-Command winget -ErrorAction SilentlyContinue) {
+            winget validate --manifest $manifestDir
+          }
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: winget-manifest
+          path: winget-manifest/${{ needs.validate.outputs.version }}/*
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
@@ -121,8 +139,16 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          name: mac-arm64
           path: release-assets
-          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-x64
+          path: release-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-x64
+          path: release-assets
       - id: hashes
         run: |
           ARM_SHA="$(awk '{print $1}' "release-assets/InovaIDE-${{ needs.validate.outputs.version }}-arm64.dmg.sha256")"
@@ -184,3 +210,29 @@ jobs:
           git add Casks/inova-ide.rb
           git commit -m "inova-ide ${VERSION}"
           git push origin HEAD:main
+
+  update-winget:
+    needs: [validate, publish-release]
+    if: vars.WINGET_ENABLED == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Check Winget token
+        id: check
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINGET_TOKEN)) {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Output "WINGET_TOKEN not configured; skipping Winget release."
+          } else {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+      - name: Publish to WinGet
+        if: steps.check.outputs.enabled == 'true'
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: InovacodeDev.InovaIDE
+          version: ${{ needs.validate.outputs.version }}
+          installers-regex: '^InovaIDE-.*-win-x64\.exe$'
+          token: ${{ secrets.WINGET_TOKEN }}

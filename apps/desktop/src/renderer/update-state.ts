@@ -5,6 +5,13 @@ import { translate } from './i18n';
 export const UPDATE_DISMISSED_KEY = 'inova.update.dismissed';
 export const LAST_SEEN_VERSION_KEY = 'inova.lastSeenVersion';
 export const UPGRADE_COMMAND = 'brew update && brew upgrade --cask inova-ide';
+export const WINGET_UPGRADE_COMMAND = 'winget upgrade --id InovacodeDev.InovaIDE --exact';
+
+export function upgradeCommandForPlatform(platform: string): string | null {
+  if (/^mac/i.test(platform)) return UPGRADE_COMMAND;
+  if (/^win/i.test(platform)) return WINGET_UPGRADE_COMMAND;
+  return null;
+}
 
 export interface InstallStageView {
   label: string;

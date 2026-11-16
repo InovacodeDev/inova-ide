@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
-import { appBundlePath, createUpdateInstaller, createUpdateService } from '../src/main/updates';
+import {
+  WINGET_PACKAGE_ID,
+  appBundlePath,
+  createUpdateInstaller,
+  createUpdateService,
+  parseWingetAvailableVersion,
+} from '../src/main/updates';
 import type { UpdateInstallerDeps } from '../src/main/updates';
 import {
   compareVersions,
@@ -259,5 +265,107 @@ describe('createUpdateInstaller', () => {
     await Promise.all([installer.install(), installer.install()]);
     expect(deps.run).toHaveBeenCalledTimes(3);
     expect(deps.relaunch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('parseWingetAvailableVersion', () => {
+  test('extracts the highest valid version from winget show --versions output', () => {
+    const output = [
+      `Found InovaIDE [${WINGET_PACKAGE_ID}]`,
+      'Versão',
+      '-------',
+      '0.8.0',
+      '0.9.1',
+      '0.9.0',
+      '',
+    ].join('\r\n');
+    expect(parseWingetAvailableVersion(output)).toBe('0.9.1');
+  });
+
+  test('returns null when no version lines exist', () => {
+    expect(parseWingetAvailableVersion('No package found matching input criteria.')).toBeNull();
+  });
+});
+
+function winInstallerDeps(overrides: Partial<UpdateInstallerDeps> = {}): UpdateInstallerDeps {
+  return installerDeps({
+    platform: 'win32',
+    current: '0.9.0',
+    execPath: 'C:\\Users\\dev\\AppData\\Local\\Programs\\InovaIDE\\InovaIDE.exe',
+    isWinInstalled: () => true,
+    findWinget: async () => 'winget.exe',
+    runOutput: vi.fn(async () => 'Version\r\n-------\r\n0.9.1\r\n0.9.0\r\n'),
+    spawnWinUpgrade: vi.fn(async () => undefined),
+    quit: vi.fn(),
+    pid: 4242,
+    ...overrides,
+  });
+}
+
+describe('createUpdateInstaller (Windows Winget)', () => {
+  test('verifies available version, spawns detached upgrade and quits', async () => {
+    const deps = winInstallerDeps();
+    expect(await createUpdateInstaller(deps).install()).toEqual({ ok: true, value: null });
+    expect(deps.runOutput).toHaveBeenCalledWith('winget.exe', [
+      'show',
+      '--id',
+      WINGET_PACKAGE_ID,
+      '--exact',
+      '--versions',
+      '--accept-source-agreements',
+    ]);
+    expect(deps.spawnWinUpgrade).toHaveBeenCalledWith({
+      winget: 'winget.exe',
+      execPath: deps.execPath,
+      pid: 4242,
+    });
+    expect(deps.quit).toHaveBeenCalledTimes(1);
+    expect(deps.relaunch).not.toHaveBeenCalled();
+    expect(vi.mocked(deps.onProgress).mock.calls.map(([stage]) => stage)).toEqual([
+      'preparing',
+      'fetching',
+      'downloading',
+      'restarting',
+    ]);
+  });
+
+  test('refuses when running outside an installed Windows package', async () => {
+    const deps = winInstallerDeps({ isWinInstalled: () => false });
+    const result = await createUpdateInstaller(deps).install();
+    expect(result.ok).toBe(false);
+    expect(deps.findWinget).toBeDefined();
+    expect(deps.spawnWinUpgrade).not.toHaveBeenCalled();
+    expect(deps.quit).not.toHaveBeenCalled();
+  });
+
+  test('fails when winget is missing, query errors, or new version is not published yet', async () => {
+    const missing = winInstallerDeps({ findWinget: async () => undefined });
+    expect((await createUpdateInstaller(missing).install()).ok).toBe(false);
+    expect(missing.quit).not.toHaveBeenCalled();
+
+    const queryError = winInstallerDeps({
+      runOutput: vi.fn(async () => {
+        throw new Error('winget failed');
+      }),
+    });
+    expect((await createUpdateInstaller(queryError).install()).ok).toBe(false);
+    expect(queryError.spawnWinUpgrade).not.toHaveBeenCalled();
+
+    const stale = winInstallerDeps({
+      runOutput: vi.fn(async () => 'Version\r\n-------\r\n0.9.0\r\n'),
+    });
+    expect((await createUpdateInstaller(stale).install()).ok).toBe(false);
+    expect(stale.spawnWinUpgrade).not.toHaveBeenCalled();
+    expect(stale.quit).not.toHaveBeenCalled();
+  });
+
+  test('fails without quitting when spawning the updater fails', async () => {
+    const broken = winInstallerDeps({
+      spawnWinUpgrade: vi.fn(async () => {
+        throw new Error('spawn ENOENT');
+      }),
+    });
+    expect((await createUpdateInstaller(broken).install()).ok).toBe(false);
+    expect(broken.quit).not.toHaveBeenCalled();
   });
 });

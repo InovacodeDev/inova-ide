@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { UpdateInfo } from '../shared/api';
 import { useI18n } from './I18nContext';
 import { CloseIcon, CopyIcon, ExternalLinkIcon } from './icons';
-import { UPGRADE_COMMAND } from './update-state';
+import { upgradeCommandForPlatform } from './update-state';
 import './update.css';
 
 interface UpdateToastProps {
@@ -14,9 +14,11 @@ export function UpdateToast({ info, onDismiss }: UpdateToastProps) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const { releaseUrl } = info;
+  const upgradeCommand = upgradeCommandForPlatform(navigator.platform);
 
   const copyCommand = () => {
-    void navigator.clipboard.writeText(UPGRADE_COMMAND).then(() => setCopied(true));
+    if (!upgradeCommand) return;
+    void navigator.clipboard.writeText(upgradeCommand).then(() => setCopied(true));
   };
 
   return (
@@ -25,7 +27,7 @@ export function UpdateToast({ info, onDismiss }: UpdateToastProps) {
         <span className="update-toast-title">
           {t('update.availableTitle', { version: info.latest ?? '' })}
         </span>
-        <span className="update-toast-desc mono">{UPGRADE_COMMAND}</span>
+        {upgradeCommand ? <span className="update-toast-desc mono">{upgradeCommand}</span> : null}
       </div>
       <div className="update-toast-actions">
         {releaseUrl ? (
@@ -38,15 +40,17 @@ export function UpdateToast({ info, onDismiss }: UpdateToastProps) {
             {t('update.viewNotes')}
           </button>
         ) : null}
-        <button
-          type="button"
-          className="btn"
-          data-tooltip={t('update.copyTooltip')}
-          onClick={copyCommand}
-        >
-          <CopyIcon size={13} />
-          {copied ? t('update.copiedCommand') : t('update.copyCommand')}
-        </button>
+        {upgradeCommand ? (
+          <button
+            type="button"
+            className="btn"
+            data-tooltip={t('update.copyTooltip')}
+            onClick={copyCommand}
+          >
+            <CopyIcon size={13} />
+            {copied ? t('update.copiedCommand') : t('update.copyCommand')}
+          </button>
+        ) : null}
         <button
           type="button"
           className="icon-btn"

@@ -55,9 +55,12 @@ win:
       arch:
         - x64
 nsis:
+  guid: d7a4c9e2-6b3f-4c81-9f2a-1e5b8a4d7c03
+  uninstallDisplayName: InovaIDE
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
+  include: build/installer.nsh
 linux:
   category: Development
   icon: build/icon.png
