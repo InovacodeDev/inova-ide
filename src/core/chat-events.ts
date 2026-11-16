@@ -520,6 +520,32 @@ function codexContext(usage: unknown): ChatEvent[] {
 
 function createCodexParser(prefix: string): ChatParser {
   const failedDone: ChatEvent = { kind: 'done', isError: true, costUsd: null, durationMs: null };
+  const startedFileChanges = new Set<string>();
+
+  function fromFileChange(started: boolean, id: string, item: Json): ChatEvent[] {
+    const changes = Array.isArray(item['changes']) ? item['changes'].filter(isRecord) : [];
+    const toolUse: ChatEvent = {
+      kind: 'tool-use',
+      toolId: id,
+      name: 'file_change',
+      input: prettyJson({ changes }),
+    };
+    if (started) {
+      startedFileChanges.add(id);
+      return [toolUse];
+    }
+    const output = changes
+      .map((change) => `${str(change['kind']) ?? 'update'} ${str(change['path']) ?? ''}`.trim())
+      .join('\n');
+    const result: ChatEvent = {
+      kind: 'tool-result',
+      toolId: id,
+      output,
+      isError: item['status'] === 'failed',
+    };
+    if (startedFileChanges.delete(id)) return [result];
+    return [toolUse, result];
+  }
 
   function fromItem(started: boolean, item: unknown): ChatEvent[] {
     if (!isRecord(item)) return [];
@@ -543,6 +569,7 @@ function createCodexParser(prefix: string): ChatParser {
         { kind: 'tool-result', toolId: id, output: str(item['aggregated_output']) ?? '', isError },
       ];
     }
+    if (item['type'] === 'file_change') return fromFileChange(started, id, item);
     const text = str(item['text']);
     if (!started && item['type'] === 'reasoning' && text !== null && text.trim() !== '') {
       return [{ kind: 'thinking', blockId: id, text }];

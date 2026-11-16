@@ -349,6 +349,51 @@ describe('codex parser', () => {
     ]);
   });
 
+  it('maps file_change items to a tool-use with the changed paths', () => {
+    const parser = createChatParser('codex', { turnId: 't1' });
+    const changes = [
+      { path: '/repo/a.ts', kind: 'update' },
+      { path: '/repo/b.ts', kind: 'add' },
+    ];
+    const started = parser.parse(
+      JSON.stringify({
+        type: 'item.started',
+        item: { id: 'fc', type: 'file_change', changes, status: 'in_progress' },
+      }),
+    );
+    const completed = parser.parse(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'fc', type: 'file_change', changes, status: 'completed' },
+      }),
+    );
+    expect(started).toEqual([
+      {
+        kind: 'tool-use',
+        toolId: 't1:fc',
+        name: 'file_change',
+        input: JSON.stringify({ changes }, null, 2),
+      },
+    ]);
+    expect(completed).toEqual([
+      {
+        kind: 'tool-result',
+        toolId: 't1:fc',
+        output: 'update /repo/a.ts\nadd /repo/b.ts',
+        isError: false,
+      },
+    ]);
+
+    const onlyCompleted = createChatParser('codex', { turnId: 't2' }).parse(
+      JSON.stringify({
+        type: 'item.completed',
+        item: { id: 'fc', type: 'file_change', changes, status: 'failed' },
+      }),
+    );
+    expect(onlyCompleted.map((event) => event.kind)).toEqual(['tool-use', 'tool-result']);
+    expect(onlyCompleted[1]).toMatchObject({ isError: true });
+  });
+
   it('keeps item ids distinct across turns', () => {
     const line = JSON.stringify({
       type: 'item.completed',
