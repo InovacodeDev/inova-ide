@@ -1,11 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
 import { useI18n } from './I18nContext';
 import { CloseIcon, SplitViewIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
 import { queueCountLabel } from './queue-state';
 import type { SessionStatus } from './session-status';
 import { handleHorizontalTabListKeyDown } from './tablist-nav';
-import type { Tab } from './tabs';
+import { dropIndex, type Tab } from './tabs';
 
 interface TabBarProps {
   tabs: Tab[];
@@ -16,17 +16,40 @@ interface TabBarProps {
   onActivate(sessionId: string): void;
   onClose(tab: Tab): void;
   onSplit?(sessionId: string): void;
+  onMove?(input: { sessionId: string; toIndex: number }): void;
+}
+
+interface DropMarker {
+  targetId: string;
+  after: boolean;
+}
+
+function isAfterMidpoint(event: DragEvent<HTMLElement>): boolean {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return event.clientX > rect.left + rect.width / 2;
 }
 
 export function TabBar(props: TabBarProps) {
-  const { tabs, active, paneIds, statusOf, queuedCountOf, onActivate, onClose, onSplit } = props;
+  const { tabs, active, paneIds, statusOf, queuedCountOf, onActivate, onClose, onSplit, onMove } =
+    props;
   const { locale, t } = useI18n();
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active]);
   const tabIds = tabs.map((tab) => tab.sessionId);
   const focusableId = tabIds.includes(active ?? '') ? active : (tabIds[0] ?? null);
+  const endDrag = () => {
+    setDraggedId(null);
+    setDropMarker(null);
+  };
+  const dropOn = (targetId: string, after: boolean) => {
+    if (draggedId === null || !onMove) return;
+    const toIndex = dropIndex({ ids: tabIds, draggedId, targetId, after });
+    if (toIndex !== null) onMove({ sessionId: draggedId, toIndex });
+  };
   return (
     <div
       className="tab-bar"
@@ -45,12 +68,40 @@ export function TabBar(props: TabBarProps) {
         const selected = tab.sessionId === active;
         const queuedCount = queuedCountOf?.(tab.sessionId) ?? 0;
         const inPane = paneIds.includes(tab.sessionId);
-        const tabClass = selected ? ' tab-bar-tab-active' : inPane ? ' tab-bar-tab-pane' : '';
+        const stateClass = selected ? ' tab-bar-tab-active' : inPane ? ' tab-bar-tab-pane' : '';
+        const dragClass = draggedId === tab.sessionId ? ' tab-bar-tab-dragging' : '';
+        const markerClass =
+          dropMarker?.targetId === tab.sessionId && draggedId !== tab.sessionId
+            ? dropMarker.after
+              ? ' tab-bar-tab-drop-after'
+              : ' tab-bar-tab-drop-before'
+            : '';
         return (
           <div
             key={tab.sessionId}
             ref={selected ? activeTabRef : undefined}
-            className={`tab-bar-tab${tabClass}`}
+            className={`tab-bar-tab${stateClass}${dragClass}${markerClass}`}
+            draggable={Boolean(onMove)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', tab.title);
+              setDraggedId(tab.sessionId);
+            }}
+            onDragOver={(event) => {
+              if (draggedId === null) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = 'move';
+              const after = isAfterMidpoint(event);
+              if (dropMarker?.targetId !== tab.sessionId || dropMarker.after !== after) {
+                setDropMarker({ targetId: tab.sessionId, after });
+              }
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              dropOn(tab.sessionId, isAfterMidpoint(event));
+              endDrag();
+            }}
+            onDragEnd={endDrag}
           >
             <button
               type="button"

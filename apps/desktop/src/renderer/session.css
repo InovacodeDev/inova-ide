@@ -29,6 +29,18 @@
   color: var(--text);
 }
 
+.tab-bar-tab-dragging {
+  opacity: 0.5;
+}
+
+.tab-bar-tab-drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.tab-bar-tab-drop-after {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
 .tab-bar-tab-pane {
   border-color: var(--border-subtle);
   color: var(--text);

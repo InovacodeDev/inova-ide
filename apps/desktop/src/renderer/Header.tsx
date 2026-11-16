@@ -18,6 +18,7 @@ interface HeaderProps {
   onCloseTab?: (tab: Tab) => void;
   paneIds?: string[];
   onSplitTab?: (sessionId: string) => void;
+  onMoveTab?: (input: { sessionId: string; toIndex: number }) => void;
 }
 
 export function Header({
@@ -34,6 +35,7 @@ export function Header({
   onCloseTab,
   paneIds = [],
   onSplitTab,
+  onMoveTab,
 }: HeaderProps) {
   const { t } = useI18n();
   return (
@@ -63,6 +65,7 @@ export function Header({
             onActivate={onActivateTab}
             onClose={onCloseTab}
             onSplit={onSplitTab}
+            onMove={onMoveTab}
           />
         ) : null}
       </div>

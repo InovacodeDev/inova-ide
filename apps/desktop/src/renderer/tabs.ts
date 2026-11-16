@@ -22,7 +22,8 @@ export type TabsAction =
   | { type: 'rename'; sessionId: string; title: string }
   | { type: 'rebind'; sessionId: string; provider: ProviderId | null }
   | { type: 'split'; sessionId: string }
-  | { type: 'unsplit'; sessionId: string };
+  | { type: 'unsplit'; sessionId: string }
+  | { type: 'move'; sessionId: string; toIndex: number };
 
 export const initialTabsState: TabsState = { tabs: [], active: null, split: null };
 
@@ -68,6 +69,29 @@ function closeTab(state: TabsState, sessionId: string): TabsState {
   return { ...state, tabs, active: neighbor?.sessionId ?? null };
 }
 
+export function dropIndex(input: {
+  ids: readonly string[];
+  draggedId: string;
+  targetId: string;
+  after: boolean;
+}): number | null {
+  const from = input.ids.indexOf(input.draggedId);
+  const target = input.ids.indexOf(input.targetId);
+  if (from === -1 || target === -1) return null;
+  const insertion = target + (input.after ? 1 : 0);
+  const toIndex = insertion > from ? insertion - 1 : insertion;
+  return toIndex === from ? null : toIndex;
+}
+
+function moveTab(state: TabsState, input: { sessionId: string; toIndex: number }): TabsState {
+  const from = state.tabs.findIndex((tab) => tab.sessionId === input.sessionId);
+  const moving = state.tabs[from];
+  const to = Math.max(0, Math.min(state.tabs.length - 1, input.toIndex));
+  if (moving === undefined || from === to) return state;
+  const rest = state.tabs.filter((tab) => tab.sessionId !== input.sessionId);
+  return { ...state, tabs: [...rest.slice(0, to), moving, ...rest.slice(to)] };
+}
+
 function updateTab(state: TabsState, sessionId: string, patch: Partial<Tab>): TabsState {
   return {
     ...state,
@@ -107,5 +131,7 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       return openSplit(state, action.sessionId);
     case 'unsplit':
       return closeSplitPane(state, action.sessionId);
+    case 'move':
+      return moveTab(state, action);
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   adjacentSessionId,
+  dropIndex,
   initialTabsState,
   tabsReducer,
   visibleSessionIds,
@@ -99,6 +100,46 @@ describe('adjacentSessionId', () => {
     const unfocused: TabsState = { ...three, active: null };
     expect(adjacentSessionId({ state: unfocused, delta: 1 })).toBe('a');
     expect(adjacentSessionId({ state: unfocused, delta: -1 })).toBe('c');
+  });
+});
+
+describe('reorder', () => {
+  const ids = (state: TabsState) => state.tabs.map((tab) => tab.sessionId);
+  const three = open(open(open(empty, 'a'), 'b'), 'c');
+  const move = (sessionId: string, toIndex: number) =>
+    tabsReducer(three, { type: 'move', sessionId, toIndex });
+
+  test('moves a tab to the target index and keeps the active tab', () => {
+    expect(ids(move('a', 2))).toEqual(['b', 'c', 'a']);
+    expect(ids(move('c', 0))).toEqual(['c', 'a', 'b']);
+    expect(ids(move('b', 0))).toEqual(['b', 'a', 'c']);
+    expect(move('a', 2).active).toBe('c');
+  });
+
+  test('clamps the target index and ignores no-op moves', () => {
+    expect(ids(move('a', 99))).toEqual(['b', 'c', 'a']);
+    expect(ids(move('c', -5))).toEqual(['c', 'a', 'b']);
+    expect(move('b', 1)).toBe(three);
+  });
+});
+
+describe('dropIndex', () => {
+  const ids = ['a', 'b', 'c', 'd'];
+  const drop = (draggedId: string, targetId: string, after: boolean) =>
+    dropIndex({ ids, draggedId, targetId, after });
+
+  test('maps a drop before or after a target to the final index', () => {
+    expect(drop('a', 'c', false)).toBe(1);
+    expect(drop('a', 'c', true)).toBe(2);
+    expect(drop('d', 'a', false)).toBe(0);
+    expect(drop('d', 'b', true)).toBe(2);
+  });
+
+  test('returns null for drops that keep the order or unknown ids', () => {
+    expect(drop('b', 'b', false)).toBeNull();
+    expect(drop('b', 'a', true)).toBeNull();
+    expect(drop('b', 'c', false)).toBeNull();
+    expect(drop('x', 'a', false)).toBeNull();
   });
 });
 

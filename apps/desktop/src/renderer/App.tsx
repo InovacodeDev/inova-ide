@@ -1703,6 +1703,7 @@ export function App() {
           onCloseTab={requestCloseTab}
           paneIds={paneIds}
           onSplitTab={splitTab}
+          onMoveTab={({ sessionId, toIndex }) => dispatch({ type: 'move', sessionId, toIndex })}
         />
         <div className="app-body">
           <Sidebar
