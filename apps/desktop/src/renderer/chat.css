@@ -974,16 +974,24 @@
 
 .chat-dictation {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 10px 14px 0;
   color: var(--muted);
   font-size: 13px;
 }
 
+.chat-dictation .dot {
+  flex: none;
+  margin-top: 6px;
+}
+
 .chat-dictation-text {
   flex: 1;
   min-width: 0;
+  max-height: calc(1.45em * 6);
+  line-height: 1.45;
+  overflow-y: auto;
   overflow-wrap: anywhere;
 }
 

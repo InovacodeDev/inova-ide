@@ -39,6 +39,7 @@ import { CompareView } from './CompareView';
 import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
+import { collectVoiceHints } from './dictation';
 import { Footer, type UsageState } from './Footer';
 import { ForkModal } from './ForkModal';
 import { buildFailoverNotice, type FailoverNotice } from './failover-notice';
@@ -1934,11 +1935,20 @@ export function App() {
                           defaultModes={defaultModes}
                           inWorktree={Boolean(tabSession?.worktree)}
                           workingDir={tabSession?.worktree?.path ?? tabProject?.path ?? null}
-                          voiceHints={[
-                            ...(tabProject ? [folderName(tabProject.path)] : []),
-                            ...(tabSession?.worktree ? [tabSession.worktree.branch] : []),
-                          ]}
+                          voiceHints={collectVoiceHints({
+                            projectName: tabProject ? folderName(tabProject.path) : null,
+                            branch: tabSession?.worktree?.branch ?? null,
+                            customDictionary: settings?.voice.customDictionary,
+                            recentToolInputs: tabState.items
+                              .filter((item) => item.type === 'tool')
+                              .slice(-12)
+                              .map((item) => item.input),
+                            pinnedMemory: [tabProject?.pinnedMemory, tabSession?.pinnedMemory]
+                              .filter((value): value is string => Boolean(value))
+                              .join('\n'),
+                          })}
                           dictationLanguage={settings?.voice.language}
+                          dictationPolishMode={settings?.voice.polishMode}
                           collapseFinishedTurns={settings?.sessions.collapseFinishedTurns}
                           catalog={tabCatalog}
                           readOnly={archivedIds.has(tab.sessionId)}

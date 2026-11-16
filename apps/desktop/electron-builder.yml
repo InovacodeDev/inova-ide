@@ -22,6 +22,7 @@ extraResources:
     to: whisper
     filter:
       - whisper-cli*
+      - whisper-server*
 mac:
   category: public.app-category.developer-tools
   extendInfo:

@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_VOICE_POLISH_ENDPOINT,
   getSettings,
   isSettings,
   isSettingsPatch,
+  resolveVoicePolishSettings,
   SettingsError,
   updateSettings,
   VOICE_MODEL_IDS,
@@ -311,6 +313,40 @@ describe('settings', () => {
     }
     await expect(
       updateSettings({ root, patch: { sessions: { rateLimitFailover: 'auto' } as never } }),
+    ).rejects.toThrow(SettingsError);
+  });
+
+  it('validates and resolves Eloquent voice polish and custom dictionary settings', async () => {
+    expect(resolveVoicePolishSettings(DEFAULT_SETTINGS.voice)).toEqual({
+      mode: 'clean',
+      model: '',
+      endpoint: DEFAULT_VOICE_POLISH_ENDPOINT,
+      customDictionary: [],
+    });
+
+    const updated = await updateSettings({
+      root,
+      patch: {
+        voice: {
+          polishMode: 'structured',
+          polishModel: 'gemma3:4b',
+          polishEndpoint: 'http://127.0.0.1:11434',
+          customDictionary: ['InovaIDE', 'whisper-server'],
+        },
+      },
+    });
+    expect(resolveVoicePolishSettings(updated.voice)).toEqual({
+      mode: 'structured',
+      model: 'gemma3:4b',
+      endpoint: 'http://127.0.0.1:11434',
+      customDictionary: ['InovaIDE', 'whisper-server'],
+    });
+
+    await expect(
+      updateSettings({ root, patch: { voice: { polishEndpoint: 'http://example.com' } } }),
+    ).rejects.toThrow(SettingsError);
+    await expect(
+      updateSettings({ root, patch: { voice: { customDictionary: [''] } } }),
     ).rejects.toThrow(SettingsError);
   });
 });

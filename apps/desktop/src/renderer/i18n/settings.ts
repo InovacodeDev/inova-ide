@@ -119,6 +119,39 @@ export const SETTINGS_PT_BR = {
   'settings.voice.removeUnusedDesc':
     'Remover o modelo "{label}"? Será preciso baixar de novo para usá-lo.',
   'settings.voice.removeConfirm': 'Remover modelo',
+  'settings.voice.polishGroup': 'Polimento inteligente (Eloquent)',
+  'settings.voice.polishDesc':
+    'Usa um modelo local via Ollama para remover vícios de fala e resolver autocorreções.',
+  'settings.voice.polishModeTitle': 'Modo de escrita',
+  'settings.voice.polishModeDesc':
+    'Se nenhum modelo local estiver ativo, usa apenas a sanitização rápida.',
+  'settings.voice.polishMode.off': 'Literal',
+  'settings.voice.polishMode.clean': 'Limpo',
+  'settings.voice.polishMode.structured': 'Estruturado',
+  'settings.voice.polishModelTitle': 'Modelo local (Ollama)',
+  'settings.voice.polishModelDesc':
+    'Deixe vazio para escolher Gemma, Qwen ou Llama automaticamente.',
+  'settings.voice.polishModelPlaceholder': 'Auto (ex: gemma3:4b)',
+  'settings.voice.polishEndpointTitle': 'Endereço do Ollama',
+  'settings.voice.polishEndpointDesc': 'Aceita apenas localhost ou HTTPS.',
+  'settings.voice.polishEndpointStatus': 'Modelos detectados: {models}',
+  'settings.voice.polishEndpointOffline': 'Nenhum servidor Ollama detectado neste endereço.',
+  'settings.voice.polishEndpointChecking': 'Verificando conexão com {endpoint}…',
+  'settings.voice.polishEndpointConnected': 'Conectado em {endpoint} · Modelos: {models}',
+  'settings.voice.polishEndpointEmpty':
+    'Ollama ativo em {endpoint}, mas sem modelos instalados (ex.: gemma3:4b).',
+  'settings.voice.polishEndpointCheckedOffline':
+    'Sem resposta em {endpoint} (verificado às {time}).',
+  'settings.voice.polishCheckBtn': 'Verificar',
+  'settings.voice.polishCheckingBtn': 'Verificando…',
+  'settings.voice.polishDockerTitle': 'Ligar servidor no Docker',
+  'settings.voice.polishDockerDesc': 'Sobe o Ollama e baixa o modelo gemma3:4b na porta 11434.',
+  'settings.voice.polishDockerCopyBtn': 'Copiar',
+  'settings.voice.polishDockerCopiedBtn': 'Copiado',
+  'settings.voice.dictionaryGroup': 'Vocabulário personalizado',
+  'settings.voice.dictionaryDesc':
+    'Termos técnicos, nomes e siglas separados por vírgula ou quebra de linha.',
+  'settings.voice.dictionaryPlaceholder': 'InovaIDE, whisper-server, useDictation, PostgreSQL',
 
   'settings.shortcuts.tableAria': 'Atalhos: {group}',
   'shortcuts.group.Geral': 'Geral',
@@ -272,6 +305,37 @@ export const SETTINGS_EN_US: Record<SettingsKey, string> = {
   'settings.voice.removeUnusedDesc':
     'Remove model "{label}"? It will need to be downloaded again to use.',
   'settings.voice.removeConfirm': 'Remove model',
+  'settings.voice.polishGroup': 'Smart polish (Eloquent)',
+  'settings.voice.polishDesc':
+    'Uses a local Ollama model to remove speech fillers and resolve self-corrections.',
+  'settings.voice.polishModeTitle': 'Writing style',
+  'settings.voice.polishModeDesc':
+    'When no local model is running, falls back to fast rule-based sanitization.',
+  'settings.voice.polishMode.off': 'Literal',
+  'settings.voice.polishMode.clean': 'Clean',
+  'settings.voice.polishMode.structured': 'Structured',
+  'settings.voice.polishModelTitle': 'Local model (Ollama)',
+  'settings.voice.polishModelDesc': 'Leave empty to auto-select Gemma, Qwen, or Llama.',
+  'settings.voice.polishModelPlaceholder': 'Auto (e.g. gemma3:4b)',
+  'settings.voice.polishEndpointTitle': 'Ollama endpoint',
+  'settings.voice.polishEndpointDesc': 'Allows localhost or HTTPS only.',
+  'settings.voice.polishEndpointStatus': 'Detected models: {models}',
+  'settings.voice.polishEndpointOffline': 'No Ollama server detected at this address.',
+  'settings.voice.polishEndpointChecking': 'Checking connection to {endpoint}…',
+  'settings.voice.polishEndpointConnected': 'Connected at {endpoint} · Models: {models}',
+  'settings.voice.polishEndpointEmpty':
+    'Ollama running at {endpoint}, with no installed models (e.g. gemma3:4b).',
+  'settings.voice.polishEndpointCheckedOffline': 'No response at {endpoint} (checked at {time}).',
+  'settings.voice.polishCheckBtn': 'Check',
+  'settings.voice.polishCheckingBtn': 'Checking…',
+  'settings.voice.polishDockerTitle': 'Start server in Docker',
+  'settings.voice.polishDockerDesc': 'Starts Ollama and pulls gemma3:4b on port 11434.',
+  'settings.voice.polishDockerCopyBtn': 'Copy',
+  'settings.voice.polishDockerCopiedBtn': 'Copied',
+  'settings.voice.dictionaryGroup': 'Custom vocabulary',
+  'settings.voice.dictionaryDesc':
+    'Technical terms, names, and acronyms separated by comma or newline.',
+  'settings.voice.dictionaryPlaceholder': 'InovaIDE, whisper-server, useDictation, PostgreSQL',
 
   'settings.shortcuts.tableAria': 'Shortcuts: {group}',
   'shortcuts.group.Geral': 'General',

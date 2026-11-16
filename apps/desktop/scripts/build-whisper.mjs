@@ -14,6 +14,10 @@ export function whisperBinaryName(platform) {
   return platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
 }
 
+export function whisperServerName(platform) {
+  return platform === 'win32' ? 'whisper-server.exe' : 'whisper-server';
+}
+
 export function whisperOutDir() {
   return join(desktopDir, 'resources', 'whisper');
 }
@@ -25,7 +29,7 @@ export function cmakeConfigureArgs({ platform, arch }) {
     '-DCMAKE_BUILD_TYPE=Release',
     '-DBUILD_SHARED_LIBS=OFF',
     '-DWHISPER_BUILD_TESTS=OFF',
-    '-DWHISPER_BUILD_SERVER=OFF',
+    '-DWHISPER_BUILD_SERVER=ON',
     '-DWHISPER_BUILD_EXAMPLES=ON',
   ];
   if (platform === 'darwin') {
@@ -44,9 +48,10 @@ function findBuiltBinary(buildDir, name) {
 export function buildWhisper({ platform, arch }) {
   const outDir = whisperOutDir();
   const target = join(outDir, whisperBinaryName(platform));
+  const serverTarget = join(outDir, whisperServerName(platform));
   const stampFile = join(outDir, 'build-stamp.txt');
-  const stamp = `${WHISPER_TAG} ${platform} ${arch}`;
-  if (fs.existsSync(target) && fs.existsSync(stampFile)) {
+  const stamp = `${WHISPER_TAG} ${platform} ${arch} +server`;
+  if (fs.existsSync(target) && fs.existsSync(serverTarget) && fs.existsSync(stampFile)) {
     if (fs.readFileSync(stampFile, 'utf8') === stamp) return target;
   }
 
@@ -55,11 +60,25 @@ export function buildWhisper({ platform, arch }) {
   try {
     run('git', ['clone', '--depth', '1', '--branch', WHISPER_TAG, WHISPER_REPO, '.']);
     run('cmake', cmakeConfigureArgs({ platform, arch }));
-    run('cmake', ['--build', 'build', '--config', 'Release', '--target', 'whisper-cli', '-j']);
+    run('cmake', [
+      '--build',
+      'build',
+      '--config',
+      'Release',
+      '--target',
+      'whisper-cli',
+      'whisper-server',
+      '-j',
+    ]);
     const built = findBuiltBinary(join(workDir, 'build'), whisperBinaryName(platform));
+    const builtServer = findBuiltBinary(join(workDir, 'build'), whisperServerName(platform));
     fs.mkdirSync(outDir, { recursive: true });
     fs.copyFileSync(built, target);
-    if (platform !== 'win32') fs.chmodSync(target, 0o755);
+    fs.copyFileSync(builtServer, serverTarget);
+    if (platform !== 'win32') {
+      fs.chmodSync(target, 0o755);
+      fs.chmodSync(serverTarget, 0o755);
+    }
     fs.writeFileSync(stampFile, stamp);
     return target;
   } finally {

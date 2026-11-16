@@ -15,6 +15,10 @@
     "version:check": "node scripts/version.mjs check",
     "version:bump": "node scripts/version.mjs bump",
     "version:deploy": "node scripts/deploy.mjs",
+    "eloquent:up": "docker compose -f docker/eloquent/docker-compose.yml up -d",
+    "eloquent:down": "docker compose -f docker/eloquent/docker-compose.yml down",
+    "eloquent:logs": "docker compose -f docker/eloquent/docker-compose.yml logs -f ollama",
+    "eloquent:pull": "docker compose -f docker/eloquent/docker-compose.yml run --rm ollama-init",
     "package:mac": "pnpm --filter @inova/desktop pack:mac",
     "package:win": "pnpm --filter @inova/desktop pack:win",
     "package:linux": "pnpm --filter @inova/desktop pack:linux"

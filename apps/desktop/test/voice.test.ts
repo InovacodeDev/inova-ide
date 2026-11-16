@@ -82,6 +82,28 @@ describe('pure helpers', () => {
     expect(cleanTranscript('[Música]')).toBe('');
   });
 
+  test('cleanTranscript strips fillers, stutters and hallucinations without breaking normal words', () => {
+    expect(cleanTranscript('hã, cria um arquivo novo, tipo, em src/main/voice.ts', 'pt')).toBe(
+      'cria um arquivo novo em src/main/voice.ts',
+    );
+    expect(cleanTranscript('eu eu quero o tipo de erro, né, bem claro', 'pt')).toBe(
+      'eu quero o tipo de erro bem claro',
+    );
+    expect(cleanTranscript('um, create a, like, new endpoint for the the user', 'en')).toBe(
+      'create a new endpoint for the user',
+    );
+    expect(
+      cleanTranscript(
+        'Vamos testar o novo fluxo. É... Se eu ficar gaguejando... gaguejando, É... É... É... E agora? Isso é bom.',
+        'pt',
+      ),
+    ).toBe('Vamos testar o novo fluxo. Se eu ficar gaguejando, E agora? Isso é bom.');
+    expect(cleanTranscript('Obrigado por assistir a este vídeo.')).toBe('');
+    expect(cleanTranscript('Refatora a função agora. Legendas pela comunidade Amara')).toBe(
+      'Refatora a função agora.',
+    );
+  });
+
   test('the prompt puts the session hints before the glossary', () => {
     expect(buildVoicePrompt(['inova-ide', 'feat/voz'])).toMatch(
       /^inova-ide, feat\/voz, TypeScript/,
@@ -131,7 +153,7 @@ describe('parseTranscribe', () => {
       { ...valid, hints: 'x' },
       { ...valid, hints: [''] },
       { ...valid, hints: ['a'.repeat(121)] },
-      { ...valid, hints: new Array(9).fill('a') },
+      { ...valid, hints: new Array(25).fill('a') },
     ];
     for (const input of bad) expect(parseTranscribe(input)).toBeUndefined();
   });
@@ -371,6 +393,139 @@ describe('voice service', () => {
     const { service } = await setup({ fetch });
     await service.downloadModel();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test('reuses persistent whisper-server across transcriptions and restarts on model switch', async () => {
+    await seedModel('base');
+    await seedModel(DEFAULT_MODEL);
+    const serverBinary = join(dir, 'whisper-server');
+    await writeFile(serverBinary, '');
+    const stops: string[] = [];
+    const startServer = vi.fn(async ({ modelPath }: { binary: string; modelPath: string }) => {
+      return {
+        modelPath,
+        transcribe: vi.fn(async () => `texto de ${modelPath.split('/').pop()}`),
+        stop: vi.fn(async () => {
+          stops.push(modelPath);
+        }),
+      };
+    });
+    const { service, runWhisper } = await setup({
+      serverBinaryCandidates: [serverBinary],
+      startServer,
+    });
+    const input = { pcm: ONE_SECOND, final: true, language: 'pt', hints: [] };
+
+    expect(await service.transcribe(input)).toBe('texto de ggml-large-v3-turbo-q5_0.bin');
+    expect(await service.transcribe(input)).toBe('texto de ggml-large-v3-turbo-q5_0.bin');
+    expect(startServer).toHaveBeenCalledTimes(1);
+    expect(runWhisper).not.toHaveBeenCalled();
+
+    activeModel = 'base';
+    expect(await service.transcribe(input)).toBe('texto de ggml-base.bin');
+    expect(startServer).toHaveBeenCalledTimes(2);
+    expect(stops).toHaveLength(1);
+
+    await service.deleteModel({ modelId: 'base' });
+    expect(stops).toHaveLength(2);
+    await service.dispose();
+  });
+
+  test('falls back to whisper-cli when whisper-server fails', async () => {
+    await seedModel();
+    const serverBinary = join(dir, 'whisper-server');
+    await writeFile(serverBinary, '');
+    const startServer = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const { service, runWhisper } = await setup({
+      serverBinaryCandidates: [serverBinary],
+      startServer,
+    });
+    const result = await service.transcribe({
+      pcm: ONE_SECOND,
+      final: true,
+      language: 'pt',
+      hints: [],
+    });
+    expect(result).toBe('olá mundo');
+    expect(runWhisper).toHaveBeenCalledOnce();
+  });
+
+  test('transcribeDetailed runs polish on final transcripts, merges customDictionary and exposes polishModels', async () => {
+    await seedModel();
+    const polish = vi.fn(async ({ text, hints }: { text: string; hints: readonly string[] }) => ({
+      text: `${text} [polido:${hints.join('|')}]`,
+      polished: true,
+    }));
+    const listPolishModels = vi.fn(async () => ['gemma3:4b']);
+    const { service } = await setup({
+      runWhisper: async () => ' [BLANK_AUDIO] hã, olá mundo ',
+      getVoiceSettings: async () => ({
+        language: 'pt',
+        modelId: DEFAULT_MODEL,
+        polishMode: 'clean',
+        customDictionary: ['InovaIDE'],
+      }),
+      polish,
+      listPolishModels,
+    });
+
+    expect((await service.status()).polishModels).toEqual(['gemma3:4b']);
+
+    const interim = await service.transcribeDetailed({
+      pcm: ONE_SECOND,
+      final: false,
+      language: 'pt',
+      hints: ['voice.ts'],
+    });
+    expect(interim).toEqual({ text: 'hã, olá mundo', rawText: 'hã, olá mundo', polished: false });
+    expect(polish).not.toHaveBeenCalled();
+
+    const finalRes = await service.transcribeDetailed({
+      pcm: ONE_SECOND,
+      final: true,
+      language: 'pt',
+      hints: ['voice.ts'],
+    });
+    expect(finalRes).toEqual({
+      text: 'olá mundo [polido:InovaIDE|voice.ts]',
+      rawText: 'olá mundo',
+      polished: true,
+    });
+
+    const literalOverride = await service.transcribeDetailed({
+      pcm: ONE_SECOND,
+      final: true,
+      language: 'pt',
+      hints: ['voice.ts'],
+      polishMode: 'off',
+    });
+    expect(literalOverride).toEqual({ text: 'olá mundo', rawText: 'olá mundo', polished: false });
+  });
+
+  test('checkVoicePolish probes valid endpoints and rejects non-local HTTP URLs', async () => {
+    const { service } = await setup({
+      probePolishEndpoint: async ({ endpoint }) => ({
+        reachable: true,
+        models: [`checked:${endpoint}`],
+      }),
+    });
+    const handlers = createVoiceHandlers(service);
+    const valid = await handlers.checkVoicePolish({ endpoint: 'http://localhost:11434' });
+    expect(valid).toMatchObject({
+      ok: true,
+      value: {
+        endpoint: 'http://localhost:11434',
+        reachable: true,
+        models: ['checked:http://localhost:11434'],
+      },
+    });
+    const invalid = await handlers.checkVoicePolish({ endpoint: 'http://example.com' });
+    expect(invalid).toEqual({
+      ok: false,
+      message: 'Endereço inválido. Use http://127.0.0.1, http://localhost ou https://.',
+    });
   });
 });
 

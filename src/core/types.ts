@@ -104,6 +104,8 @@ export interface Workspace {
 
 export type VoiceModelId = 'base' | 'small-q5_1' | 'medium-q5_0' | 'large-v3-turbo-q5_0';
 
+export type VoicePolishMode = 'off' | 'clean' | 'structured';
+
 export type ThemePreference = 'system' | 'dark' | 'light';
 
 export type SupportedLocale = 'pt-BR' | 'en-US';
@@ -130,6 +132,10 @@ export interface Settings {
   voice: {
     language: 'auto' | 'pt' | 'en' | 'es';
     modelId: VoiceModelId;
+    polishMode?: VoicePolishMode;
+    polishModel?: string;
+    polishEndpoint?: string;
+    customDictionary?: string[];
   };
   sessions: {
     autoArchiveDays: 0 | 1 | 3 | 7 | 30;

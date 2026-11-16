@@ -14,7 +14,7 @@ export function SettingGroup(props: { title?: string; description?: string; chil
 export function SettingRow(props: {
   htmlFor?: string;
   title: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
 }) {
   const { htmlFor, title, description, children } = props;

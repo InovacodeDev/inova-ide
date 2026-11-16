@@ -89,6 +89,7 @@ function setup() {
   handlers['reportUiFocus'] = vi.fn();
   const voice = {
     getVoiceStatus: vi.fn(async () => ({ ok: true as const, value: 'getVoiceStatus' })),
+    checkVoicePolish: vi.fn(async () => ({ ok: true as const, value: 'checkVoicePolish' })),
     downloadVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'downloadVoiceModel' })),
     deleteVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'deleteVoiceModel' })),
     transcribeAudio: vi.fn(async () => ({ ok: true as const, value: 'transcribeAudio' })),
@@ -146,8 +147,10 @@ test('voice invokes reach the voice handlers', async () => {
   await invoke('inova:transcribeAudio', trusted, input);
   expect(voice.transcribeAudio).toHaveBeenCalledWith(input);
   await invoke('inova:getVoiceStatus', trusted);
+  await invoke('inova:checkVoicePolish', trusted, { endpoint: 'http://127.0.0.1:11434' });
   await invoke('inova:downloadVoiceModel', trusted);
   expect(voice.getVoiceStatus).toHaveBeenCalledOnce();
+  expect(voice.checkVoicePolish).toHaveBeenCalledWith({ endpoint: 'http://127.0.0.1:11434' });
   expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith(undefined);
   await invoke('inova:downloadVoiceModel', trusted, { modelId: 'base' });
   expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith({ modelId: 'base' });

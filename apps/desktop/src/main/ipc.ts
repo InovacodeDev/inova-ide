@@ -97,6 +97,7 @@ export function registerIpc(deps: {
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
   handle(CHANNELS.getVoiceStatus, () => voice.getVoiceStatus());
+  handle(CHANNELS.checkVoicePolish, (input) => voice.checkVoicePolish(input));
   handle(CHANNELS.downloadVoiceModel, (input) => voice.downloadVoiceModel(input));
   handle(CHANNELS.deleteVoiceModel, (input) => voice.deleteVoiceModel(input));
   handle(CHANNELS.transcribeAudio, (input) => voice.transcribeAudio(input));

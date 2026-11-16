@@ -6,8 +6,22 @@ import type {
   RateLimitFailoverPolicy,
   Settings,
   SettingsPatch,
-  VoiceModelId,
 } from './types.js';
+import {
+  DEFAULT_VOICE_POLISH_ENDPOINT,
+  VOICE_MODEL_IDS,
+  VOICE_POLISH_MODES,
+  isPolishEndpointUrl,
+  resolveVoicePolishSettings,
+} from './voice-settings.js';
+
+export {
+  DEFAULT_VOICE_POLISH_ENDPOINT,
+  VOICE_MODEL_IDS,
+  VOICE_POLISH_MODES,
+  isPolishEndpointUrl,
+  resolveVoicePolishSettings,
+};
 
 export class SettingsError extends Error {
   constructor(message: string) {
@@ -16,12 +30,9 @@ export class SettingsError extends Error {
   }
 }
 
-export const VOICE_MODEL_IDS: readonly VoiceModelId[] = [
-  'base',
-  'small-q5_1',
-  'medium-q5_0',
-  'large-v3-turbo-q5_0',
-];
+const MAX_POLISH_MODEL_LENGTH = 120;
+const MAX_DICTIONARY_ITEMS = 100;
+const MAX_DICTIONARY_ITEM_LENGTH = 80;
 
 export const RATE_LIMIT_FAILOVER_POLICIES: readonly RateLimitFailoverPolicy[] = [
   'off',
@@ -83,6 +94,19 @@ function oneOf(options: readonly unknown[]): FieldGuard {
   return (value) => options.includes(value);
 }
 
+const isPolishModel: FieldGuard = (value) =>
+  typeof value === 'string' && value.length <= MAX_POLISH_MODEL_LENGTH;
+
+const isPolishEndpoint: FieldGuard = (value) => isPolishEndpointUrl(value);
+
+const isCustomDictionary: FieldGuard = (value) =>
+  Array.isArray(value) &&
+  value.length <= MAX_DICTIONARY_ITEMS &&
+  value.every(
+    (item) =>
+      typeof item === 'string' && item.trim() !== '' && item.length <= MAX_DICTIONARY_ITEM_LENGTH,
+  );
+
 const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } =
   {
     appearance: {
@@ -91,7 +115,14 @@ const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Secti
       sidebarCollapsed: isBoolean,
       detailsCollapsed: isBoolean,
     },
-    voice: { language: oneOf(['auto', 'pt', 'en', 'es']), modelId: oneOf(VOICE_MODEL_IDS) },
+    voice: {
+      language: oneOf(['auto', 'pt', 'en', 'es']),
+      modelId: oneOf(VOICE_MODEL_IDS),
+      polishMode: oneOf(VOICE_POLISH_MODES),
+      polishModel: isPolishModel,
+      polishEndpoint: isPolishEndpoint,
+      customDictionary: isCustomDictionary,
+    },
     sessions: {
       autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
       collapseFinishedTurns: isBoolean,

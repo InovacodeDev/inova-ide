@@ -20,6 +20,7 @@ import type {
   ProviderId,
   QueuedTurn,
   Settings,
+  VoicePolishMode,
 } from '@inova/core/types';
 import type { AccountView, AttachmentKind, ProjectCommandView } from '../shared/api';
 import { AttachMenu } from './AttachMenu';
@@ -48,7 +49,7 @@ import {
 } from './composer-trigger';
 import { ConfirmModal } from './ConfirmModal';
 import { DictationControl } from './DictationControl';
-import { appendDictation, formatMegabytes } from './dictation';
+import { appendDictation, collectVoiceHints, formatMegabytes } from './dictation';
 import { describeFailoverBanner, type FailoverNotice } from './failover-notice';
 import { translate, type SupportedLocale } from './i18n';
 import { useI18n } from './I18nContext';
@@ -114,6 +115,7 @@ export interface ChatViewProps {
   workingDir?: string | null;
   voiceHints?: readonly string[];
   dictationLanguage?: Settings['voice']['language'];
+  dictationPolishMode?: VoicePolishMode;
   collapseFinishedTurns?: boolean;
   catalog: ProviderModels;
   readOnly?: boolean;
@@ -782,8 +784,31 @@ function dropAccessDescription(input: {
   return translate(locale, 'chat.externalDirNoticeNoGrant', { paths, agent });
 }
 
-function DictationStatus({ dictation }: { dictation: Dictation }) {
+function DictationStatus({
+  dictation,
+  onUseRaw,
+}: {
+  dictation: Dictation;
+  onUseRaw: (rawText: string, polishedText: string) => void;
+}) {
   const { t } = useI18n();
+  const liveTextRef = useRef<HTMLSpanElement>(null);
+  const text =
+    dictation.phase === 'recording'
+      ? dictation.interim === ''
+        ? t('chat.listening')
+        : dictation.interim
+      : dictation.phase === 'transcribing'
+        ? t('chat.transcribing')
+        : dictation.phase === 'downloading'
+          ? t('chat.downloadingVoiceInline', { percent: dictation.downloadPercent })
+          : null;
+
+  useEffect(() => {
+    const element = liveTextRef.current;
+    if (element !== null) element.scrollTop = element.scrollHeight;
+  }, [text]);
+
   if (dictation.error !== null) {
     return (
       <div className="chat-dictation chat-dictation-error" role="alert">
@@ -800,21 +825,40 @@ function DictationStatus({ dictation }: { dictation: Dictation }) {
       </div>
     );
   }
-  const text =
-    dictation.phase === 'recording'
-      ? dictation.interim === ''
-        ? t('chat.listening')
-        : dictation.interim
-      : dictation.phase === 'transcribing'
-        ? t('chat.transcribing')
-        : dictation.phase === 'downloading'
-          ? t('chat.downloadingVoiceInline', { percent: dictation.downloadPercent })
-          : null;
-  if (text === null) return null;
+  if (text === null) {
+    const fallback = dictation.polishFallback;
+    if (fallback === null) return null;
+    return (
+      <div className="chat-dictation" role="status">
+        <span className="chat-dictation-text">{t('chat.dictationPolished')}</span>
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={() => {
+            onUseRaw(fallback.rawText, fallback.polishedText);
+            dictation.dismissPolishFallback();
+          }}
+        >
+          {t('chat.dictationUseRaw')}
+        </button>
+        <button
+          type="button"
+          className="chat-file-tag-remove"
+          aria-label={t('chat.dictationDismissPolished')}
+          data-tooltip={t('chat.dictationDismissPolished')}
+          onClick={dictation.dismissPolishFallback}
+        >
+          <CloseIcon size={12} />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="chat-dictation" role="status">
       {dictation.phase === 'recording' ? <span className="dot pulse" aria-hidden="true" /> : null}
-      <span className="chat-dictation-text">{text}</span>
+      <span ref={liveTextRef} className="chat-dictation-text">
+        {text}
+      </span>
       <button
         type="button"
         className="chat-file-tag-remove"
@@ -846,6 +890,7 @@ export function ChatView({
   workingDir = null,
   voiceHints = NO_VOICE_HINTS,
   dictationLanguage,
+  dictationPolishMode,
   collapseFinishedTurns = true,
   catalog,
   readOnly = false,
@@ -890,9 +935,18 @@ export function ChatView({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [showFormatToolbar, setShowFormatToolbar] = useState(false);
   const [pickerOpenRequest, setPickerOpenRequest] = useState(0);
+  const mergedVoiceHints = useMemo(
+    () =>
+      collectVoiceHints({
+        attachedFiles,
+        customDictionary: voiceHints,
+      }),
+    [attachedFiles, voiceHints],
+  );
   const dictation = useDictation({
-    hints: voiceHints,
+    hints: mergedVoiceHints,
     language: dictationLanguage,
+    ...(dictationPolishMode !== undefined ? { polishMode: dictationPolishMode } : {}),
     locale,
     onText: (text) => {
       const editor = editorRef.current;
@@ -1642,7 +1696,22 @@ export function ChatView({
               ))}
             </div>
           ) : null}
-          <DictationStatus dictation={dictation} />
+          <DictationStatus
+            dictation={dictation}
+            onUseRaw={(rawText, polishedText) => {
+              const editor = editorRef.current;
+              if (editor === null) return;
+              const current = editor.getText();
+              const index = current.lastIndexOf(polishedText);
+              if (index !== -1) {
+                editor.replaceRange({
+                  start: index,
+                  end: index + polishedText.length,
+                  text: rawText,
+                });
+              }
+            }}
+          />
           <RichComposer
             ref={editorRef}
             isMac={IS_MAC}

@@ -50,6 +50,7 @@ const api: InovaApi = {
   sendMessage: (input) => ipcRenderer.invoke(CHANNELS.sendMessage, input),
   getPathForFile: (file) => webUtils.getPathForFile(file),
   getVoiceStatus: () => ipcRenderer.invoke(CHANNELS.getVoiceStatus),
+  checkVoicePolish: (input) => ipcRenderer.invoke(CHANNELS.checkVoicePolish, input),
   downloadVoiceModel: (input) => ipcRenderer.invoke(CHANNELS.downloadVoiceModel, input),
   deleteVoiceModel: (input) => ipcRenderer.invoke(CHANNELS.deleteVoiceModel, input),
   transcribeAudio: (input) => ipcRenderer.invoke(CHANNELS.transcribeAudio, input),

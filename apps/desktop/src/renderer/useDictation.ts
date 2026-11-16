@@ -1,21 +1,31 @@
-import type { Settings, SupportedLocale, VoiceModelId } from '@inova/core/types';
+import type { Settings, SupportedLocale, VoiceModelId, VoicePolishMode } from '@inova/core/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DICTATION_INTERIM_MS,
   DICTATION_MAX_MS,
   DICTATION_SAMPLE_RATE,
+  appendDictation,
   encodePcm16,
+  findPauseSplitSample,
   resolveDictationLanguage,
+  sliceChunksRange,
+  trimPcmSilence,
 } from './dictation';
 import { translate } from './i18n';
 
 export type DictationPhase =
   'idle' | 'checking' | 'needs-model' | 'downloading' | 'recording' | 'transcribing';
 
+export interface DictationPolishFallback {
+  rawText: string;
+  polishedText: string;
+}
+
 export interface Dictation {
   phase: DictationPhase;
   interim: string;
   error: string | null;
+  polishFallback: DictationPolishFallback | null;
   modelBytes: number;
   downloadPercent: number;
   getLevels: (target: Uint8Array<ArrayBuffer>) => boolean;
@@ -23,34 +33,74 @@ export interface Dictation {
   confirmDownload: () => void;
   cancel: () => void;
   dismissError: () => void;
+  dismissPolishFallback: () => void;
 }
 
 interface Capture {
+  id: number;
   stream: MediaStream;
   context: AudioContext;
   analyser: AnalyserNode;
+  processor: AudioNode;
   chunks: Float32Array[];
   interimTimer: ReturnType<typeof setInterval>;
   maxTimer: ReturnType<typeof setTimeout>;
 }
 
 const BUFFER_SIZE = 4096;
+const INTERIM_CLI_MS = 2_500;
 export const ANALYSER_FFT_SIZE = 512;
+
+async function attachCaptureNode(input: {
+  context: AudioContext;
+  source: AudioNode;
+  onChunk: (samples: Float32Array) => void;
+}): Promise<AudioNode> {
+  const { context, source, onChunk } = input;
+  try {
+    if (typeof AudioWorkletNode !== 'undefined' && context.audioWorklet) {
+      const workletUrl = new URL('./pcm-worklet.js', window.location.href).href;
+      await context.audioWorklet.addModule(workletUrl);
+      const node = new AudioWorkletNode(context, 'pcm-capture-processor');
+      node.port.onmessage = (event: MessageEvent<Float32Array>) => {
+        if (event.data instanceof Float32Array) onChunk(event.data);
+      };
+      source.connect(node);
+      node.connect(context.destination);
+      return node;
+    }
+  } catch {
+    // NOTE: Fall back to ScriptProcessorNode when CSP or file:// blocks worklet loading.
+  }
+  const processor = context.createScriptProcessor(BUFFER_SIZE, 1, 1);
+  processor.onaudioprocess = (event) => {
+    onChunk(new Float32Array(event.inputBuffer.getChannelData(0)));
+  };
+  source.connect(processor);
+  processor.connect(context.destination);
+  return processor;
+}
 
 export function useDictation(input: {
   hints: readonly string[];
   language?: Settings['voice']['language'];
+  polishMode?: VoicePolishMode;
   locale?: SupportedLocale;
   onText: (text: string) => void;
 }): Dictation {
   const [phase, setPhaseState] = useState<DictationPhase>('idle');
   const [interim, setInterim] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [polishFallback, setPolishFallback] = useState<DictationPolishFallback | null>(null);
   const [modelBytes, setModelBytes] = useState(0);
   const [downloadPercent, setDownloadPercent] = useState(0);
   const phaseRef = useRef<DictationPhase>('idle');
   const captureRef = useRef<Capture | null>(null);
+  const captureIdRef = useRef(0);
   const interimBusyRef = useRef(false);
+  const hasServerRef = useRef(false);
+  const livePrefixRef = useRef('');
+  const liveCursorRef = useRef(0);
   const missingModelRef = useRef<VoiceModelId | null>(null);
   const inputRef = useRef(input);
   inputRef.current = input;
@@ -61,17 +111,33 @@ export function useDictation(input: {
     setPhaseState(next);
   }, []);
 
-  const transcribe = useCallback((chunks: readonly Float32Array[], final: boolean) => {
-    return window.inova.transcribeAudio({
-      pcm: encodePcm16(chunks),
-      final,
-      language: resolveDictationLanguage({
-        setting: inputRef.current.language,
-        locale: navigator.language,
-      }),
-      hints: [...inputRef.current.hints],
-    });
-  }, []);
+  const transcribe = useCallback(
+    (
+      chunks: readonly Float32Array[],
+      final: boolean,
+    ): ReturnType<typeof window.inova.transcribeAudio> => {
+      const audioChunks = final ? trimPcmSilence(chunks) : chunks;
+      if (audioChunks.length === 0) {
+        return Promise.resolve({
+          ok: true as const,
+          value: { text: '', rawText: '', polished: false },
+        });
+      }
+      return window.inova.transcribeAudio({
+        pcm: encodePcm16(audioChunks),
+        final,
+        language: resolveDictationLanguage({
+          setting: inputRef.current.language,
+          locale: navigator.language,
+        }),
+        hints: [...inputRef.current.hints],
+        ...(final && inputRef.current.polishMode !== undefined
+          ? { polishMode: inputRef.current.polishMode }
+          : {}),
+      });
+    },
+    [],
+  );
 
   const release = useCallback((): Float32Array[] => {
     const capture = captureRef.current;
@@ -79,6 +145,7 @@ export function useDictation(input: {
     captureRef.current = null;
     clearInterval(capture.interimTimer);
     clearTimeout(capture.maxTimer);
+    capture.processor.disconnect();
     capture.analyser.disconnect();
     capture.stream.getTracks().forEach((track) => track.stop());
     void capture.context.close();
@@ -88,20 +155,35 @@ export function useDictation(input: {
   const finish = useCallback(async () => {
     if (phaseRef.current !== 'recording') return;
     const chunks = release();
+    livePrefixRef.current = '';
+    liveCursorRef.current = 0;
     setPhase('transcribing');
     const result = await transcribe(chunks, true);
     if (currentPhase() !== 'transcribing') return;
     setInterim('');
     setPhase('idle');
-    if (result.ok) inputRef.current.onText(result.value.text);
-    else setError(result.message);
+    if (result.ok) {
+      const inserted = result.value.text;
+      const rawInserted = result.value.rawText ?? inserted;
+      if (result.value.polished === true && rawInserted !== inserted) {
+        setPolishFallback({ rawText: rawInserted, polishedText: inserted });
+      }
+      inputRef.current.onText(inserted);
+    } else {
+      setError(result.message);
+    }
   }, [currentPhase, release, setPhase, transcribe]);
 
   const record = useCallback(async () => {
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
       });
     } catch (cause: unknown) {
       const denied = cause instanceof DOMException && cause.name === 'NotAllowedError';
@@ -112,38 +194,82 @@ export function useDictation(input: {
     }
     const context = new AudioContext({ sampleRate: DICTATION_SAMPLE_RATE });
     const chunks: Float32Array[] = [];
-    // NOTE: ScriptProcessorNode is deprecated but needs no worklet module, which the
-    // file:// origin and the default-src 'self' policy make fragile to load.
-    const processor = context.createScriptProcessor(BUFFER_SIZE, 1, 1);
-    processor.onaudioprocess = (event) => {
-      chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-    };
     const source = context.createMediaStreamSource(stream);
+    const highpass = context.createBiquadFilter();
+    highpass.type = 'highpass';
+    highpass.frequency.value = 80;
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -24;
+    compressor.knee.value = 12;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
     const analyser = context.createAnalyser();
     analyser.fftSize = ANALYSER_FFT_SIZE;
-    source.connect(analyser);
-    source.connect(processor);
-    processor.connect(context.destination);
+    source.connect(highpass);
+    highpass.connect(compressor);
+    compressor.connect(analyser);
+    const processor = await attachCaptureNode({
+      context,
+      source: compressor,
+      onChunk: (samples) => chunks.push(samples),
+    });
 
+    captureIdRef.current += 1;
+    const captureId = captureIdRef.current;
+    livePrefixRef.current = '';
+    liveCursorRef.current = 0;
+
+    const interimMs = hasServerRef.current ? DICTATION_INTERIM_MS : INTERIM_CLI_MS;
     const interimTimer = setInterval(() => {
       if (interimBusyRef.current || chunks.length === 0) return;
+      const cursor = liveCursorRef.current;
+      const splitAt = findPauseSplitSample(chunks, cursor);
+      const previewChunks =
+        splitAt !== null
+          ? sliceChunksRange(chunks, cursor, splitAt)
+          : sliceChunksRange(chunks, cursor);
+      if (previewChunks.length === 0) return;
       interimBusyRef.current = true;
-      void transcribe([...chunks], false)
+      void transcribe(previewChunks, false)
         .then((result) => {
-          if (result.ok && phaseRef.current === 'recording') setInterim(result.value.text);
+          if (
+            !result.ok ||
+            phaseRef.current !== 'recording' ||
+            captureRef.current?.id !== captureId
+          ) {
+            return;
+          }
+          if (splitAt !== null) {
+            livePrefixRef.current = appendDictation(livePrefixRef.current, result.value.text);
+            liveCursorRef.current = splitAt;
+            setInterim(livePrefixRef.current);
+            return;
+          }
+          setInterim(appendDictation(livePrefixRef.current, result.value.text));
         })
         .finally(() => {
           interimBusyRef.current = false;
         });
-    }, DICTATION_INTERIM_MS);
+    }, interimMs);
     const maxTimer = setTimeout(() => void finish(), DICTATION_MAX_MS);
-    captureRef.current = { stream, context, analyser, chunks, interimTimer, maxTimer };
+    captureRef.current = {
+      id: captureId,
+      stream,
+      context,
+      analyser,
+      processor,
+      chunks,
+      interimTimer,
+      maxTimer,
+    };
     setInterim('');
     setPhase('recording');
   }, [finish, setPhase, transcribe]);
 
   const begin = useCallback(async () => {
     setError(null);
+    setPolishFallback(null);
     setPhase('checking');
     const status = await window.inova.getVoiceStatus();
     if (!status.ok) {
@@ -156,6 +282,7 @@ export function useDictation(input: {
       setPhase('idle');
       return;
     }
+    hasServerRef.current = status.value.server === true;
     if (!status.value.model) {
       missingModelRef.current = status.value.modelId;
       setModelBytes(status.value.modelBytes);
@@ -190,6 +317,8 @@ export function useDictation(input: {
 
   const cancel = useCallback(() => {
     release();
+    livePrefixRef.current = '';
+    liveCursorRef.current = 0;
     setInterim('');
     setPhase('idle');
   }, [release, setPhase]);
@@ -212,6 +341,7 @@ export function useDictation(input: {
     phase,
     interim,
     error,
+    polishFallback,
     modelBytes,
     downloadPercent,
     getLevels,
@@ -219,5 +349,6 @@ export function useDictation(input: {
     confirmDownload,
     cancel,
     dismissError: () => setError(null),
+    dismissPolishFallback: () => setPolishFallback(null),
   };
 }

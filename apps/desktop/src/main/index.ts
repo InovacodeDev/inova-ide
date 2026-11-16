@@ -22,6 +22,8 @@ import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { findBinary, loginShellPath } from './shell-env.js';
 import { createVoiceHandlers, createVoiceService } from './voice.js';
+import { listOllamaModels, polishTranscript, probeOllamaEndpoint } from './voice-polish.js';
+import { startWhisperServer } from './whisper-server.js';
 
 const execFileAsync = promisify(execFile);
 const SHELL_TIMEOUT_MS = 5000;
@@ -77,6 +79,7 @@ const spawnChild: SpawnChild = ({ file, args, cwd, env }) =>
   spawn(file, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 
 let handlers: ReturnType<typeof createHandlers> | undefined;
+let disposeVoice: (() => Promise<void>) | undefined;
 
 const chat = createChatRunner({
   spawnChild,
@@ -120,9 +123,11 @@ function createWindow(): void {
 
 function closeAllSessions(): Promise<void> {
   const report = (error: unknown): void => console.error('inova: closeAll failed', error);
-  return Promise.all([sessions.closeAll().catch(report), chat.closeAll().catch(report)]).then(
-    () => undefined,
-  );
+  return Promise.all([
+    sessions.closeAll().catch(report),
+    chat.closeAll().catch(report),
+    disposeVoice ? disposeVoice().catch(report) : Promise.resolve(),
+  ]).then(() => undefined);
 }
 
 async function pickFolder(): Promise<string | null> {
@@ -310,9 +315,12 @@ void app.whenReady().then(async () => {
     autoArchive();
     setInterval(autoArchive, AUTO_ARCHIVE_INTERVAL_MS);
     const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
+    const whisperServerName =
+      process.platform === 'win32' ? 'whisper-server.exe' : 'whisper-server';
     const voice = createVoiceService({
       modelDir: join(dataRoot(process.env), 'models'),
       getModelId: async () => (await getSettings(dataRoot(process.env))).voice.modelId,
+      getVoiceSettings: async () => (await getSettings(dataRoot(process.env))).voice,
       binaryCandidates: [
         join(process.resourcesPath, 'whisper', whisperName),
         join(app.getAppPath(), 'resources', 'whisper', whisperName),
@@ -326,9 +334,19 @@ void app.whenReady().then(async () => {
         });
         return stdout;
       },
-      fetch: (url) => globalThis.fetch(url),
+      serverBinaryCandidates: [
+        join(process.resourcesPath, 'whisper', whisperServerName),
+        join(app.getAppPath(), 'resources', 'whisper', whisperServerName),
+      ],
+      findServerOnPath: async () => findBinary('whisper-server', (await baseEnv())['PATH'] ?? ''),
+      startServer: startWhisperServer,
+      polish: polishTranscript,
+      listPolishModels: listOllamaModels,
+      probePolishEndpoint: probeOllamaEndpoint,
+      fetch: (url, init) => globalThis.fetch(url, init),
       onProgress: (progress) => sendToWindow(CHANNELS.voiceModelProgress, progress),
     });
+    disposeVoice = voice.dispose;
     registerIpc({
       handlers: created,
       voice: createVoiceHandlers(voice),

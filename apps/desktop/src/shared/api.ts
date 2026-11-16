@@ -44,6 +44,7 @@ import type {
   SettingsPatch,
   VerificationCheck,
   VoiceModelId,
+  VoicePolishMode,
   Workspace,
 } from '@inova/core/types';
 
@@ -125,11 +126,21 @@ export interface VoiceModelInfo {
 
 export interface VoiceStatus {
   binary: boolean;
+  server?: boolean;
   model: boolean;
   modelBytes: number;
   modelId: VoiceModelId;
   installed: VoiceModelId[];
   catalog: VoiceModelInfo[];
+  polishModels?: string[];
+}
+
+export interface VoicePolishCheckResult {
+  endpoint: string;
+  reachable: boolean;
+  models: string[];
+  checkedAt: string;
+  error?: string;
 }
 
 export interface VoiceModelProgress {
@@ -230,6 +241,7 @@ export interface InovaApi {
   }): Promise<Result<null>>;
   getPathForFile(file: File): string;
   getVoiceStatus(): Promise<Result<VoiceStatus>>;
+  checkVoicePolish(input?: { endpoint?: string }): Promise<Result<VoicePolishCheckResult>>;
   downloadVoiceModel(input?: { modelId: VoiceModelId }): Promise<Result<null>>;
   deleteVoiceModel(input: { modelId: VoiceModelId }): Promise<Result<VoiceStatus>>;
   transcribeAudio(input: {
@@ -237,7 +249,8 @@ export interface InovaApi {
     final: boolean;
     language: string;
     hints: string[];
-  }): Promise<Result<{ text: string }>>;
+    polishMode?: VoicePolishMode;
+  }): Promise<Result<{ text: string; rawText?: string; polished?: boolean }>>;
   onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
   enqueueTurn(input: {
     sessionId: string;
@@ -423,6 +436,7 @@ export const CHANNELS = {
   cancelLogin: 'inova:cancelLogin',
   loginEvent: 'inova:login:event',
   getVoiceStatus: 'inova:getVoiceStatus',
+  checkVoicePolish: 'inova:checkVoicePolish',
   downloadVoiceModel: 'inova:downloadVoiceModel',
   deleteVoiceModel: 'inova:deleteVoiceModel',
   transcribeAudio: 'inova:transcribeAudio',
