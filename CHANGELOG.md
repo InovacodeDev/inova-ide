@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.9.0] - 2026-11-16
+
 ### Adicionado
 
 - Visão dividida: abra uma aba ao lado da aba atual pelo botão de colunas na barra de abas; cada painel tem barra própria com foco e botão de fechar.
