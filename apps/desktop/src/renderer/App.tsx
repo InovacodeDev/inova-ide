@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import type { TurnTokenUsage } from '@inova/core/chat-types';
 import {
@@ -22,6 +22,8 @@ import type {
 import type {
   AccountView,
   ComparisonDiffView,
+  FilePreview,
+  FilePreviewSource,
   ProfileSyncApplyResult,
   ProfileSyncPreview,
   ProjectView,
@@ -41,6 +43,8 @@ import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
 import { collectVoiceHints } from './dictation';
+import { FileViewerPane } from './FileViewerPane';
+import { fileViewerReducer, initialFileViewerState } from './file-viewer-state';
 import { Footer, type UsageState } from './Footer';
 import { ForkModal } from './ForkModal';
 import { buildFailoverNotice, type FailoverNotice } from './failover-notice';
@@ -65,6 +69,7 @@ import { I18nProvider } from './I18nContext';
 import { resolveLocale, translate, type TranslationKey, type TranslationParams } from './i18n';
 import { modeOptionText } from './mode-picker-state';
 import { localizeModelOption } from './model-picker-state';
+import { openModalCount } from './modal-layers';
 import { UpdateProgress } from './UpdateProgress';
 import { UpdateToast } from './UpdateToast';
 import { useUpdates } from './useUpdates';
@@ -206,6 +211,10 @@ export function App() {
   const detailsCollapsed = settings?.appearance.detailsCollapsed ?? false;
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabsState);
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
+  const [fileViewer, dispatchFileViewer] = useReducer(fileViewerReducer, initialFileViewerState);
+  const [viewerPreviews, setViewerPreviews] = useState<
+    Record<string, { preview?: FilePreview; loading: boolean; error?: string }>
+  >({});
 
   const latest = useRef({ accounts, projects, sessions, chats, tabs });
   useEffect(() => {
@@ -1430,6 +1439,148 @@ export function App() {
     }
   }, [activeAccountLabel, modelsByAccount, loadModels]);
 
+  const activeViewerTab = useMemo(
+    () => fileViewer.tabs.find((tab) => tab.resolvedPath === fileViewer.activePath) ?? null,
+    [fileViewer.tabs, fileViewer.activePath],
+  );
+
+  const activeViewerKey = activeViewerTab
+    ? `${activeViewerTab.resolvedPath}@${activeViewerTab.revision}`
+    : null;
+  const activeViewerEntry = activeViewerKey ? viewerPreviews[activeViewerKey] : undefined;
+
+  useEffect(() => {
+    if (!fileViewer.open || !activeViewerTab || !activeViewerKey) return;
+    if (viewerPreviews[activeViewerKey]) return;
+
+    queueMicrotask(() => {
+      setViewerPreviews((prev) =>
+        prev[activeViewerKey] ? prev : { ...prev, [activeViewerKey]: { loading: true } },
+      );
+    });
+
+    let cancelled = false;
+    void window.inova
+      .readFilePreview({
+        path: activeViewerTab.resolvedPath,
+        source: activeViewerTab.source,
+        projectId: activeViewerTab.projectId,
+        sessionId: activeViewerTab.sessionId,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        queueMicrotask(() => {
+          setViewerPreviews((prev) => ({
+            ...prev,
+            [activeViewerKey]: result.ok
+              ? { preview: result.value, loading: false }
+              : { loading: false, error: result.message },
+          }));
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileViewer.open, activeViewerKey, activeViewerTab, viewerPreviews]);
+
+  const openFileInViewer = useCallback(
+    (input: {
+      path: string;
+      source?: FilePreviewSource;
+      projectId?: string | null;
+      sessionId?: string | null;
+      line?: number | null;
+    }) => {
+      dispatchFileViewer({
+        type: 'openTab',
+        tab: {
+          resolvedPath: input.path,
+          source: input.source ?? 'project',
+          projectId: input.projectId ?? activeProject?.id,
+          sessionId: input.sessionId ?? activeSession?.id,
+          line: input.line ?? null,
+        },
+      });
+    },
+    [activeProject?.id, activeSession?.id],
+  );
+
+  const openViewerPicker = useCallback(async () => {
+    const res = await window.inova.pickViewerFiles();
+    if (res.ok && res.value.length > 0) {
+      for (const filePath of res.value) {
+        dispatchFileViewer({
+          type: 'openTab',
+          tab: {
+            resolvedPath: filePath,
+            source: 'picker',
+          },
+        });
+      }
+    }
+  }, []);
+
+  const openDroppedFiles = useCallback((paths: string[]) => {
+    for (const filePath of paths) {
+      dispatchFileViewer({
+        type: 'openTab',
+        tab: {
+          resolvedPath: filePath,
+          source: 'user-drop',
+        },
+      });
+    }
+  }, []);
+
+  const openExternalFilePath = useCallback(
+    (path: string) => {
+      const tab = fileViewer.tabs.find((t) => t.resolvedPath === path) ?? activeViewerTab;
+      void window.inova.openFilePath({
+        path,
+        source: tab?.source ?? 'project',
+        projectId: tab?.projectId ?? activeProject?.id,
+        sessionId: tab?.sessionId ?? activeSession?.id,
+      });
+    },
+    [activeProject?.id, activeSession?.id, activeViewerTab, fileViewer.tabs],
+  );
+
+  useEffect(() => {
+    if (!fileViewer.open || !fileViewer.maximized) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      if (openModalCount() > 0) return;
+      if (
+        settingsOpen ||
+        commandPaletteOpen ||
+        worktreeModal !== null ||
+        pendingRevert !== null ||
+        pendingHandoff !== null ||
+        pendingFork !== null ||
+        pendingRestore !== null ||
+        pendingRewind !== null
+      ) {
+        return;
+      }
+      event.preventDefault();
+      dispatchFileViewer({ type: 'setMaximized', maximized: false });
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    fileViewer.open,
+    fileViewer.maximized,
+    settingsOpen,
+    commandPaletteOpen,
+    worktreeModal,
+    pendingRevert,
+    pendingHandoff,
+    pendingFork,
+    pendingRestore,
+    pendingRewind,
+  ]);
+
   const runShortcut = ({ id, tabIndex }: ShortcutCommand): boolean => {
     switch (id) {
       case 'open-settings':
@@ -1513,6 +1664,7 @@ export function App() {
         const projectMap = new Map(projects.map((project) => [project.id, project] as const));
         return buildCommandPaletteItems({
           locale,
+          fileViewer: inWorkspace ? { open: fileViewer.open } : undefined,
           actions: [
             {
               id: 'action:new-session',
@@ -1663,6 +1815,12 @@ export function App() {
             return;
           case 'action:toggle-inspector':
             void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } });
+            return;
+          case 'action:toggle-file-viewer':
+            dispatchFileViewer({ type: 'toggleOpen' });
+            return;
+          case 'action:open-file-viewer':
+            void openViewerPicker();
             return;
           case 'action:open-git-diff':
             if (activeSession) void inspectWorktree(activeSession);
@@ -1874,8 +2032,14 @@ export function App() {
                   }
                   exited={activeTab.exited}
                   detailsCollapsed={detailsCollapsed}
+                  fileViewerOpen={fileViewer.open}
+                  fileViewerMaximized={fileViewer.maximized}
                   onToggleDetails={() =>
                     void updateSettings({ appearance: { detailsCollapsed: !detailsCollapsed } })
+                  }
+                  onToggleFileViewer={() => dispatchFileViewer({ type: 'toggleOpen' })}
+                  onToggleFileViewerMaximized={() =>
+                    dispatchFileViewer({ type: 'toggleMaximized' })
                   }
                   onRename={
                     activeSession
@@ -1895,7 +2059,10 @@ export function App() {
                 <p className="hint">{t('app.emptySessionHint')}</p>
               )}
               <div className="session-stage">
-                <div className="session-panes">
+                <div
+                  className="session-panes"
+                  style={fileViewer.open && fileViewer.maximized ? { display: 'none' } : undefined}
+                >
                   {tabs.tabs.map((tab) => {
                     const tabSession = sessionById.get(tab.sessionId);
                     const tabProject = projectOf(tab.sessionId);
@@ -2107,6 +2274,14 @@ export function App() {
                               : undefined
                           }
                           onPinNote={(note) => void pinSessionNote(tab.sessionId, note)}
+                          onOpenFile={(filePath) =>
+                            openFileInViewer({
+                              path: filePath,
+                              source: 'project',
+                              projectId: tabProject?.id ?? null,
+                              sessionId: tabSession?.id ?? null,
+                            })
+                          }
                           onSend={(prompt, extraDirs) =>
                             void sendMessage(tab.sessionId, prompt, extraDirs)
                           }
@@ -2116,6 +2291,41 @@ export function App() {
                     );
                   })}
                 </div>
+                {fileViewer.open ? (
+                  <FileViewerPane
+                    open={fileViewer.open}
+                    maximized={fileViewer.maximized}
+                    widthPx={fileViewer.widthPx}
+                    tabs={fileViewer.tabs}
+                    activePath={fileViewer.activePath}
+                    preview={activeViewerEntry?.preview}
+                    loading={
+                      activeViewerEntry ? activeViewerEntry.loading : Boolean(activeViewerTab)
+                    }
+                    error={activeViewerEntry?.error ?? null}
+                    onSelectTab={(path) =>
+                      dispatchFileViewer({ type: 'selectTab', resolvedPath: path })
+                    }
+                    onCloseTab={(path) =>
+                      dispatchFileViewer({ type: 'closeTab', resolvedPath: path })
+                    }
+                    onClosePanel={() => dispatchFileViewer({ type: 'setOpen', open: false })}
+                    onToggleMaximized={() => dispatchFileViewer({ type: 'toggleMaximized' })}
+                    onResizeWidth={(width) => dispatchFileViewer({ type: 'setWidthPx', width })}
+                    onPickFiles={() => void openViewerPicker()}
+                    onOpenDroppedFiles={openDroppedFiles}
+                    onReload={() => dispatchFileViewer({ type: 'reloadActiveTab' })}
+                    onOpenExternal={openExternalFilePath}
+                    onOpenFile={(path) =>
+                      openFileInViewer({
+                        path,
+                        source: 'project',
+                        projectId: activeProject?.id,
+                        sessionId: activeSession?.id,
+                      })
+                    }
+                  />
+                ) : null}
                 {activeSession && activeProject && (
                   <SessionDetails
                     sessionId={activeSession.id}
@@ -2128,6 +2338,15 @@ export function App() {
                     projectSessionCount={(sessions[activeProject.id] ?? []).length}
                     turnUsages={turnUsagesBySession[activeSession.id]}
                     collapsed={detailsCollapsed}
+                    hidden={fileViewer.open && fileViewer.maximized}
+                    onOpenFile={(filePath) =>
+                      openFileInViewer({
+                        path: filePath,
+                        source: 'project',
+                        projectId: activeProject.id,
+                        sessionId: activeSession.id,
+                      })
+                    }
                     kind={activeSession.parentId ? 'subsession' : 'session'}
                     sectionName={folderName(activeProject.path)}
                     parentTitle={activeParentTitle}

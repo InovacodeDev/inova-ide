@@ -67,10 +67,12 @@ function EditToolCard({
   item,
   presented,
   defaultOpen,
+  onOpenFile,
 }: {
   item: Extract<ChatItem, { type: 'tool' }>;
   presented: PresentedEditTool;
   defaultOpen: boolean;
+  onOpenFile?: (path: string) => void;
 }) {
   const { t } = useI18n();
   const [expandedAll, setExpandedAll] = useState(false);
@@ -93,7 +95,22 @@ function EditToolCard({
           <PencilIcon size={16} />
         </span>
         <span className="chat-tool-name">{label}</span>
-        <span className="chat-tool-preview">{presented.filePath}</span>
+        {onOpenFile ? (
+          <button
+            type="button"
+            className="chat-tool-file-btn"
+            title={t('fileViewer.openFile')}
+            aria-label={t('fileViewer.openFile')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenFile(presented.filePath);
+            }}
+          >
+            <span className="chat-tool-preview">{presented.filePath}</span>
+          </button>
+        ) : (
+          <span className="chat-tool-preview">{presented.filePath}</span>
+        )}
         {presented.addedLines > 0 ? (
           <span className="chat-tool-status chat-diff-stat-add">+{presented.addedLines}</span>
         ) : null}
@@ -205,10 +222,13 @@ function LookupIcon({ category }: { category: PresentedLookupTool['category'] })
 function LookupToolCard({
   item,
   presented,
+  onOpenFile,
 }: {
   item: Extract<ChatItem, { type: 'tool' }>;
   presented: PresentedLookupTool;
+  onOpenFile?: (path: string) => void;
 }) {
+  const { t } = useI18n();
   return (
     <details
       className={
@@ -220,7 +240,22 @@ function LookupToolCard({
           <LookupIcon category={presented.category} />
         </span>
         <span className="chat-tool-name">{presented.label}</span>
-        <span className="chat-tool-preview">{presented.target || item.name}</span>
+        {presented.category === 'read' && presented.target && onOpenFile ? (
+          <button
+            type="button"
+            className="chat-tool-file-btn"
+            title={t('fileViewer.openFile')}
+            aria-label={t('fileViewer.openFile')}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenFile(presented.target);
+            }}
+          >
+            <span className="chat-tool-preview">{presented.target}</span>
+          </button>
+        ) : (
+          <span className="chat-tool-preview">{presented.target || item.name}</span>
+        )}
         <ToolStatusBadges
           isError={item.isError}
           running={item.output === null}
@@ -357,20 +392,29 @@ export function ToolCard({
   item,
   defaultOpen = false,
   onCopyText,
+  onOpenFile,
 }: {
   item: Extract<ChatItem, { type: 'tool' }>;
   defaultOpen?: boolean;
   onCopyText: (text: string) => void;
+  onOpenFile?: (path: string) => void;
 }) {
   const { locale } = useI18n();
   const presented = presentTool(item, locale);
   switch (presented.kind) {
     case 'edit':
-      return <EditToolCard item={item} presented={presented} defaultOpen={defaultOpen} />;
+      return (
+        <EditToolCard
+          item={item}
+          presented={presented}
+          defaultOpen={defaultOpen}
+          onOpenFile={onOpenFile}
+        />
+      );
     case 'shell':
       return <ShellToolCard item={item} presented={presented} onCopyText={onCopyText} />;
     case 'lookup':
-      return <LookupToolCard item={item} presented={presented} />;
+      return <LookupToolCard item={item} presented={presented} onOpenFile={onOpenFile} />;
     case 'todo':
       return <TodoToolCard item={item} presented={presented} defaultOpen={defaultOpen} />;
     case 'generic':

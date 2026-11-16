@@ -21,6 +21,7 @@ import {
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  EyeIcon,
   FolderIcon,
   GitBranchIcon,
   RefreshIcon,
@@ -350,6 +351,7 @@ interface SessionDetailsProps {
   projectSessionCount?: number;
   turnUsages?: readonly TurnUsageEntry[];
   collapsed: boolean;
+  hidden?: boolean;
   kind?: 'session' | 'subsession';
   sectionName?: string | null;
   parentTitle?: string | null;
@@ -366,6 +368,7 @@ interface SessionDetailsProps {
   onReviewDiff?: () => void;
   reviewBusy?: boolean;
   onHandoff?: () => void;
+  onOpenFile?: (path: string) => void;
   projectPinnedMemory?: string | null;
   sessionPinnedMemory?: string | null;
   pinnedMemoryDisabled?: boolean;
@@ -382,6 +385,7 @@ export function SessionDetails({
   projectSessionCount,
   turnUsages,
   collapsed,
+  hidden = false,
   kind = 'session',
   sectionName = null,
   parentTitle = null,
@@ -398,6 +402,7 @@ export function SessionDetails({
   onReviewDiff,
   reviewBusy = false,
   onHandoff,
+  onOpenFile,
   projectPinnedMemory = null,
   sessionPinnedMemory = null,
   pinnedMemoryDisabled = false,
@@ -445,7 +450,11 @@ export function SessionDetails({
   };
 
   return (
-    <aside className="session-details" aria-label={t('details.asideAria')}>
+    <aside
+      className="session-details"
+      aria-label={t('details.asideAria')}
+      style={hidden ? { display: 'none' } : undefined}
+    >
       <div className="session-details-top">
         <div
           className="session-details-tabs"
@@ -668,6 +677,20 @@ export function SessionDetails({
                           ) : null}
                         </span>
                       </button>
+                      {onOpenFile ? (
+                        <button
+                          type="button"
+                          className="icon-btn session-git-item-preview"
+                          aria-label={t('fileViewer.openFile')}
+                          data-tooltip={t('fileViewer.openFile')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenFile(file.path);
+                          }}
+                        >
+                          <EyeIcon size={12} />
+                        </button>
+                      ) : null}
                       {onRevertFiles ? (
                         <button
                           type="button"

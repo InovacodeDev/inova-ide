@@ -54,7 +54,39 @@ export interface BuildCommandPaletteInput {
     shortcutId?: ShortcutId;
     keywords?: readonly string[];
   }[];
+  readonly fileViewer?: {
+    open: boolean;
+  };
   readonly locale?: SupportedLocale;
+}
+
+export interface ViewerPaletteActionInput {
+  open: boolean;
+  locale?: SupportedLocale;
+}
+
+export function buildViewerPaletteActions(input: ViewerPaletteActionInput): readonly {
+  id: string;
+  title: string;
+  subtitle?: string;
+  keywords?: readonly string[];
+}[] {
+  const locale = input.locale ?? 'pt-BR';
+  return [
+    {
+      id: 'action:toggle-file-viewer',
+      title: input.open
+        ? translate(locale, 'app.palette.toggleFileViewerClose')
+        : translate(locale, 'app.palette.toggleFileViewerOpen'),
+      keywords: ['viewer', 'arquivo', 'leitor', 'preview', 'file'],
+    },
+    {
+      id: 'action:open-file-viewer',
+      title: translate(locale, 'app.palette.openFileViewer'),
+      subtitle: translate(locale, 'app.palette.openFileViewerSub'),
+      keywords: ['abrir', 'arquivo', 'file', 'picker', 'selecionar'],
+    },
+  ];
 }
 
 export function paletteCategoryLabel(
@@ -94,6 +126,16 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     ...(action.shortcutId !== undefined ? { shortcutId: action.shortcutId } : {}),
     ...(action.keywords !== undefined ? { keywords: action.keywords } : {}),
   }));
+
+  const viewerItems: CommandPaletteItem[] = input.fileViewer
+    ? buildViewerPaletteActions({ open: input.fileViewer.open, locale }).map((action) => ({
+        id: action.id,
+        category: 'Ações',
+        title: action.title,
+        ...(action.subtitle !== undefined ? { subtitle: action.subtitle } : {}),
+        keywords: action.keywords,
+      }))
+    : [];
 
   const sortedSessions = [...input.sessions].sort((a, b) => sessionRank(a) - sessionRank(b));
   const sessionItems: CommandPaletteItem[] = sortedSessions.map((session) => ({
@@ -149,7 +191,14 @@ export function buildCommandPaletteItems(input: BuildCommandPaletteInput): Comma
     keywords: [mode.id, 'modo', 'mode'],
   }));
 
-  return [...actionItems, ...sessionItems, ...projectItems, ...modelItems, ...modeItems];
+  return [
+    ...actionItems,
+    ...viewerItems,
+    ...sessionItems,
+    ...projectItems,
+    ...modelItems,
+    ...modeItems,
+  ];
 }
 
 function isSubsequence(needle: string, haystack: string): boolean {
