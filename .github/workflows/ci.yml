@@ -33,6 +33,9 @@ jobs:
       - name: Test Winget manifest generator
         run: node --test scripts/winget-manifest.test.mjs
 
+      - name: Test development flow policy
+        run: node --test scripts/dev-flow/policy.contract.test.mjs scripts/dev-flow/policy.edge.test.mjs
+
       - name: Check root CLI (POSIX)
         if: runner.os != 'Windows'
         run: pnpm typecheck && pnpm lint && pnpm test

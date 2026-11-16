@@ -1,0 +1,118 @@
+# Fluxo de desenvolvimento
+
+Este documento é a fonte única do fluxo. Ele vale para pessoas e para agentes.
+
+## Regras
+
+1. Nunca faça commit ou push na `main`. Toda mudança entra por PR.
+2. Toda mudança começa em uma demanda planejada e em uma tarefa (sub-issue).
+3. Cada tarefa tem uma branch vinculada à issue e um PR que fecha a issue.
+4. Toda mudança de código tem teste. Os testes seguem dois padrões (seção "Testes").
+5. Um teste de contrato que já está na `main` é imutável.
+
+## Passo a passo
+
+### 1. Planeje a demanda
+
+Defina contexto, objetivo, abordagem, regras de negócio, critérios de aceite e tarefas.
+
+### 2. Crie a issue da demanda
+
+```bash
+gh issue create --label demanda --title "Demanda: <título>" --body-file <plano.md>
+```
+
+O corpo segue os campos do template `Demanda`.
+
+### 3. Crie uma sub-issue por tarefa
+
+```bash
+gh issue create --label tarefa --parent <numero-da-demanda> \
+  --title "Tarefa: <título>" --body-file <tarefa.md>
+```
+
+### 4. Crie a branch vinculada à tarefa, com base na `main`
+
+```bash
+gh issue develop <numero-da-tarefa> --base main \
+  --name <tipo>/<numero-da-tarefa>-<slug> --checkout
+```
+
+Formato do nome: `<tipo>/<numero>-<slug>`. O slug usa minúsculas, dígitos e hífen.
+
+| Tipo                                    | Uso                              | Testes exigidos no PR                                             |
+| --------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `feat`                                  | Funcionalidade nova              | Um contrato novo e um arquivo de cenários de bug novo ou alterado |
+| `fix`                                   | Correção de bug                  | Um arquivo de cenários de bug novo ou alterado                    |
+| `refactor`, `perf`                      | Mudança sem alterar comportamento | Nenhum teste novo. Os testes existentes devem passar              |
+| `docs`, `test`, `chore`, `ci`, `build`  | Mudança sem código de produção   | Proibido alterar código de produção                               |
+
+### 5. Desenvolva e abra o PR
+
+```bash
+gh pr create --base main --title "<título>" --body "Closes #<numero-da-tarefa>"
+```
+
+O PR deve conter `Closes #<numero-da-tarefa>`. O GitHub fecha a tarefa no merge.
+
+### 6. Faça o merge
+
+O merge exige os checks `PR policy` e `verify` verdes. Depois do merge, feche a demanda quando
+todas as tarefas estiverem fechadas.
+
+## Testes
+
+| Padrão          | Arquivo             | Objetivo                                         | Pode alterar depois do merge?                    |
+| --------------- | ------------------- | ------------------------------------------------ | ------------------------------------------------ |
+| Contrato        | `*.contract.test.*` | Garante a regra de negócio                       | Não. Só com a label `contrato-alteracao-aprovada` |
+| Cenários de bug | `*.edge.test.*`     | Ataca o fluxo: entrada inválida, limite, falha   | Sim                                              |
+
+- Crie o contrato quando a funcionalidade surgir. Uma funcionalidade nova tem um arquivo novo.
+- Não adicione casos a um contrato existente. Crie outro arquivo de contrato.
+- Se um contrato falhar, corrija o código. Não altere o teste.
+- A alteração de um contrato exige pedido explícito do dono do produto. Só ele aplica a label
+  `contrato-alteracao-aprovada` no PR. Agentes nunca aplicam essa label.
+- Os testes `*.test.*` antigos continuam válidos. Eles não contam como contrato nem como cenários
+  de bug.
+
+Locais: `src/**/*.test.ts` (CLI), `apps/desktop/test/**/*.test.ts` (desktop) e
+`scripts/**/*.test.mjs` (scripts, com `node --test`).
+
+## Release
+
+Rode o release em uma branch `release/vX.Y.Z`, nunca na `main`.
+
+```bash
+git checkout -b release/v<versão> origin/main
+pnpm version:deploy <major|minor|patch>
+gh pr create --base main --title "chore: release v<versão>" --body "Release v<versão>"
+```
+
+A branch de release não exige issue. Ela não pode alterar código de produção.
+
+## O que garante o fluxo
+
+| Mecanismo                               | O que valida                                                                 |
+| --------------------------------------- | ---------------------------------------------------------------------------- |
+| Workflow `PR policy`                    | Nome da branch, tarefa aberta, sub-issue de demanda, branch vinculada, `Closes #N`, testes exigidos, contratos imutáveis |
+| Workflow `CI` (`verify`)                | Typecheck, lint e testes nos três sistemas                                   |
+| Workflow `Main guard`                   | Falha se um commit chegar na `main` sem PR com merge                         |
+| Ruleset `main-dev-flow` (sem bypass)    | Bloqueia push direto e exige os checks acima                                 |
+| Ruleset `main` (bypass só por PR)       | Exige revisão. O time `owners` pode dispensar a revisão, só dentro de um PR  |
+
+O workflow `PR policy` roda com o código da `main`, não com o código do PR. Um PR não consegue
+alterar a própria validação.
+
+Se você mudar a issue depois de abrir o PR (label, sub-issue, branch vinculada), rode o check
+`PR policy` de novo.
+
+## Configuração do repositório
+
+O script cria as labels e os rulesets. Ele é idempotente.
+
+```bash
+node scripts/dev-flow/setup-github.mjs
+node scripts/dev-flow/setup-github.mjs --apply
+```
+
+O primeiro comando mostra o plano. O segundo aplica.
