@@ -11,6 +11,12 @@ export const VOICE_POLISH_MODES: readonly VoicePolishMode[] = ['off', 'clean', '
 
 export const DEFAULT_VOICE_POLISH_ENDPOINT = 'http://127.0.0.1:11434';
 
+export const ELOQUENT_CONTAINER_NAME = 'inova-eloquent-ollama';
+export const ELOQUENT_VOLUME_NAME = 'inova_eloquent_ollama';
+export const ELOQUENT_DEFAULT_MODEL = 'gemma3:4b';
+export const ELOQUENT_IMAGE = 'ollama/ollama:latest';
+export const ELOQUENT_STANDALONE_COMMAND = `docker run -d --name ${ELOQUENT_CONTAINER_NAME} --restart unless-stopped -p 127.0.0.1:11434:11434 -v ${ELOQUENT_VOLUME_NAME}:/root/.ollama ${ELOQUENT_IMAGE} && docker exec ${ELOQUENT_CONTAINER_NAME} ollama pull ${ELOQUENT_DEFAULT_MODEL}`;
+
 export function isPolishEndpointUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 240) return false;
   try {

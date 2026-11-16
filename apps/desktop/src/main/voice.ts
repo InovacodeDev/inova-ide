@@ -16,6 +16,7 @@ import type {
   VoiceStatus,
 } from '../shared/api.js';
 import { fail, isRecord, ok } from './validation.js';
+import { VoiceDockerError } from './voice-docker.js';
 import type { OllamaProbeResult, PolishInput, PolishResult } from './voice-polish.js';
 import type { WhisperServerHandle } from './whisper-server.js';
 
@@ -138,6 +139,7 @@ export interface VoiceDeps {
     endpoint: string;
     fetch: (url: string, init?: RequestInit) => Promise<Response>;
   }) => Promise<OllamaProbeResult>;
+  setupDocker?: (input?: { model?: string }) => Promise<VoicePolishCheckResult>;
   fetch: (url: string, init?: RequestInit) => Promise<Response>;
   onProgress: (progress: VoiceModelProgress) => void;
 }
@@ -145,6 +147,7 @@ export interface VoiceDeps {
 export interface VoiceService {
   status(): Promise<VoiceStatus>;
   checkPolish(input?: { endpoint?: string }): Promise<VoicePolishCheckResult>;
+  setupDocker(input?: { model?: string }): Promise<VoicePolishCheckResult>;
   downloadModel(input?: { modelId?: VoiceModelId }): Promise<void>;
   deleteModel(input: { modelId: VoiceModelId }): Promise<VoiceStatus>;
   transcribe(input: TranscribeInput): Promise<string>;
@@ -569,6 +572,13 @@ export function createVoiceService(deps: VoiceDeps): VoiceService {
 
     checkPolish,
 
+    async setupDocker(input) {
+      if (!deps.setupDocker) {
+        throw new VoiceError('Instalação automática no Docker indisponível.');
+      }
+      return deps.setupDocker(input);
+    },
+
     dispose: stopServer,
 
     async downloadModel(input) {
@@ -648,7 +658,8 @@ async function voiceGuarded<T>(work: () => Promise<T>): Promise<Result<T>> {
   try {
     return ok(await work());
   } catch (error: unknown) {
-    if (error instanceof VoiceError) return fail(error.message);
+    if (error instanceof VoiceError || error instanceof VoiceDockerError)
+      return fail(error.message);
     if (error instanceof Error && error.name === 'AbortError') {
       return fail('Transcrição cancelada.');
     }
@@ -665,6 +676,15 @@ export function parseVoicePolishCheck(input: unknown): { endpoint?: string } | u
   return { endpoint };
 }
 
+export function parseVoiceDockerSetup(input: unknown): { model?: string } | undefined {
+  if (input === undefined) return {};
+  if (!isRecord(input)) return undefined;
+  const model = input['model'];
+  if (model === undefined) return {};
+  if (typeof model !== 'string') return undefined;
+  return { model };
+}
+
 export function createVoiceHandlers(service: VoiceService) {
   return {
     getVoiceStatus: (): Promise<Result<VoiceStatus>> => voiceGuarded(() => service.status()),
@@ -672,6 +692,11 @@ export function createVoiceHandlers(service: VoiceService) {
       const parsed = parseVoicePolishCheck(input);
       if (parsed === undefined) return Promise.resolve(fail('Endereço inválido.'));
       return voiceGuarded(() => service.checkPolish(parsed));
+    },
+    setupVoiceDocker: (input?: unknown): Promise<Result<VoicePolishCheckResult>> => {
+      const parsed = parseVoiceDockerSetup(input);
+      if (parsed === undefined) return Promise.resolve(fail('Modelo inválido.'));
+      return voiceGuarded(() => service.setupDocker(parsed));
     },
     downloadVoiceModel: (input?: unknown): Promise<Result<null>> => {
       const parsed = parseVoiceDownload(input);

@@ -22,6 +22,7 @@ import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
 import { findBinary, loginShellPath } from './shell-env.js';
 import { createVoiceHandlers, createVoiceService } from './voice.js';
+import { createVoiceDockerSetup } from './voice-docker.js';
 import { listOllamaModels, polishTranscript, probeOllamaEndpoint } from './voice-polish.js';
 import { startWhisperServer } from './whisper-server.js';
 
@@ -317,6 +318,27 @@ void app.whenReady().then(async () => {
     const whisperName = process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli';
     const whisperServerName =
       process.platform === 'win32' ? 'whisper-server.exe' : 'whisper-server';
+    const setupDocker = createVoiceDockerSetup({
+      findDocker: async () => {
+        const envPath = (await baseEnv())['PATH'] ?? '';
+        const extraPath =
+          process.platform === 'darwin'
+            ? `${envPath}:/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin`
+            : envPath;
+        return findBinary('docker', extraPath);
+      },
+      runDocker: async ({ file, args }) => {
+        const { stdout } = await execFileAsync(file, args, {
+          env: await baseEnv(),
+          timeout: INSTALL_TIMEOUT_MS,
+          maxBuffer: WHISPER_MAX_OUTPUT_BYTES,
+        });
+        return stdout;
+      },
+      probeEndpoint: probeOllamaEndpoint,
+      fetch: (url, init) => globalThis.fetch(url, init),
+      onProgress: (progress) => sendToWindow(CHANNELS.voiceDockerProgress, progress),
+    });
     const voice = createVoiceService({
       modelDir: join(dataRoot(process.env), 'models'),
       getModelId: async () => (await getSettings(dataRoot(process.env))).voice.modelId,
@@ -343,6 +365,7 @@ void app.whenReady().then(async () => {
       polish: polishTranscript,
       listPolishModels: listOllamaModels,
       probePolishEndpoint: probeOllamaEndpoint,
+      setupDocker,
       fetch: (url, init) => globalThis.fetch(url, init),
       onProgress: (progress) => sendToWindow(CHANNELS.voiceModelProgress, progress),
     });

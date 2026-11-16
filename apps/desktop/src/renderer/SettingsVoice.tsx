@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   DEFAULT_VOICE_POLISH_ENDPOINT,
+  ELOQUENT_DEFAULT_MODEL,
+  ELOQUENT_STANDALONE_COMMAND,
   isPolishEndpointUrl,
   resolveVoicePolishSettings,
 } from '@inova/core/voice-settings';
 import type { Settings, SettingsPatch, VoiceModelId, VoicePolishMode } from '@inova/core/types';
-import type { VoiceModelInfo, VoicePolishCheckResult, VoiceStatus } from '../shared/api';
+import type {
+  VoiceDockerProgress,
+  VoiceModelInfo,
+  VoicePolishCheckResult,
+  VoiceStatus,
+} from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
 import { formatMegabytes, parseCustomDictionary } from './dictation';
 import { useI18n } from './I18nContext';
@@ -32,8 +39,6 @@ const POLISH_OPTIONS: { value: VoicePolishMode; labelKey: TranslationKey }[] = [
   { value: 'clean', labelKey: 'settings.voice.polishMode.clean' },
   { value: 'structured', labelKey: 'settings.voice.polishMode.structured' },
 ];
-
-const ELOQUENT_DOCKER_COMMAND = 'pnpm eloquent:up';
 
 const STATE_KEY: Record<Exclude<VoiceModelState, 'downloading'>, TranslationKey> = {
   'in-use': 'settings.voice.state.inUse',
@@ -105,6 +110,8 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
   const [pendingRemove, setPendingRemove] = useState<VoiceModelInfo | null>(null);
   const [checkingEndpoint, setCheckingEndpoint] = useState<string | null>(null);
   const [polishCheck, setPolishCheck] = useState<VoicePolishCheckResult | null>(null);
+  const [installingDocker, setInstallingDocker] = useState(false);
+  const [dockerProgress, setDockerProgress] = useState<VoiceDockerProgress | null>(null);
   const [dockerCopied, setDockerCopied] = useState(false);
   const endpointInputRef = useRef<HTMLInputElement>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -135,6 +142,8 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
       }),
     [],
   );
+
+  useEffect(() => window.inova.onVoiceDockerProgress(setDockerProgress), []);
 
   const download = async (modelId: VoiceModelId) => {
     setDownloads({ [modelId]: 0 });
@@ -176,7 +185,7 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
 
   const copyDockerCommand = async () => {
     try {
-      await navigator.clipboard.writeText(ELOQUENT_DOCKER_COMMAND);
+      await navigator.clipboard.writeText(ELOQUENT_STANDALONE_COMMAND);
       setDockerCopied(true);
       if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setDockerCopied(false), 2000);
@@ -184,6 +193,71 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
       setDockerCopied(false);
     }
   };
+
+  const installInDocker = async () => {
+    const targetModel = polish.model.trim() || ELOQUENT_DEFAULT_MODEL;
+    setInstallingDocker(true);
+    setDockerProgress({ stage: 'checking', model: targetModel, percent: null });
+    try {
+      const result = await call(() => window.inova.setupVoiceDocker({ model: targetModel }));
+      if (result) {
+        setPolishCheck(result.value);
+        if (polish.endpoint !== result.value.endpoint) {
+          onUpdate({ voice: { polishEndpoint: result.value.endpoint } });
+        }
+        setStatus((current) =>
+          current === null ? current : { ...current, polishModels: result.value.models },
+        );
+      } else {
+        setDockerProgress(null);
+      }
+    } finally {
+      setInstallingDocker(false);
+    }
+  };
+
+  const dockerModelLabel = polish.model.trim() || ELOQUENT_DEFAULT_MODEL;
+  const dockerDescription = (() => {
+    if (dockerProgress === null) {
+      return t('settings.voice.polishDockerDesc', { model: dockerModelLabel });
+    }
+    if (dockerProgress.stage === 'pulling') {
+      const label =
+        dockerProgress.percent !== null
+          ? t('settings.voice.polishDockerStage.pullingPercent', {
+              model: dockerProgress.model,
+              percent: dockerProgress.percent,
+            })
+          : t('settings.voice.polishDockerStage.pulling', { model: dockerProgress.model });
+      return (
+        <>
+          <span>{label}</span>
+          {dockerProgress.percent !== null ? (
+            <div
+              className="usage-track voice-docker-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={dockerProgress.percent}
+            >
+              <div
+                className="usage-fill usage-ok"
+                style={{ width: `${dockerProgress.percent}%` }}
+              />
+            </div>
+          ) : null}
+        </>
+      );
+    }
+    if (dockerProgress.stage === 'ready') {
+      return (
+        <span className="voice-endpoint-status-ok">
+          {t('settings.voice.polishDockerStage.ready', { model: dockerProgress.model })}
+        </span>
+      );
+    }
+    return t(`settings.voice.polishDockerStage.${dockerProgress.stage}`);
+  })();
 
   const endpointDescription = (() => {
     if (checkingEndpoint !== null) {
@@ -348,12 +422,27 @@ export function VoiceSection({ settings, onUpdate, call }: SettingsVoiceProps) {
             </button>
           </div>
         </SettingRow>
+        <SettingRow title={t('settings.voice.polishDockerTitle')} description={dockerDescription}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={installingDocker}
+            aria-busy={installingDocker}
+            onClick={() => void installInDocker()}
+          >
+            {installingDocker
+              ? t('settings.voice.polishDockerInstallingBtn')
+              : t('settings.voice.polishDockerInstallBtn')}
+          </button>
+        </SettingRow>
         <SettingRow
-          title={t('settings.voice.polishDockerTitle')}
-          description={t('settings.voice.polishDockerDesc')}
+          title={t('settings.voice.polishDockerManualTitle')}
+          description={t('settings.voice.polishDockerManualDesc')}
         >
           <div className="voice-endpoint-control">
-            <code className="voice-command-code mono">{ELOQUENT_DOCKER_COMMAND}</code>
+            <code className="voice-command-code mono" title={ELOQUENT_STANDALONE_COMMAND}>
+              {ELOQUENT_STANDALONE_COMMAND}
+            </code>
             <button type="button" className="btn" onClick={() => void copyDockerCommand()}>
               {dockerCopied
                 ? t('settings.voice.polishDockerCopiedBtn')

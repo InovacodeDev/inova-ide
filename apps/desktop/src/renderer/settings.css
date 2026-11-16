@@ -346,6 +346,7 @@
 .voice-command-code {
   display: inline-flex;
   align-items: center;
+  width: 220px;
   height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border);
@@ -354,6 +355,16 @@
   color: var(--text);
   font-size: 12.5px;
   white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.voice-command-code::-webkit-scrollbar {
+  display: none;
+}
+
+.voice-docker-progress {
+  margin-top: 6px;
 }
 
 .voice-endpoint-status-ok {

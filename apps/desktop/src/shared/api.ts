@@ -143,6 +143,14 @@ export interface VoicePolishCheckResult {
   error?: string;
 }
 
+export type VoiceDockerStage = 'checking' | 'starting' | 'waiting' | 'pulling' | 'ready';
+
+export interface VoiceDockerProgress {
+  stage: VoiceDockerStage;
+  model: string;
+  percent: number | null;
+}
+
 export interface VoiceModelProgress {
   modelId: VoiceModelId;
   receivedBytes: number;
@@ -242,6 +250,7 @@ export interface InovaApi {
   getPathForFile(file: File): string;
   getVoiceStatus(): Promise<Result<VoiceStatus>>;
   checkVoicePolish(input?: { endpoint?: string }): Promise<Result<VoicePolishCheckResult>>;
+  setupVoiceDocker(input?: { model?: string }): Promise<Result<VoicePolishCheckResult>>;
   downloadVoiceModel(input?: { modelId: VoiceModelId }): Promise<Result<null>>;
   deleteVoiceModel(input: { modelId: VoiceModelId }): Promise<Result<VoiceStatus>>;
   transcribeAudio(input: {
@@ -252,6 +261,7 @@ export interface InovaApi {
     polishMode?: VoicePolishMode;
   }): Promise<Result<{ text: string; rawText?: string; polished?: boolean }>>;
   onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
+  onVoiceDockerProgress(callback: (progress: VoiceDockerProgress) => void): () => void;
   enqueueTurn(input: {
     sessionId: string;
     prompt: string;
@@ -437,10 +447,12 @@ export const CHANNELS = {
   loginEvent: 'inova:login:event',
   getVoiceStatus: 'inova:getVoiceStatus',
   checkVoicePolish: 'inova:checkVoicePolish',
+  setupVoiceDocker: 'inova:setupVoiceDocker',
   downloadVoiceModel: 'inova:downloadVoiceModel',
   deleteVoiceModel: 'inova:deleteVoiceModel',
   transcribeAudio: 'inova:transcribeAudio',
   voiceModelProgress: 'inova:voice:model-progress',
+  voiceDockerProgress: 'inova:voice:docker-progress',
 } as const;
 
 declare global {

@@ -527,6 +527,26 @@ describe('voice service', () => {
       message: 'Endereço inválido. Use http://127.0.0.1, http://localhost ou https://.',
     });
   });
+
+  test('setupVoiceDocker delegates to setupDocker and validates input', async () => {
+    const { service } = await setup({
+      setupDocker: async (input) => ({
+        endpoint: 'http://127.0.0.1:11434',
+        reachable: true,
+        models: [input?.model ?? 'gemma3:4b'],
+        checkedAt: '2026-11-16T00:00:00.000Z',
+      }),
+    });
+    const handlers = createVoiceHandlers(service);
+    expect(await handlers.setupVoiceDocker({ model: 'gemma3:4b' })).toMatchObject({
+      ok: true,
+      value: { reachable: true, models: ['gemma3:4b'] },
+    });
+    expect(await handlers.setupVoiceDocker({ model: 123 })).toEqual({
+      ok: false,
+      message: 'Modelo inválido.',
+    });
+  });
 });
 
 describe('voice handlers', () => {
