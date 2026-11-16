@@ -128,6 +128,19 @@ describe('git-worktree', () => {
     expect(full.changedFiles.sort()).toEqual(['app.txt', 'new file.txt', 'other.txt']);
   });
 
+  test('lists non-ASCII file names unquoted so a scoped status keeps them', async () => {
+    const repo = await initRepo();
+    await writeFile(join(repo, 'configuração.txt'), 'acentuado\n');
+
+    const scoped = await getWorktreeStatus({
+      worktreePath: repo,
+      baseCommit: 'HEAD',
+      paths: ['configuração.txt'],
+    });
+    expect(scoped.changedFiles).toEqual(['configuração.txt']);
+    expect(scoped.diff).toContain('+acentuado');
+  });
+
   test('refuses applyWorktreeToProject when main repo has uncommitted changes', async () => {
     const root = await makeTempDir('inova-wt-root-');
     const repo = await initRepo();

@@ -107,7 +107,7 @@ export async function getWorktreeStatus(input: {
   });
   const namesRes = await runGit({
     cwd: input.worktreePath,
-    args: ['diff', '--name-only', input.baseCommit, snapshot.tree],
+    args: ['-c', 'core.quotePath=false', 'diff', '--name-only', input.baseCommit, snapshot.tree],
   });
   const allChangedFiles = namesRes.stdout
     .split('\n')
