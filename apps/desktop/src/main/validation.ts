@@ -139,6 +139,15 @@ export function parseSessionRef(input: unknown): { sessionId: string } | undefin
     : undefined;
 }
 
+export function parseClearSession(
+  input: unknown,
+): { sessionId: string; keepContext: boolean } | undefined {
+  if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
+  const { keepContext = false } = input;
+  if (typeof keepContext !== 'boolean') return undefined;
+  return { sessionId: input['sessionId'], keepContext };
+}
+
 export function parseSessionDelete(
   input: unknown,
 ): { sessionId: string; force: boolean } | undefined {

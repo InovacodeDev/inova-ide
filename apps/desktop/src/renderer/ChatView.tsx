@@ -10,7 +10,10 @@ import {
   type ReactNode,
   type Ref,
 } from 'react';
-import { isCircuitBreakerMessage } from '@inova/core/circuit-breaker';
+import {
+  isCircuitBreakerMessage,
+  isContextCircuitBreakerMessage,
+} from '@inova/core/circuit-breaker';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
 import { nativeSlashCommands, type SlashCommandAction } from '@inova/core/slash-commands';
@@ -133,6 +136,7 @@ export interface ChatViewProps {
   onRewindTurn?: (turnIndex: number) => void;
   onRegenerate?: (extraDirs: string[]) => void;
   onClearSession?: () => void;
+  onClearAndContinue?: () => void;
   onFeedback?: (input: { turnIndex: number; value: 'up' | 'down' | null }) => void;
   onWarn?: (message: string) => void;
   onOpenHandoff?: () => void;
@@ -424,6 +428,7 @@ interface MessageProps {
   latestCheckpoint?: { ref: string; skippedLargeFiles: string[] } | null;
   queuePaused?: boolean;
   onResumeQueue?: () => void;
+  onClearAndContinue?: () => void;
 }
 
 interface AgentMetaProps {
@@ -544,6 +549,7 @@ function Message({
   latestCheckpoint,
   queuePaused = false,
   onResumeQueue,
+  onClearAndContinue,
 }: MessageProps) {
   const { t, locale } = useI18n();
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
@@ -687,9 +693,12 @@ function Message({
         </div>
       );
     case 'error': {
+      const canClearAndContinue =
+        Boolean(onClearAndContinue) && isContextCircuitBreakerMessage(item.message);
       const showCircuitActions =
         isCircuitBreakerMessage(item.message) &&
-        ((queuePaused && Boolean(onResumeQueue)) ||
+        (canClearAndContinue ||
+          (queuePaused && Boolean(onResumeQueue)) ||
           (Boolean(latestCheckpoint) && Boolean(onRestoreCheckpoint)));
       const displayError =
         item.message === INTERRUPTED_MESSAGE ? t('tool.interruptedMessage') : item.message;
@@ -711,10 +720,21 @@ function Message({
             ) : null}
             {showCircuitActions ? (
               <div className="chat-error-actions">
-                {queuePaused && onResumeQueue ? (
+                {canClearAndContinue ? (
                   <button
                     type="button"
                     className="btn btn-sm btn-primary"
+                    disabled={busy}
+                    data-tooltip={t('chat.clearAndContinueTooltip')}
+                    onClick={onClearAndContinue}
+                  >
+                    {t('chat.clearAndContinue')}
+                  </button>
+                ) : null}
+                {queuePaused && onResumeQueue ? (
+                  <button
+                    type="button"
+                    className={canClearAndContinue ? 'btn btn-sm' : 'btn btn-sm btn-primary'}
                     disabled={busy}
                     onClick={onResumeQueue}
                   >
@@ -908,6 +928,7 @@ export function ChatView({
   onRewindTurn,
   onRegenerate,
   onClearSession,
+  onClearAndContinue,
   onFeedback,
   onWarn,
   onOpenHandoff,
@@ -1360,6 +1381,7 @@ export function ChatView({
         latestCheckpoint={latestCheckpoint}
         queuePaused={queuePaused}
         onResumeQueue={onResumeQueue}
+        onClearAndContinue={readOnly ? undefined : onClearAndContinue}
         onFixVerification={(fixPrompt) => {
           if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
         }}

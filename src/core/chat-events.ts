@@ -1,5 +1,5 @@
 import type { ChatEvent, SubagentSnapshot, SubagentStatus, UsageWindow } from './chat-types.js';
-import { contextWindowFor } from './context-window.js';
+import { contextWindowFor, rememberContextWindow } from './context-window.js';
 import type { ProviderId } from './types.js';
 
 export interface ChatParser {
@@ -195,22 +195,40 @@ function extractToolResults(message: unknown): ChatEvent[] {
 function createClaudeParser(): ChatParser {
   let messageId = '';
   let lastContext = '';
+  let lastUsage: { usedTokens: number; model: string | null } | null = null;
   const subagents = createSubagentTracker();
 
-  function contextEvents(message: Json): ChatEvent[] {
-    const counts = usageCounts(message['usage']);
-    if (counts === null) return [];
-    const model = str(message['model']);
+  function emitContext(usage: { usedTokens: number; model: string | null }): ChatEvent[] {
+    lastUsage = usage;
     const event: ChatEvent = {
       kind: 'context',
-      usedTokens: counts.input + counts.output,
-      windowTokens: contextWindowFor(model),
-      model,
+      usedTokens: usage.usedTokens,
+      windowTokens: contextWindowFor(usage.model),
+      model: usage.model,
     };
     const key = JSON.stringify(event);
     if (key === lastContext) return [];
     lastContext = key;
     return [event];
+  }
+
+  function contextEvents(message: Json): ChatEvent[] {
+    const counts = usageCounts(message['usage']);
+    if (counts === null) return [];
+    return emitContext({ usedTokens: counts.input + counts.output, model: str(message['model']) });
+  }
+
+  function reportedContextEvents(modelUsage: unknown): ChatEvent[] {
+    if (!isRecord(modelUsage)) return [];
+    for (const [model, usage] of Object.entries(modelUsage)) {
+      if (!isRecord(usage)) continue;
+      const windowTokens = num(usage['contextWindow']);
+      if (windowTokens === null) continue;
+      rememberContextWindow({ model, windowTokens });
+      const canonical = str(usage['canonicalModel']);
+      if (canonical !== null) rememberContextWindow({ model: canonical, windowTokens });
+    }
+    return lastUsage === null ? [] : emitContext(lastUsage);
   }
 
   function fromUser(data: Json): ChatEvent[] {
@@ -324,13 +342,16 @@ function createClaudeParser(): ChatParser {
           return parentToolId === null ? fromUser(data) : [];
         case 'result': {
           const isError = data['is_error'] === true;
+          const context = reportedContextEvents(data['modelUsage']);
           const done: ChatEvent = {
             kind: 'done',
             isError,
             costUsd: num(data['total_cost_usd']),
             durationMs: num(data['duration_ms']),
           };
-          return isError ? [{ kind: 'error', message: claudeErrorMessage(data) }, done] : [done];
+          return isError
+            ? [...context, { kind: 'error', message: claudeErrorMessage(data) }, done]
+            : [...context, done];
         }
         default:
           return [];

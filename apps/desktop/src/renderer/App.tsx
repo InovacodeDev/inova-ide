@@ -821,6 +821,22 @@ export function App() {
     await loadChat(sessionId, 'replace');
   };
 
+  const clearAndContinue = async (sessionId: string) => {
+    const lastRequest = (latest.current.chats[sessionId]?.items ?? [])
+      .flatMap((item) => (item.type === 'user' ? [item.text.trim()] : []))
+      .filter((text) => text !== '')
+      .at(-1);
+    const result = await call(() => window.inova.clearSession({ sessionId, keepContext: true }));
+    if (!result) return;
+    await loadChat(sessionId, 'replace');
+    seedComposer(
+      sessionId,
+      lastRequest === undefined
+        ? t('chat.continuePrompt')
+        : t('chat.continuePromptWithRequest', { request: lastRequest }),
+    );
+  };
+
   const regenerateLastTurn = async (input: { sessionId: string; extraDirs: string[] }) => {
     const { sessionId, extraDirs } = input;
     const userTurns = (chats[sessionId]?.items ?? []).filter((item) => item.type === 'user');
@@ -2020,6 +2036,7 @@ export function App() {
                               : undefined
                           }
                           onClearSession={() => void clearConversation(tab.sessionId)}
+                          onClearAndContinue={() => void clearAndContinue(tab.sessionId)}
                           onFeedback={({ turnIndex, value }) =>
                             void recordFeedback({ sessionId: tab.sessionId, turnIndex, value })
                           }

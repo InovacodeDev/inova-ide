@@ -2743,6 +2743,27 @@ test('clearSession empties the transcript and resets agent memory', async () => 
   expect(stored?.handoffContext).toBeNull();
 });
 
+test('clearSession with keepContext carries a summary of the cleared turns', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+
+  unwrap(await handlers.clearSession({ sessionId: session.id, keepContext: true }));
+
+  expect(unwrap(await handlers.loadTranscript({ sessionId: session.id }))).toEqual([]);
+  const stored = (await loadStore(root)).sessions?.find((item) => item.id === session.id);
+  expect(stored?.providerSessionId).toBeNull();
+  expect(stored?.handoffContext).toContain('Contexto de handoff');
+  expect(stored?.handoffContext).toContain('Turno 0');
+});
+
+test('clearSession rejects a non-boolean keepContext', async () => {
+  const { root, handlers } = await setup();
+  const { session } = await seedRewindSession(root, handlers);
+  expect((await handlers.clearSession({ sessionId: session.id, keepContext: 'yes' })).ok).toBe(
+    false,
+  );
+});
+
 test('clearSession detaches a child session and refuses while running', async () => {
   const { root, handlers, running } = await setup();
   const { project, session: parent } = await seedSession(root);
@@ -2932,8 +2953,9 @@ test('circuit breaker pauses queue on session cost limit until resumeSessionQueu
   expect(unwrap(await handlers.listPausedQueues())).toEqual([]);
 });
 
-test('circuit breaker pauses queue when context usage exceeds limit', async () => {
-  const { handlers, send, chatInUse, emitted, session, accountId } = await startQueuedSession();
+test('circuit breaker stops the turn and pauses queue when context usage exceeds limit', async () => {
+  const { handlers, cancel, send, chatInUse, emitted, session, accountId } =
+    await startQueuedSession();
   unwrap(await handlers.updateSettings({ sessions: { maxContextPercent: 80 } }));
   unwrap(await handlers.enqueueTurn({ sessionId: session.id, prompt: 'Segundo' }));
 
@@ -2943,6 +2965,7 @@ test('circuit breaker pauses queue when context usage exceeds limit', async () =
     windowTokens: 100_000,
     model: null,
   });
+  expect(cancel).toHaveBeenCalledWith(session.id);
   expect(
     emitted.some(
       (item) =>

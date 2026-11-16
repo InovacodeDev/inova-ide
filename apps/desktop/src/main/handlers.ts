@@ -166,6 +166,7 @@ import {
   parseRestoreCheckpoint,
   parseRecordFeedback,
   parseRewindSession,
+  parseClearSession,
   parseSessionDelete,
   parseSettingsPatch,
   parseSessionRef,
@@ -1414,6 +1415,7 @@ export function createHandlers(deps: HandlerDeps) {
         limits: cachedSessionSettings,
       });
       if (reason !== null) {
+        deps.chat.cancel(sessionId);
         emitCircuitBreakerError(sessionId, reason);
         if (turnQueue.forSession(sessionId).length > 0) {
           setQueuePaused({ sessionId, paused: true });
@@ -2772,19 +2774,36 @@ export function createHandlers(deps: HandlerDeps) {
         }),
       ),
     clearSession: (input: unknown): Promise<Result<null>> =>
-      validated(input, parseSessionRef, ({ sessionId }) =>
+      validated(input, parseClearSession, ({ sessionId, keepContext }) =>
         serialized(async () => {
           if (deps.chat.isRunning(sessionId)) {
             return fail('Pare o turno em andamento antes de limpar a conversa.');
           }
-          const session = requireSession(await loadStore(deps.root), sessionId);
+          const store = await loadStore(deps.root);
+          const session = requireSession(store, sessionId);
+          let handoffContext: string | null = null;
+          if (keepContext) {
+            const project = store.projects.find((item) => item.id === session.projectId);
+            if (!project) return fail('Projeto não encontrado.');
+            const account = resolveSessionAccount({ session, project, accounts: store.accounts });
+            if (!account) return fail('Conta da sessão não encontrada.');
+            const events = await readTranscriptEvents(sessionId);
+            if (events.some((event) => event.kind === 'user')) {
+              handoffContext = buildHandoffContext({
+                events,
+                gitSummary: await gitSummaryFor(effectiveCwd(session, project)),
+                fromProvider: account.provider,
+                toProvider: account.provider,
+              });
+            }
+          }
           provisionalSessions.delete(sessionId);
           await updateSession({
             root: deps.root,
             sessionId,
             patch: {
               providerSessionId: null,
-              handoffContext: null,
+              handoffContext,
               ...(session.parentId === null ? {} : { detachedFromParent: true }),
             },
           });

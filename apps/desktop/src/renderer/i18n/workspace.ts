@@ -549,6 +549,13 @@ export const WORKSPACE_PT_BR = {
   'chat.checkpointPreservedFiles': '{count} arquivo(s) >10MB preservado(s)',
   'chat.continueOtherAccount': 'Continuar com resumo em outra conta',
   'chat.resumeQueue': 'Retomar fila',
+  'chat.clearAndContinue': 'Limpar e continuar',
+  'chat.clearAndContinueTooltip':
+    'Limpa a conversa, leva um resumo dela para a próxima mensagem e prepara o pedido de continuação',
+  'chat.continuePrompt':
+    'Continue a tarefa a partir do ponto em que ela parou. O contexto anterior está resumido acima.',
+  'chat.continuePromptWithRequest':
+    'Continue a tarefa a partir do ponto em que ela parou. O contexto anterior está resumido acima.\n\nÚltimo pedido:\n{request}',
   'chat.workTurnTitle': 'Trabalho do turno',
   'chat.listening': 'Ouvindo…',
   'chat.downloadingVoiceInline': 'Baixando o modelo de voz… {percent}%',
@@ -1246,6 +1253,13 @@ export const WORKSPACE_EN_US: Record<WorkspaceKey, string> = {
   'chat.checkpointPreservedFiles': '{count} file(s) >10MB preserved',
   'chat.continueOtherAccount': 'Continue with summary in another account',
   'chat.resumeQueue': 'Resume queue',
+  'chat.clearAndContinue': 'Clear and continue',
+  'chat.clearAndContinueTooltip':
+    'Clears the conversation, carries a summary into the next message, and prepares the continue request',
+  'chat.continuePrompt':
+    'Continue the task from the point where it stopped. The previous context is summarized above.',
+  'chat.continuePromptWithRequest':
+    'Continue the task from the point where it stopped. The previous context is summarized above.\n\nLast request:\n{request}',
   'chat.workTurnTitle': 'Turn work',
   'chat.listening': 'Listening…',
   'chat.downloadingVoiceInline': 'Downloading voice model… {percent}%',

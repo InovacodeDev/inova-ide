@@ -16,8 +16,14 @@ export interface CircuitBreakerLimits {
   maxContextPercent: MaxContextPercent;
 }
 
+const CONTEXT_TRIP_START = `${CIRCUIT_BREAKER_PREFIX} Uso de contexto atingiu`;
+
 export function isCircuitBreakerMessage(text: string): boolean {
   return text.trimStart().startsWith(CIRCUIT_BREAKER_PREFIX);
+}
+
+export function isContextCircuitBreakerMessage(text: string): boolean {
+  return text.trimStart().startsWith(CONTEXT_TRIP_START);
 }
 
 interface SessionCircuitState {
@@ -168,7 +174,7 @@ export function createCircuitBreakerTracker(): CircuitBreakerTracker {
       const maxPercent = input.limits.maxContextPercent;
       if (maxPercent === 0 || state.contextTrippedInTurn) return null;
       if (percent >= maxPercent) {
-        const reason = `${CIRCUIT_BREAKER_PREFIX} Uso de contexto atingiu ${percent}% (limite: ${maxPercent}%). Sessão pausada.`;
+        const reason = `${CONTEXT_TRIP_START} ${percent}% (limite: ${maxPercent}%). Turno interrompido.`;
         state.contextTrippedInTurn = true;
         state.activeTurnTripReason = reason;
         state.trippedReason = reason;

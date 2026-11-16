@@ -475,9 +475,42 @@ describe('claude context and subagents', () => {
     const events = parseFixture('claude', 'claude-subagent-async.jsonl');
     const contexts = events.filter((event) => event.kind === 'context');
     expect(contexts).toEqual([
-      { kind: 'context', usedTokens: 23190, windowTokens: 200_000, model: 'claude-haiku-5-5' },
-      { kind: 'context', usedTokens: 28161, windowTokens: 200_000, model: 'claude-haiku-5-5' },
-      { kind: 'context', usedTokens: 28687, windowTokens: 200_000, model: 'claude-haiku-5-5' },
+      { kind: 'context', usedTokens: 23190, windowTokens: null, model: 'claude-haiku-5-5' },
+      { kind: 'context', usedTokens: 28161, windowTokens: null, model: 'claude-haiku-5-5' },
+      { kind: 'context', usedTokens: 28687, windowTokens: null, model: 'claude-haiku-5-5' },
+    ]);
+  });
+
+  it('uses the context window reported in the result and applies it to later turns', () => {
+    const model = 'claude-result-window-test';
+    const assistant = (usage: Record<string, number>) =>
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: null,
+        message: { id: 'm1', model, content: [{ type: 'text', text: 'ok' }], usage },
+      });
+    const result = JSON.stringify({
+      type: 'result',
+      is_error: false,
+      total_cost_usd: 0.01,
+      duration_ms: 10,
+      modelUsage: { [model]: { contextWindow: 1_000_000, canonicalModel: model } },
+    });
+    const parser = createChatParser('claude', { turnId: 't1' });
+    const firstTurn = [
+      assistant({ input_tokens: 2, cache_read_input_tokens: 300_000, output_tokens: 8 }),
+      result,
+    ].flatMap((line) => parser.parse(line));
+    expect(firstTurn.filter((event) => event.kind !== 'text')).toEqual([
+      { kind: 'context', usedTokens: 300_010, windowTokens: null, model },
+      { kind: 'context', usedTokens: 300_010, windowTokens: 1_000_000, model },
+      { kind: 'done', isError: false, costUsd: 0.01, durationMs: 10 },
+    ]);
+    const nextTurn = parser.parse(
+      assistant({ input_tokens: 5, cache_read_input_tokens: 310_000, output_tokens: 5 }),
+    );
+    expect(nextTurn.filter((event) => event.kind === 'context')).toEqual([
+      { kind: 'context', usedTokens: 310_010, windowTokens: 1_000_000, model },
     ]);
   });
 

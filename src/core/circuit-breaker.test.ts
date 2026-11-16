@@ -3,6 +3,7 @@ import {
   CIRCUIT_BREAKER_PREFIX,
   createCircuitBreakerTracker,
   isCircuitBreakerMessage,
+  isContextCircuitBreakerMessage,
   type CircuitBreakerLimits,
 } from './circuit-breaker.js';
 
@@ -284,6 +285,10 @@ describe('circuit breaker', () => {
     });
     expect(tripped).toContain(CIRCUIT_BREAKER_PREFIX);
     expect(tripped).toContain('90%');
+    expect(isContextCircuitBreakerMessage(tripped ?? '')).toBe(true);
+    expect(isContextCircuitBreakerMessage(`${CIRCUIT_BREAKER_PREFIX} Limite de 3 erros.`)).toBe(
+      false,
+    );
 
     expect(
       tracker.recordContext({

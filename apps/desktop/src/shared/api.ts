@@ -291,7 +291,7 @@ export interface InovaApi {
     sessionId: string;
   }): Promise<Result<{ session: SessionView; prompt: string }>>;
   rewindSession(input: { sessionId: string; turnIndex: number }): Promise<Result<{ text: string }>>;
-  clearSession(input: { sessionId: string }): Promise<Result<null>>;
+  clearSession(input: { sessionId: string; keepContext?: boolean }): Promise<Result<null>>;
   recordFeedback(input: {
     sessionId: string;
     turnIndex: number;
