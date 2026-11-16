@@ -1,110 +1,11 @@
-import { isValidElement, memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { isValidElement, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { createHighlighterCore, type HighlighterCore, type LanguageInput } from 'shiki/core';
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import { CheckIcon, CopyIcon } from './icons';
+import { parseInlineFileCode, parseLocalFileHref } from './markdown-file-links';
+import { highlightCode } from './shiki-highlight';
 
 const LANG_CLASS = /language-([\w+#-]+)/;
-const CACHE_LIMIT = 100;
-
-const LANG_LOADERS: Record<string, () => LanguageInput> = {
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  shellscript: () => import('shiki/langs/shellscript.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  dart: () => import('shiki/langs/dart.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-};
-
-const LANG_ALIASES: Record<string, string> = {
-  ts: 'typescript',
-  js: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  bash: 'shellscript',
-  sh: 'shellscript',
-  shell: 'shellscript',
-  zsh: 'shellscript',
-  py: 'python',
-  rs: 'rust',
-  kt: 'kotlin',
-  'c++': 'cpp',
-  cs: 'csharp',
-  'c#': 'csharp',
-  yml: 'yaml',
-  md: 'markdown',
-  rb: 'ruby',
-  docker: 'dockerfile',
-  htm: 'html',
-};
-
-function canonicalLang(lang: string): string | null {
-  const key = lang.toLowerCase();
-  const name = LANG_ALIASES[key] ?? key;
-  return name in LANG_LOADERS ? name : null;
-}
-
-let highlighterPromise: Promise<HighlighterCore> | null = null;
-
-function getHighlighter(): Promise<HighlighterCore> {
-  highlighterPromise ??= createHighlighterCore({
-    themes: [
-      import('shiki/themes/catppuccin-mocha.mjs'),
-      import('shiki/themes/catppuccin-latte.mjs'),
-    ],
-    langs: [],
-    engine: createJavaScriptRegexEngine(),
-  });
-  return highlighterPromise;
-}
-
-const htmlCache = new Map<string, string>();
-
-async function highlight(input: { code: string; lang: string }): Promise<string | null> {
-  const name = canonicalLang(input.lang);
-  if (name === null) return null;
-  const key = `${name}\u0000${input.code}`;
-  const cached = htmlCache.get(key);
-  if (cached !== undefined) return cached;
-  const highlighter = await getHighlighter();
-  const loader = LANG_LOADERS[name];
-  if (loader === undefined) return null;
-  await highlighter.loadLanguage(loader());
-  const html = highlighter.codeToHtml(input.code, {
-    lang: name,
-    themes: { dark: 'catppuccin-mocha', light: 'catppuccin-latte' },
-    defaultColor: false,
-  });
-  if (htmlCache.size >= CACHE_LIMIT) {
-    const oldest = htmlCache.keys().next();
-    if (!oldest.done) htmlCache.delete(oldest.value);
-  }
-  htmlCache.set(key, html);
-  return html;
-}
 
 interface CodeBlockProps {
   lang: string;
@@ -121,7 +22,7 @@ function CodeBlock({ lang, code, streaming }: CodeBlockProps) {
   useEffect(() => {
     if (streaming) return;
     let cancelled = false;
-    highlight({ code, lang })
+    highlightCode({ code, lang })
       .then((html) => {
         if (!cancelled && html !== null) setHighlighted({ key, html });
       })
@@ -191,9 +92,32 @@ function blockFromPre(children: ReactNode): { lang: string; code: string } {
   return { lang: match?.[1] ?? '', code: textOf(props.children).replace(/\n$/, '') };
 }
 
-function buildComponents(streaming: boolean): Components {
+function buildComponents(streaming: boolean, onOpenFile?: (path: string) => void): Components {
   return {
-    a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+    a: ({ node: _node, href, onClick, children, ...props }) => {
+      const local = typeof href === 'string' ? parseLocalFileHref(href) : null;
+      if (local !== null && onOpenFile !== undefined) {
+        return (
+          <a
+            {...props}
+            href={href}
+            className="md-file-link"
+            onClick={(event) => {
+              event.preventDefault();
+              onClick?.(event);
+              onOpenFile(local.path);
+            }}
+          >
+            {children}
+          </a>
+        );
+      }
+      return (
+        <a {...props} href={href} onClick={onClick} target="_blank" rel="noreferrer">
+          {children}
+        </a>
+      );
+    },
     table: ({ node: _node, ...props }) => (
       <div className="md-table-wrap">
         <table {...props} />
@@ -203,30 +127,57 @@ function buildComponents(streaming: boolean): Components {
       const { lang, code } = blockFromPre(children);
       return <CodeBlock lang={lang} code={code} streaming={streaming} />;
     },
-    code: ({ node: _node, className, children, ...props }) => (
-      <code className={className ?? 'md-inline-code'} {...props}>
-        {children}
-      </code>
-    ),
+    code: ({ node: _node, className, children, ...props }) => {
+      const codeText = textOf(children);
+      const isBlock = Boolean(className && LANG_CLASS.test(className));
+      const parsed = !isBlock && onOpenFile !== undefined ? parseInlineFileCode(codeText) : null;
+      if (parsed !== null && onOpenFile !== undefined) {
+        return (
+          <code
+            className={`${className ?? 'md-inline-code'} md-file-link`}
+            role="button"
+            tabIndex={0}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenFile(parsed.path);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenFile(parsed.path);
+              }
+            }}
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+      return (
+        <code className={className ?? 'md-inline-code'} {...props}>
+          {children}
+        </code>
+      );
+    },
   };
 }
 
 const remarkPlugins = [remarkGfm];
-const streamingComponents = buildComponents(true);
-const settledComponents = buildComponents(false);
 
-interface MarkdownProps {
+export interface MarkdownProps {
   text: string;
   streaming?: boolean;
+  onOpenFile?: (path: string) => void;
 }
 
-function MarkdownImpl({ text, streaming = false }: MarkdownProps) {
+function MarkdownImpl({ text, streaming = false, onOpenFile }: MarkdownProps) {
+  const components = useMemo(() => buildComponents(streaming, onOpenFile), [streaming, onOpenFile]);
+
   return (
     <div className="md">
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        components={streaming ? streamingComponents : settledComponents}
-      >
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {text}
       </ReactMarkdown>
     </div>

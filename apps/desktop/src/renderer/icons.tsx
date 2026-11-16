@@ -61,6 +61,19 @@ import { Trash } from 'pulsoicon-react/icons/trash';
 import { TriangleAlert } from 'pulsoicon-react/icons/triangle-alert';
 import { X } from 'pulsoicon-react/icons/x';
 import { Zap } from 'pulsoicon-react/icons/zap';
+import { ArrowDown } from 'pulsoicon-react/icons/arrow-down';
+import { ArrowUp } from 'pulsoicon-react/icons/arrow-up';
+import { FileCode } from 'pulsoicon-react/icons/file-code';
+import { FileSpreadsheet } from 'pulsoicon-react/icons/file-spreadsheet';
+import { FolderOpen } from 'pulsoicon-react/icons/folder-open';
+import { Globe } from 'pulsoicon-react/icons/globe';
+import { Maximize } from 'pulsoicon-react/icons/maximize';
+import { Minimize } from 'pulsoicon-react/icons/minimize';
+import { Table } from 'pulsoicon-react/icons/table';
+import { TextWrap } from 'pulsoicon-react/icons/text-wrap';
+import { ZoomIn } from 'pulsoicon-react/icons/zoom-in';
+import { ZoomOut } from 'pulsoicon-react/icons/zoom-out';
+import { ZoomReset } from 'pulsoicon-react/icons/zoom-reset';
 
 interface IconProps {
   size?: number;
@@ -362,4 +375,56 @@ export function EllipsisIcon({ size = 16 }: IconProps) {
 
 export function BellIcon({ size = 16 }: IconProps) {
   return <Bell size={size} strokeWidth={1.8} aria-hidden="true" />;
+}
+
+export function MaximizeIcon({ size = 16 }: IconProps) {
+  return <Maximize size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function MinimizeIcon({ size = 16 }: IconProps) {
+  return <Minimize size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function GlobeIcon({ size = 16 }: IconProps) {
+  return <Globe size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function TableIcon({ size = 16 }: IconProps) {
+  return <Table size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function TextWrapIcon({ size = 16 }: IconProps) {
+  return <TextWrap size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function FileCodeIcon({ size = 16 }: IconProps) {
+  return <FileCode size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function FileSpreadsheetIcon({ size = 16 }: IconProps) {
+  return <FileSpreadsheet size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ZoomInIcon({ size = 16 }: IconProps) {
+  return <ZoomIn size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ZoomOutIcon({ size = 16 }: IconProps) {
+  return <ZoomOut size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ZoomResetIcon({ size = 16 }: IconProps) {
+  return <ZoomReset size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function FolderOpenIcon({ size = 16 }: IconProps) {
+  return <FolderOpen size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ArrowUpIcon({ size = 16 }: IconProps) {
+  return <ArrowUp size={size} strokeWidth={1.7} aria-hidden="true" />;
+}
+
+export function ArrowDownIcon({ size = 16 }: IconProps) {
+  return <ArrowDown size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
