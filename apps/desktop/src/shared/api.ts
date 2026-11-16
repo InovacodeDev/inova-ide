@@ -182,7 +182,55 @@ export interface FailoverEvent {
   toAccountId?: string;
 }
 
+export type FilePreviewSource = 'project' | 'user-drop' | 'picker';
+
+export type FilePreviewKind =
+  'text' | 'markdown' | 'html' | 'spreadsheet' | 'image' | 'pdf' | 'binary' | 'too-large';
+
+export interface SpreadsheetSheet {
+  name: string;
+  columns: string[];
+  rows: string[][];
+  totalRows: number;
+  truncated: boolean;
+}
+
+export interface FilePreviewBase {
+  resolvedPath: string;
+  name: string;
+  extension: string;
+  sizeBytes: number;
+  mtimeMs: number;
+}
+
+export type FilePreview =
+  | (FilePreviewBase & { kind: 'text'; content: string })
+  | (FilePreviewBase & { kind: 'markdown'; content: string })
+  | (FilePreviewBase & { kind: 'html'; content: string; previewUrl?: string })
+  | (FilePreviewBase & { kind: 'image'; previewUrl?: string; content?: string })
+  | (FilePreviewBase & { kind: 'pdf'; previewUrl?: string })
+  | (FilePreviewBase & { kind: 'spreadsheet'; sheets: SpreadsheetSheet[] })
+  | (FilePreviewBase & { kind: 'binary'; reason: string })
+  | (FilePreviewBase & { kind: 'too-large'; reason: string });
+
+export interface ReadFilePreviewInput {
+  path: string;
+  projectId?: string;
+  sessionId?: string;
+  source: FilePreviewSource;
+}
+
+export interface OpenFilePathInput {
+  path: string;
+  projectId?: string;
+  sessionId?: string;
+  source: FilePreviewSource;
+}
+
 export interface InovaApi {
+  readFilePreview?(input: ReadFilePreviewInput): Promise<Result<FilePreview>>;
+  pickViewerFiles?(): Promise<Result<string[]>>;
+  openFilePath?(input: OpenFilePathInput): Promise<Result<null>>;
   listAccounts(): Promise<Result<AccountView[]>>;
   addAccount(input: { provider: string; label: string }): Promise<Result<AccountView>>;
   removeAccount(input: { label: string; force: boolean }): Promise<Result<null>>;
@@ -454,6 +502,9 @@ export const CHANNELS = {
   transcribeAudio: 'inova:transcribeAudio',
   voiceModelProgress: 'inova:voice:model-progress',
   voiceDockerProgress: 'inova:voice:docker-progress',
+  readFilePreview: 'inova:readFilePreview',
+  pickViewerFiles: 'inova:pickViewerFiles',
+  openFilePath: 'inova:openFilePath',
 } as const;
 
 declare global {
