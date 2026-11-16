@@ -1722,6 +1722,92 @@ test('turn queue rejects busy account, drains FIFO on done, and tracks inbox not
   expect(afterClear.some((item) => item.sessionId === s1.id)).toBe(false);
 });
 
+test('getWorktreeStatus without own worktree lists only files the session edited', async () => {
+  const exec = promisify(execFile);
+  const { root, handlers } = await setup();
+  await addAccount({ root, provider: 'claude', label: 'work' });
+  const repoDir = await tmp();
+  await exec('git', ['init', '-b', 'main'], { cwd: repoDir });
+  await exec('git', ['config', 'user.email', 'test@inova.dev'], { cwd: repoDir });
+  await exec('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+  for (const name of ['a.ts', 'b.ts', 'reverted.ts', 'shell.ts']) {
+    await writeFile(join(repoDir, name), `export const ${name.split('.')[0]} = 1;\n`);
+  }
+  await exec('git', ['add', '.'], { cwd: repoDir });
+  await exec('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+  const project = unwrap(await handlers.bindProject({ path: repoDir, accountLabel: 'work' }));
+  const first = unwrap(await handlers.createSession({ projectId: project.id }));
+  const second = unwrap(await handlers.createSession({ projectId: project.id }));
+  const idle = unwrap(await handlers.createSession({ projectId: project.id }));
+
+  const toolUse = (toolId: string, name: string, input: Record<string, unknown>): ChatEvent => ({
+    kind: 'tool-use',
+    toolId,
+    name,
+    input: JSON.stringify(input, null, 2),
+  });
+  handlers.handleChatEvent(
+    first.id,
+    toolUse('f1', 'Edit', { file_path: join(repoDir, 'a.ts'), old_string: '1', new_string: '2' }),
+  );
+  handlers.handleChatEvent(first.id, toolUse('f2', 'Write', { file_path: 'new-first.ts' }));
+  handlers.handleChatEvent(
+    first.id,
+    toolUse('f3', 'Bash', { command: `echo x > ${join(repoDir, 'shell.ts')}` }),
+  );
+  handlers.handleChatEvent(
+    second.id,
+    toolUse('s1', 'Edit', { file_path: join(repoDir, 'b.ts'), old_string: '1', new_string: '2' }),
+  );
+  handlers.handleChatEvent(
+    second.id,
+    toolUse('s2', 'Edit', {
+      file_path: join(repoDir, 'reverted.ts'),
+      old_string: '1',
+      new_string: '2',
+    }),
+  );
+
+  await writeFile(join(repoDir, 'a.ts'), 'export const a = 2;\n');
+  await writeFile(join(repoDir, 'new-first.ts'), 'export const fresh = true;\n');
+  await writeFile(join(repoDir, 'b.ts'), 'export const b = 2;\n');
+  await writeFile(join(repoDir, 'shell.ts'), 'x\n');
+
+  const firstStatus = unwrap(await handlers.getWorktreeStatus({ sessionId: first.id }));
+  expect(firstStatus.scope).toBe('session');
+  expect([...firstStatus.changedFiles].sort()).toEqual(['a.ts', 'new-first.ts']);
+  expect(firstStatus.diff).toContain('+export const a = 2;');
+  expect(firstStatus.diff).toContain('+export const fresh = true;');
+  expect(firstStatus.diff).not.toContain('b.ts');
+  expect(firstStatus.diff).not.toContain('shell.ts');
+  expect(firstStatus.dirty).toBe(true);
+
+  const secondStatus = unwrap(await handlers.getWorktreeStatus({ sessionId: second.id }));
+  expect(secondStatus.changedFiles).toEqual(['b.ts']);
+  expect(secondStatus.diff).not.toContain('a.ts');
+  expect(secondStatus.diff).not.toContain('reverted.ts');
+  expect(secondStatus.diffStat).toContain('b.ts');
+  expect(secondStatus.diffStat).not.toContain('a.ts');
+
+  const idleStatus = unwrap(await handlers.getWorktreeStatus({ sessionId: idle.id }));
+  expect(idleStatus).toMatchObject({ changedFiles: [], diff: '', dirty: false, scope: 'session' });
+  const idleReview = await handlers.reviewSessionDiff({ sessionId: idle.id });
+  expect(idleReview.ok).toBe(false);
+
+  unwrap(
+    await handlers.restoreCheckpoint({ sessionId: second.id, files: secondStatus.changedFiles }),
+  );
+  expect(await readFile(join(repoDir, 'b.ts'), 'utf8')).toBe('export const b = 1;\n');
+  expect(await readFile(join(repoDir, 'a.ts'), 'utf8')).toBe('export const a = 2;\n');
+  expect(unwrap(await handlers.getWorktreeStatus({ sessionId: second.id })).changedFiles).toEqual(
+    [],
+  );
+  expect(
+    [...unwrap(await handlers.getWorktreeStatus({ sessionId: first.id })).changedFiles].sort(),
+  ).toEqual(['a.ts', 'new-first.ts']);
+});
+
 const OK_DONE = { kind: 'done', isError: false, costUsd: null, durationMs: 1 } as const;
 const ERROR_DONE = { kind: 'done', isError: true, costUsd: null, durationMs: 1 } as const;
 const flush = async (handlers: ReturnType<typeof createHandlers>, sessionId: string) => {

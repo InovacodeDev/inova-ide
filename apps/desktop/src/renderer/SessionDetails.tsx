@@ -599,6 +599,9 @@ export function SessionDetails({
                 </button>
               </div>
             </div>
+            {gitStatus.status?.scope === 'session' ? (
+              <div className="session-details-summary">{t('details.sessionScopedGit')}</div>
+            ) : null}
             {gitFiles.length > 0 ? (
               <div className="session-git-actions-bar">
                 {onInspectWorktree ? (

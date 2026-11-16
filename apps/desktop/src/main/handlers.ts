@@ -42,6 +42,7 @@ import {
   getWorktreeStatus,
   removeSessionWorktree,
 } from '@inova/core/git-worktree';
+import { sessionEditedRepoPaths } from '@inova/core/session-files';
 import {
   buildAdversarialReviewPrompt,
   buildHandoffContext,
@@ -768,12 +769,16 @@ export function createHandlers(deps: HandlerDeps) {
     }
     const project = store.projects.find((item) => item.id === session.projectId);
     if (!project) return fail('Projeto não encontrado.');
-    return ok(
-      await getWorktreeStatus({
-        worktreePath: project.path,
-        baseCommit: 'HEAD',
-      }),
-    );
+    const paths = await sessionEditedRepoPaths({
+      cwd: project.path,
+      events: await readTranscriptEvents(session.id),
+    });
+    const status = await getWorktreeStatus({
+      worktreePath: project.path,
+      baseCommit: 'HEAD',
+      paths,
+    });
+    return ok({ ...status, scope: 'session' });
   }
 
   async function resolveFailoverTarget(input: {

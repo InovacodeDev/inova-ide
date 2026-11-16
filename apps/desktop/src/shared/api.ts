@@ -61,6 +61,7 @@ export interface WorktreeStatusView {
   diffStat: string;
   diff: string;
   dirty: boolean;
+  scope?: 'session';
 }
 
 export type SessionView = Session;
