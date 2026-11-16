@@ -69,7 +69,6 @@ import { FolderOpen } from 'pulsoicon-react/icons/folder-open';
 import { Globe } from 'pulsoicon-react/icons/globe';
 import { Maximize } from 'pulsoicon-react/icons/maximize';
 import { Minimize } from 'pulsoicon-react/icons/minimize';
-import { Table } from 'pulsoicon-react/icons/table';
 import { TextWrap } from 'pulsoicon-react/icons/text-wrap';
 import { ZoomIn } from 'pulsoicon-react/icons/zoom-in';
 import { ZoomOut } from 'pulsoicon-react/icons/zoom-out';
@@ -387,10 +386,6 @@ export function MinimizeIcon({ size = 16 }: IconProps) {
 
 export function GlobeIcon({ size = 16 }: IconProps) {
   return <Globe size={size} strokeWidth={1.7} aria-hidden="true" />;
-}
-
-export function TableIcon({ size = 16 }: IconProps) {
-  return <Table size={size} strokeWidth={1.7} aria-hidden="true" />;
 }
 
 export function TextWrapIcon({ size = 16 }: IconProps) {

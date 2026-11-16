@@ -144,9 +144,13 @@ async function pickFolder(): Promise<string | null> {
 }
 
 async function pickViewerFiles(): Promise<string[]> {
-  const result = await dialog.showOpenDialog({
+  const window = BrowserWindow.getFocusedWindow();
+  const options: Electron.OpenDialogOptions = {
     properties: ['openFile', 'multiSelections'],
-  });
+  };
+  const result = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
   return result.canceled ? [] : result.filePaths;
 }
 

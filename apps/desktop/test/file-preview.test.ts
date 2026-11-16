@@ -259,6 +259,23 @@ describe('readFilePreviewContent', () => {
     }
   });
 
+  test('strips leading UTF-8 BOM in csv files', async () => {
+    const bomCsvFile = join(projectDir, 'bom-table.csv');
+    await writeFile(bomCsvFile, '\uFEFFheader1,header2\nval1,val2');
+    const result = await readFilePreviewContent({
+      filePath: 'bom-table.csv',
+      source: 'project',
+      cwd: projectDir,
+      allowedRoots: [projectDir],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.kind).toBe('spreadsheet');
+    if (result.value.kind === 'spreadsheet') {
+      expect(result.value.sheets[0]?.rows[0]).toEqual(['header1', 'header2']);
+    }
+  });
+
   test('rejects path traversal escaping project allowed roots', async () => {
     const result = await readFilePreviewContent({
       filePath: '../outside/secret.txt',

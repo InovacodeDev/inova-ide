@@ -1,11 +1,15 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import type { FilePreview, Result } from '../src/shared/api';
 import {
   clampViewerWidth,
   fileViewerReducer,
   initialFileViewerState,
+  loadViewerPreview,
+  normalizeProjectFilePath,
   VIEWER_DEFAULT_WIDTH,
   VIEWER_MIN_WIDTH,
   type FileViewerState,
+  type ViewerPreviewMap,
 } from '../src/renderer/file-viewer-state';
 
 describe('fileViewerReducer', () => {
@@ -179,5 +183,198 @@ describe('fileViewerReducer', () => {
     expect(initialFileViewerState.maximized).toBe(false);
     expect(initialFileViewerState.tabs).toEqual([]);
     expect(initialFileViewerState.activePath).toBeNull();
+  });
+});
+
+describe('normalizeProjectFilePath', () => {
+  test('returns empty string for empty input', () => {
+    expect(normalizeProjectFilePath({ path: '' })).toBe('');
+    expect(normalizeProjectFilePath({ path: '   ' })).toBe('');
+  });
+
+  test('normalizes absolute Unix paths', () => {
+    expect(normalizeProjectFilePath({ path: '/repo/src/../src/app.ts' })).toBe('/repo/src/app.ts');
+    expect(normalizeProjectFilePath({ path: '/repo/./utils.ts' })).toBe('/repo/utils.ts');
+  });
+
+  test('normalizes absolute Windows drive paths', () => {
+    expect(normalizeProjectFilePath({ path: 'C:\\repo\\src\\..\\app.ts' })).toBe('C:/repo/app.ts');
+    expect(normalizeProjectFilePath({ path: 'D:/workspace/./main.ts' })).toBe(
+      'D:/workspace/main.ts',
+    );
+  });
+
+  test('resolves relative paths against rootDir', () => {
+    expect(
+      normalizeProjectFilePath({
+        path: './src/app.ts',
+        rootDir: '/Users/test/project',
+      }),
+    ).toBe('/Users/test/project/src/app.ts');
+
+    expect(
+      normalizeProjectFilePath({
+        path: 'src/app.ts',
+        rootDir: '/Users/test/project',
+      }),
+    ).toBe('/Users/test/project/src/app.ts');
+
+    expect(
+      normalizeProjectFilePath({
+        path: '../sibling/file.ts',
+        rootDir: '/Users/test/project/nested',
+      }),
+    ).toBe('/Users/test/project/sibling/file.ts');
+  });
+
+  test('normalizes relative paths without rootDir', () => {
+    expect(normalizeProjectFilePath({ path: './src/./components//Button.tsx' })).toBe(
+      'src/components/Button.tsx',
+    );
+  });
+});
+
+describe('loadViewerPreview', () => {
+  const dummyPreview: FilePreview = {
+    resolvedPath: '/repo/src/app.ts',
+    name: 'app.ts',
+    extension: '.ts',
+    kind: 'text',
+    content: 'export const x = 1;',
+    sizeBytes: 19,
+    mtimeMs: 1000,
+  };
+
+  test('transitions from loading: true to preview upon successful fetch', async () => {
+    let state: ViewerPreviewMap = {};
+    const inflightKeys = new Set<string>();
+
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      value: dummyPreview,
+    } as Result<FilePreview>);
+
+    const loadPromise = loadViewerPreview({
+      key: '/repo/src/app.ts@1',
+      path: '/repo/src/app.ts',
+      source: 'project',
+      fetcher,
+      onUpdate: (updater) => {
+        state = updater(state);
+      },
+      inflightKeys,
+      isCancelled: () => false,
+    });
+
+    expect(state['/repo/src/app.ts@1']?.loading).toBe(true);
+    expect(inflightKeys.has('/repo/src/app.ts@1')).toBe(true);
+
+    await loadPromise;
+
+    expect(state['/repo/src/app.ts@1']).toEqual({
+      preview: dummyPreview,
+      loading: false,
+    });
+    expect(inflightKeys.has('/repo/src/app.ts@1')).toBe(false);
+  });
+
+  test('transitions from loading: true to error when fetcher returns error result', async () => {
+    let state: ViewerPreviewMap = {};
+    const inflightKeys = new Set<string>();
+
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: false,
+      message: 'Arquivo não encontrado',
+    } as Result<FilePreview>);
+
+    await loadViewerPreview({
+      key: '/missing.ts@1',
+      path: '/missing.ts',
+      source: 'project',
+      fetcher,
+      onUpdate: (updater) => {
+        state = updater(state);
+      },
+      inflightKeys,
+      isCancelled: () => false,
+    });
+
+    expect(state['/missing.ts@1']).toEqual({
+      loading: false,
+      error: 'Arquivo não encontrado',
+    });
+    expect(inflightKeys.has('/missing.ts@1')).toBe(false);
+  });
+
+  test('handles thrown exception from fetcher without getting stuck loading', async () => {
+    let state: ViewerPreviewMap = {};
+    const inflightKeys = new Set<string>();
+
+    const fetcher = vi.fn().mockRejectedValue(new Error('IPC connection failure'));
+
+    await loadViewerPreview({
+      key: '/crash.ts@1',
+      path: '/crash.ts',
+      source: 'project',
+      fetcher,
+      onUpdate: (updater) => {
+        state = updater(state);
+      },
+      inflightKeys,
+      isCancelled: () => false,
+    });
+
+    expect(state['/crash.ts@1']).toEqual({
+      loading: false,
+      error: 'IPC connection failure',
+    });
+    expect(inflightKeys.has('/crash.ts@1')).toBe(false);
+  });
+
+  test('skips invocation if key is already in inflightKeys', async () => {
+    let state: ViewerPreviewMap = {};
+    const inflightKeys = new Set<string>(['/inflight.ts@1']);
+    const fetcher = vi.fn();
+
+    await loadViewerPreview({
+      key: '/inflight.ts@1',
+      path: '/inflight.ts',
+      source: 'project',
+      fetcher,
+      onUpdate: (updater) => {
+        state = updater(state);
+      },
+      inflightKeys,
+      isCancelled: () => false,
+    });
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(state['/inflight.ts@1']).toBeUndefined();
+  });
+
+  test('does not apply result when cancelled', async () => {
+    let state: ViewerPreviewMap = {};
+    const inflightKeys = new Set<string>();
+    let cancelled = false;
+
+    const fetcher = vi.fn().mockImplementation(async () => {
+      cancelled = true;
+      return { ok: true, value: dummyPreview } as Result<FilePreview>;
+    });
+
+    await loadViewerPreview({
+      key: '/cancelled.ts@1',
+      path: '/cancelled.ts',
+      source: 'project',
+      fetcher,
+      onUpdate: (updater) => {
+        state = updater(state);
+      },
+      inflightKeys,
+      isCancelled: () => cancelled,
+    });
+
+    expect(state['/cancelled.ts@1']?.preview).toBeUndefined();
+    expect(inflightKeys.has('/cancelled.ts@1')).toBe(false);
   });
 });

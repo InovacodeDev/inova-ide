@@ -1,5 +1,5 @@
 import { open, readFile, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, resolve } from 'node:path';
 import * as XLSX from 'xlsx';
 import type {
   FilePreview,
@@ -9,19 +9,13 @@ import type {
   SpreadsheetSheet,
 } from '../shared/api.js';
 import { fail, ok } from './validation.js';
+import { isInsideRoot } from './preview-protocol.js';
 
 export const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 export const MAX_SPREADSHEET_BYTES = 20 * 1024 * 1024;
 export const MAX_SHEET_ROWS = 10_000;
 export const MAX_SHEET_COLS = 100;
 const SAMPLE_SIZE = 512;
-
-function isInsideRoot(rootReal: string, targetReal: string): boolean {
-  return (
-    targetReal === rootReal ||
-    targetReal.startsWith(rootReal.endsWith(sep) ? rootReal : rootReal + sep)
-  );
-}
 
 async function readSampleBytes(filePath: string, maxBytes: number): Promise<Uint8Array> {
   const handle = await open(filePath, 'r');
@@ -386,7 +380,7 @@ export async function readFilePreviewContent(
 
     if (base.extension === '.csv' || base.extension === '.tsv') {
       const fileBuffer = await readFile(realTarget);
-      const text = fileBuffer.toString('utf-8');
+      const text = fileBuffer.toString('utf-8').replace(/^\uFEFF/, '');
       const delimiter = base.extension === '.tsv' ? '\t' : ',';
       const rawRows = parseCsvRows({ text, delimiter });
 

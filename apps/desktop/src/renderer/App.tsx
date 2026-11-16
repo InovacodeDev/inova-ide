@@ -22,7 +22,6 @@ import type {
 import type {
   AccountView,
   ComparisonDiffView,
-  FilePreview,
   FilePreviewSource,
   ProfileSyncApplyResult,
   ProfileSyncPreview,
@@ -44,7 +43,13 @@ import { chatStoreReducer } from './chat-store';
 import { initialChatState } from './chat-reducer';
 import { collectVoiceHints } from './dictation';
 import { FileViewerPane } from './FileViewerPane';
-import { fileViewerReducer, initialFileViewerState } from './file-viewer-state';
+import {
+  fileViewerReducer,
+  initialFileViewerState,
+  loadViewerPreview,
+  normalizeProjectFilePath,
+  type ViewerPreviewMap,
+} from './file-viewer-state';
 import { Footer, type UsageState } from './Footer';
 import { ForkModal } from './ForkModal';
 import { buildFailoverNotice, type FailoverNotice } from './failover-notice';
@@ -212,9 +217,10 @@ export function App() {
   const [tabs, dispatch] = useReducer(tabsReducer, initialTabsState);
   const [chats, dispatchChat] = useReducer(chatStoreReducer, {});
   const [fileViewer, dispatchFileViewer] = useReducer(fileViewerReducer, initialFileViewerState);
-  const [viewerPreviews, setViewerPreviews] = useState<
-    Record<string, { preview?: FilePreview; loading: boolean; error?: string }>
-  >({});
+  const [viewerPreviews, setViewerPreviews] = useState<ViewerPreviewMap>({});
+  const viewerPreviewsRef = useRef(viewerPreviews);
+  viewerPreviewsRef.current = viewerPreviews;
+  const inflightViewerKeysRef = useRef(new Set<string>());
 
   const latest = useRef({ accounts, projects, sessions, chats, tabs });
   useEffect(() => {
@@ -1451,38 +1457,29 @@ export function App() {
 
   useEffect(() => {
     if (!fileViewer.open || !activeViewerTab || !activeViewerKey) return;
-    if (viewerPreviews[activeViewerKey]) return;
-
-    queueMicrotask(() => {
-      setViewerPreviews((prev) =>
-        prev[activeViewerKey] ? prev : { ...prev, [activeViewerKey]: { loading: true } },
-      );
-    });
+    if (viewerPreviewsRef.current[activeViewerKey]) return;
 
     let cancelled = false;
-    void window.inova
-      .readFilePreview({
-        path: activeViewerTab.resolvedPath,
-        source: activeViewerTab.source,
-        projectId: activeViewerTab.projectId,
-        sessionId: activeViewerTab.sessionId,
-      })
-      .then((result) => {
-        if (cancelled) return;
+    void loadViewerPreview({
+      key: activeViewerKey,
+      path: activeViewerTab.resolvedPath,
+      source: activeViewerTab.source,
+      projectId: activeViewerTab.projectId,
+      sessionId: activeViewerTab.sessionId,
+      fetcher: window.inova.readFilePreview,
+      onUpdate: (updater) => {
         queueMicrotask(() => {
-          setViewerPreviews((prev) => ({
-            ...prev,
-            [activeViewerKey]: result.ok
-              ? { preview: result.value, loading: false }
-              : { loading: false, error: result.message },
-          }));
+          setViewerPreviews(updater);
         });
-      });
+      },
+      inflightKeys: inflightViewerKeysRef.current,
+      isCancelled: () => cancelled,
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [fileViewer.open, activeViewerKey, activeViewerTab, viewerPreviews]);
+  }, [fileViewer.open, activeViewerKey, activeViewerTab]);
 
   const openFileInViewer = useCallback(
     (input: {
@@ -1492,10 +1489,12 @@ export function App() {
       sessionId?: string | null;
       line?: number | null;
     }) => {
+      const rootDir = activeSession?.worktree?.path ?? activeProject?.path;
+      const normalized = normalizeProjectFilePath({ path: input.path, rootDir });
       dispatchFileViewer({
         type: 'openTab',
         tab: {
-          resolvedPath: input.path,
+          resolvedPath: normalized,
           source: input.source ?? 'project',
           projectId: input.projectId ?? activeProject?.id,
           sessionId: input.sessionId ?? activeSession?.id,
@@ -1503,7 +1502,7 @@ export function App() {
         },
       });
     },
-    [activeProject?.id, activeSession?.id],
+    [activeProject?.id, activeProject?.path, activeSession?.id, activeSession?.worktree?.path],
   );
 
   const openViewerPicker = useCallback(async () => {
@@ -1534,16 +1533,19 @@ export function App() {
   }, []);
 
   const openExternalFilePath = useCallback(
-    (path: string) => {
+    async (path: string) => {
       const tab = fileViewer.tabs.find((t) => t.resolvedPath === path) ?? activeViewerTab;
-      void window.inova.openFilePath({
+      const res = await window.inova.openFilePath({
         path,
         source: tab?.source ?? 'project',
         projectId: tab?.projectId ?? activeProject?.id,
         sessionId: tab?.sessionId ?? activeSession?.id,
       });
+      if (!res.ok) {
+        warn(res.message);
+      }
     },
-    [activeProject?.id, activeSession?.id, activeViewerTab, fileViewer.tabs],
+    [activeProject?.id, activeSession?.id, activeViewerTab, fileViewer.tabs, warn],
   );
 
   useEffect(() => {

@@ -47,6 +47,9 @@ import { Markdown } from './Markdown';
 import { highlightCode, languageForFilePath } from './shiki-highlight';
 import './file-viewer.css';
 
+export const MAX_HIGHLIGHT_BYTES = 250 * 1024;
+export const MAX_HIGHLIGHT_LINES = 5_000;
+
 export interface FileViewerPaneProps {
   readonly open: boolean;
   readonly maximized: boolean;
@@ -97,6 +100,13 @@ function CodeViewer({ code, lang, filePath, targetLine, sizeBytes }: CodeViewerP
   );
 
   useEffect(() => {
+    if (code.length > MAX_HIGHLIGHT_BYTES || lines.length > MAX_HIGHLIGHT_LINES) {
+      queueMicrotask(() => {
+        setHighlightedHtml(null);
+      });
+      return;
+    }
+
     let active = true;
     highlightCode({ code, lang: effectiveLang })
       .then((html) => {
@@ -114,7 +124,7 @@ function CodeViewer({ code, lang, filePath, targetLine, sizeBytes }: CodeViewerP
     return () => {
       active = false;
     };
-  }, [code, effectiveLang]);
+  }, [code, effectiveLang, lines.length]);
 
   useEffect(() => {
     if (searchOpen) {
@@ -750,6 +760,11 @@ function PdfViewer({
   readonly onOpenExternal: (path: string) => void;
 }) {
   const { t } = useI18n();
+  const [iframeKey, setIframeKey] = useState(0);
+
+  const handleReload = () => {
+    setIframeKey((k) => k + 1);
+  };
 
   return (
     <div className="file-viewer-body">
@@ -760,6 +775,15 @@ function PdfViewer({
         <div className="file-viewer-toolbar-right">
           <button
             type="button"
+            className="file-viewer-btn-icon"
+            onClick={handleReload}
+            title={t('fileViewer.reload')}
+            aria-label={t('fileViewer.reload')}
+          >
+            <RefreshIcon size={14} />
+          </button>
+          <button
+            type="button"
             className="file-viewer-btn-secondary"
             onClick={() => onOpenExternal(preview.resolvedPath)}
           >
@@ -768,7 +792,12 @@ function PdfViewer({
           </button>
         </div>
       </div>
-      <iframe src={preview.previewUrl} title={preview.name} className="file-viewer-pdf-frame" />
+      <iframe
+        key={iframeKey}
+        src={preview.previewUrl}
+        title={preview.name}
+        className="file-viewer-pdf-frame"
+      />
     </div>
   );
 }
@@ -838,6 +867,15 @@ export function FileViewerPane({
   const { t } = useI18n();
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.resolvedPath === activePath),
@@ -851,16 +889,25 @@ export function FileViewerPane({
 
     const onMouseMove = (moveEvent: globalThis.MouseEvent) => {
       const deltaX = startX - moveEvent.clientX;
+      const containerWidth = panelRef.current?.parentElement?.clientWidth ?? window.innerWidth;
       const nextWidth = clampViewerWidth({
         width: startWidth + deltaX,
-        containerWidth: window.innerWidth,
+        containerWidth,
       });
       onResizeWidth(nextWidth);
     };
 
-    const onMouseUp = () => {
+    const cleanup = () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
+      if (dragCleanupRef.current === cleanup) {
+        dragCleanupRef.current = null;
+      }
+    };
+    dragCleanupRef.current = cleanup;
+
+    const onMouseUp = () => {
+      cleanup();
     };
 
     window.addEventListener('mousemove', onMouseMove);
@@ -914,10 +961,21 @@ export function FileViewerPane({
   };
 
   const formatErrorMessage = (err: string): string => {
-    if (err.includes('access-denied') || err.includes('fora da pasta do projeto')) {
+    const lower = err.toLowerCase();
+    if (
+      lower.includes('access-denied') ||
+      lower.includes('access denied') ||
+      lower.includes('acesso negado') ||
+      lower.includes('fora da pasta')
+    ) {
       return t('fileViewer.accessDenied');
     }
-    if (err.includes('not-found') || err.includes('ENOENT')) {
+    if (
+      lower.includes('not-found') ||
+      lower.includes('not found') ||
+      lower.includes('não encontrado') ||
+      lower.includes('enoent')
+    ) {
       return t('fileViewer.fileNotFound');
     }
     return t('fileViewer.loadError', { error: err });
@@ -927,6 +985,7 @@ export function FileViewerPane({
 
   return (
     <aside
+      ref={panelRef}
       className={`file-viewer-pane ${maximized ? 'file-viewer-pane-maximized' : ''}`}
       style={maximized ? { width: '100%' } : { width: `${widthPx}px` }}
       onDragEnter={handleDragEnter}
@@ -1052,6 +1111,16 @@ export function FileViewerPane({
               <RefreshIcon size={14} />
               <span>{t('fileViewer.reload')}</span>
             </button>
+            {activeTab && (
+              <button
+                type="button"
+                className="file-viewer-btn-secondary"
+                onClick={() => onOpenExternal(activeTab.resolvedPath)}
+              >
+                <ExternalLinkIcon size={14} />
+                <span>{t('fileViewer.openExternal')}</span>
+              </button>
+            )}
             {activePath && (
               <button
                 type="button"
@@ -1070,7 +1139,7 @@ export function FileViewerPane({
             case 'html':
               return (
                 <HtmlBrowserViewer
-                  key={preview.resolvedPath}
+                  key={`${preview.resolvedPath}@${activeTab?.revision ?? 1}`}
                   preview={preview}
                   onOpenExternal={onOpenExternal}
                 />
@@ -1100,7 +1169,7 @@ export function FileViewerPane({
             case 'pdf':
               return (
                 <PdfViewer
-                  key={preview.resolvedPath}
+                  key={`${preview.resolvedPath}@${activeTab?.revision ?? 1}`}
                   preview={preview}
                   onOpenExternal={onOpenExternal}
                 />

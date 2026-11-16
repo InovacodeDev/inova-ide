@@ -1,4 +1,4 @@
-import type { FilePreviewSource } from '../shared/api';
+import type { FilePreview, FilePreviewSource, Result } from '../shared/api';
 
 export const VIEWER_MIN_WIDTH = 320;
 export const VIEWER_DEFAULT_WIDTH = 460;
@@ -215,4 +215,110 @@ export function fileViewerReducer(
       };
     }
   }
+}
+
+export interface ViewerPreviewEntry {
+  readonly preview?: FilePreview;
+  readonly loading: boolean;
+  readonly error?: string;
+}
+
+export type ViewerPreviewMap = Record<string, ViewerPreviewEntry>;
+
+export interface LoadViewerPreviewParams {
+  readonly key: string;
+  readonly path: string;
+  readonly source: FilePreviewSource;
+  readonly projectId?: string;
+  readonly sessionId?: string;
+  readonly fetcher: (input: {
+    path: string;
+    source: FilePreviewSource;
+    projectId?: string;
+    sessionId?: string;
+  }) => Promise<Result<FilePreview>>;
+  readonly onUpdate: (updater: (prev: ViewerPreviewMap) => ViewerPreviewMap) => void;
+  readonly inflightKeys: Set<string>;
+  readonly isCancelled: () => boolean;
+}
+
+export async function loadViewerPreview(params: LoadViewerPreviewParams): Promise<void> {
+  const { key, path, source, projectId, sessionId, fetcher, onUpdate, inflightKeys, isCancelled } =
+    params;
+
+  if (inflightKeys.has(key)) return;
+  inflightKeys.add(key);
+
+  onUpdate((prev) => (prev[key] ? prev : { ...prev, [key]: { loading: true } }));
+
+  try {
+    const result = await fetcher({ path, source, projectId, sessionId });
+    if (isCancelled()) return;
+
+    onUpdate((prev) => ({
+      ...prev,
+      [key]: result.ok
+        ? { preview: result.value, loading: false }
+        : { loading: false, error: result.message },
+    }));
+  } catch (error: unknown) {
+    if (isCancelled()) return;
+    const message = error instanceof Error ? error.message : String(error);
+    onUpdate((prev) => ({
+      ...prev,
+      [key]: { loading: false, error: message },
+    }));
+  } finally {
+    inflightKeys.delete(key);
+  }
+}
+
+// REGEX: matches Windows drive prefix such as C:\ or C:/
+const WINDOWS_DRIVE_REGEX = /^[a-zA-Z]:[\\/]/;
+
+export function normalizeProjectFilePath(input: { path: string; rootDir?: string | null }): string {
+  const raw = input.path.trim();
+  if (!raw) return '';
+
+  const isWinDrive = WINDOWS_DRIVE_REGEX.test(raw);
+  const isUnc = raw.startsWith('\\\\');
+  const isUnixAbs = raw.startsWith('/');
+  const isAbsolute = isWinDrive || isUnc || isUnixAbs;
+
+  let combined = raw;
+  if (!isAbsolute && input.rootDir) {
+    const trimmedRoot = input.rootDir.trim().replace(/[\\/]+$/, '');
+    combined = trimmedRoot ? `${trimmedRoot}/${raw}` : raw;
+  }
+
+  const hasWinDrive = WINDOWS_DRIVE_REGEX.test(combined);
+  const drivePrefix = hasWinDrive ? combined.slice(0, 2) : '';
+  const withoutDrive = hasWinDrive ? combined.slice(2) : combined;
+
+  const isLeadingSlash = withoutDrive.startsWith('/') || withoutDrive.startsWith('\\');
+  const normalizedSlashes = withoutDrive.replace(/\\/g, '/');
+  const parts = normalizedSlashes.split('/').filter(Boolean);
+  const resolvedParts: string[] = [];
+
+  for (const part of parts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      if (resolvedParts.length > 0 && resolvedParts[resolvedParts.length - 1] !== '..') {
+        resolvedParts.pop();
+      } else if (!isLeadingSlash && !hasWinDrive) {
+        resolvedParts.push('..');
+      }
+    } else {
+      resolvedParts.push(part);
+    }
+  }
+
+  const joined = resolvedParts.join('/');
+  if (hasWinDrive) {
+    return `${drivePrefix}/${joined}`;
+  }
+  if (isLeadingSlash) {
+    return `/${joined}`;
+  }
+  return joined || '.';
 }

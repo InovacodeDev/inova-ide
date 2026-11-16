@@ -82,7 +82,7 @@ describe('preview-protocol', () => {
     const resolvedChart = await registry.resolveRequest(chartUrl);
     expect(resolvedChart).toEqual({
       filePath: join(rootDir, 'chart.js'),
-      mimeType: 'text/javascript',
+      mimeType: 'text/javascript; charset=utf-8',
     });
 
     const resolvedLogo = await registry.resolveRequest(logoUrl);
@@ -94,7 +94,7 @@ describe('preview-protocol', () => {
     const resolvedHtml = await registry.resolveRequest(htmlUrl);
     expect(resolvedHtml).toEqual({
       filePath: join(rootDir, 'index.html'),
-      mimeType: 'text/html',
+      mimeType: 'text/html; charset=utf-8',
     });
 
     const resolvedPdf = await registry.resolveRequest(pdfUrl);
@@ -106,7 +106,7 @@ describe('preview-protocol', () => {
     const resolvedCss = await registry.resolveRequest(cssUrl);
     expect(resolvedCss).toEqual({
       filePath: join(rootDir, 'styles.css'),
-      mimeType: 'text/css',
+      mimeType: 'text/css; charset=utf-8',
     });
   });
 
