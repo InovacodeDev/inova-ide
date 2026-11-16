@@ -48,7 +48,7 @@ describe('renderWingetManifests', () => {
     assert.match(manifests.versionYaml, /PackageVersion: 0\.9\.0/);
     assert.match(manifests.versionYaml, /DefaultLocale: en-US/);
 
-    assert.match(manifests.installerYaml, /InstallerType: nsis/);
+    assert.match(manifests.installerYaml, /InstallerType: nullsoft/);
     assert.match(manifests.installerYaml, /Scope: user/);
     assert.match(manifests.installerYaml, /Silent: \/S/);
     assert.match(manifests.installerYaml, /Commands:\n  - inova/);
