@@ -2407,18 +2407,6 @@ export function App() {
             <CommandRunsIndicator runs={commandRuns.runs} onCancel={commandRuns.cancelRun} />
           }
         />
-        {commandRuns.pending ? (
-          <ConfirmModal
-            title={t('commands.confirmTitle')}
-            description={t('commands.confirmDescription', {
-              command: formatArgv(commandRuns.pending.argv),
-              cwd: commandRuns.pending.cwd,
-            })}
-            confirmLabel={t('commands.confirmRun')}
-            onConfirm={() => void commandRuns.confirmPending()}
-            onCancel={commandRuns.dismissPending}
-          />
-        ) : null}
         {updates.installing ? (
           <UpdateProgress latest={updates.info?.latest ?? null} stage={updates.installStage} />
         ) : (
@@ -2691,6 +2679,13 @@ export function App() {
             onRunVerification={() => {
               if (activeSession) void runVerification(activeSession.id);
             }}
+            onLibraryDisabledChange={(libraryDisabled) =>
+              setProjects((current) =>
+                current.map((item) =>
+                  item.id === projectSettingsTarget.id ? { ...item, libraryDisabled } : item,
+                ),
+              )
+            }
             onClose={() => setProjectSettingsId(null)}
           />
         )}
@@ -2726,11 +2721,26 @@ export function App() {
             defaultModes={defaultModes}
             isMac={IS_MAC}
             call={call}
+            accounts={accounts}
+            projects={projects}
+            onRunCommand={commandRuns.requestRun}
             onUpdate={(patch) => void updateSettings(patch)}
             onSetDefaultMode={(provider, mode) => void setDefaultProviderMode(provider, mode)}
             onClose={() => setSettingsOpen(false)}
           />
         )}
+        {commandRuns.pending ? (
+          <ConfirmModal
+            title={t('commands.confirmTitle')}
+            description={t('commands.confirmDescription', {
+              command: formatArgv(commandRuns.pending.argv),
+              cwd: commandRuns.pending.cwd,
+            })}
+            confirmLabel={t('commands.confirmRun')}
+            onConfirm={() => void commandRuns.confirmPending()}
+            onCancel={commandRuns.dismissPending}
+          />
+        ) : null}
       </div>
     </I18nProvider>
   );

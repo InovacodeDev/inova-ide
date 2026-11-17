@@ -9,7 +9,7 @@ import type { ChatEvent } from '@inova/core/chat-types';
 import type { CapabilityAdapter, CapabilityItem } from '@inova/core/capabilities/types';
 import { CapabilityFileError } from '@inova/core/capabilities/file-edit';
 import { createCheckpoint } from '@inova/core/git-checkpoints';
-import { bindProject } from '@inova/core/projects';
+import { bindProject, setProjectLibraryOverride } from '@inova/core/projects';
 import type { CommandRunner } from '@inova/core/providers';
 import { claudeProjectDirName } from '@inova/core/session-import';
 import { createSession, updateSession } from '@inova/core/sessions';
@@ -3764,4 +3764,18 @@ test('openFilePath fails gracefully when openPath is not configured', async () =
     ok: false,
     message: 'Abertura externa de arquivos não configurada.',
   });
+});
+
+test('listProjects exposes the library items disabled for the project', async () => {
+  const { root, handlers } = await setup();
+  const { project } = await seedProject(root);
+  expect(unwrap(await handlers.listProjects())[0]?.libraryDisabled).toBeUndefined();
+
+  await setProjectLibraryOverride({
+    root,
+    projectId: project.id,
+    itemId: 'my-skill',
+    disabled: true,
+  });
+  expect(unwrap(await handlers.listProjects())[0]?.libraryDisabled).toEqual(['my-skill']);
 });

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/core/types';
+import type { AccountView, ProjectView } from '../shared/api';
 import { CloseIcon } from './icons';
 import { useI18n } from './I18nContext';
+import { LibrarySection } from './LibrarySection';
+import type { RunCommand } from './LibraryPluginInstall';
 import { openModalCount } from './modal-layers';
 import {
   SETTINGS_SECTIONS,
@@ -27,13 +30,27 @@ interface SettingsModalProps {
   defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
   isMac: boolean;
   call: WarningCall;
+  accounts: readonly AccountView[];
+  projects: readonly ProjectView[];
+  onRunCommand: RunCommand;
   onUpdate: (patch: SettingsPatch) => void;
   onSetDefaultMode: (provider: ProviderId, mode: ExecutionMode) => void;
   onClose: () => void;
 }
 
 export function SettingsModal(props: SettingsModalProps) {
-  const { settings, defaultModes, isMac, call, onUpdate, onSetDefaultMode, onClose } = props;
+  const {
+    settings,
+    defaultModes,
+    isMac,
+    call,
+    accounts,
+    projects,
+    onRunCommand,
+    onUpdate,
+    onSetDefaultMode,
+    onClose,
+  } = props;
   const { locale, t } = useI18n();
   const [active, setActive] = useState<SettingsSectionId>('general');
   const cardRef = useRef<HTMLDivElement>(null);
@@ -77,6 +94,7 @@ export function SettingsModal(props: SettingsModalProps) {
     sessions: <SessionsSection settings={settings} onUpdate={onUpdate} />,
     notifications: <NotificationsSection settings={settings} onUpdate={onUpdate} call={call} />,
     voice: <VoiceSection settings={settings} onUpdate={onUpdate} call={call} />,
+    library: <LibrarySection accounts={accounts} projects={projects} onRun={onRunCommand} />,
     shortcuts: <ShortcutsSection isMac={isMac} />,
   };
 

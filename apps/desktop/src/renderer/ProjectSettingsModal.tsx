@@ -6,6 +6,7 @@ import { useI18n } from './I18nContext';
 import { openModalCount } from './modal-layers';
 import { folderName } from './path-name';
 import { addCustomCheck, removeCheck, toggleCheck } from './project-checks';
+import { ProjectLibraryPanel } from './ProjectLibraryPanel';
 import { SettingGroup, SettingRow, Switch } from './settings-controls';
 import { useDialogFocus } from './useDialogFocus';
 import './modal.css';
@@ -24,12 +25,20 @@ interface ProjectSettingsModalProps {
   onUpdate: (patch: ProjectVerificationPatch) => void;
   onDetectChecks: () => void;
   onRunVerification: () => void;
+  onLibraryDisabledChange: (disabled: string[]) => void;
   onClose: () => void;
 }
 
 export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
-  const { project, running, canRunVerification, onUpdate, onDetectChecks, onRunVerification } =
-    props;
+  const {
+    project,
+    running,
+    canRunVerification,
+    onUpdate,
+    onDetectChecks,
+    onRunVerification,
+    onLibraryDisabledChange,
+  } = props;
   const { t } = useI18n();
   const [newCommand, setNewCommand] = useState('');
   const cardRef = useRef<HTMLDivElement>(null);
@@ -189,6 +198,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
               </button>
             </div>
           </SettingGroup>
+          <ProjectLibraryPanel project={project} onDisabledChange={onLibraryDisabledChange} />
         </div>
       </div>
     </div>

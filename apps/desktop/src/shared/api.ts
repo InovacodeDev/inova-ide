@@ -182,6 +182,7 @@ export interface ProjectView {
   autoVerify?: boolean;
   verificationChecks?: VerificationCheck[];
   pinnedMemory?: string | null;
+  libraryDisabled?: string[];
 }
 
 export interface VoiceModelInfo {

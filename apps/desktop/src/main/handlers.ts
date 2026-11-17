@@ -273,6 +273,7 @@ async function projectView(project: Project, account: Account): Promise<ProjectV
     autoVerify: project.autoVerify,
     verificationChecks: project.verificationChecks,
     pinnedMemory: project.pinnedMemory,
+    libraryDisabled: project.libraryOverrides?.disabled,
   };
 }
 
