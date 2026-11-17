@@ -4,7 +4,12 @@ import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/cha
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ComparisonDiffView } from '@inova/core/git-compare';
 import type { CommandEvent } from './command-types.js';
-import type { LibraryItem, PluginDefinition, PluginInstallRecipe } from '@inova/core/library/index';
+import type {
+  InvalidLibraryEntry,
+  LibraryItem,
+  PluginDefinition,
+  PluginInstallRecipe,
+} from '@inova/core/library/index';
 import type { ProviderModels } from '@inova/core/models';
 import type {
   McpHttpServer,
@@ -17,6 +22,7 @@ import type {
 
 export type {
   ConnectorLibraryItem,
+  InvalidLibraryEntry,
   LibraryItem,
   LibraryItemKind,
   McpLibraryItem,
@@ -124,6 +130,7 @@ export type RunCommandOutcome =
 export interface LibraryListing {
   items: LibraryItem[];
   pluginRecipes: Record<string, PluginInstallRecipe>;
+  invalidItems: InvalidLibraryEntry[];
 }
 
 interface SaveLibraryItemBase {

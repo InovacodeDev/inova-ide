@@ -6,6 +6,7 @@ import {
   LibraryCorruptError,
   LibraryValidationError,
   loadLibrary,
+  loadLibraryWithInvalid,
   MAX_PROJECT_DISABLED_ITEMS,
   removeLibraryItem,
   saveLibraryItem,
@@ -188,13 +189,18 @@ export function createLibraryHandlers(deps: LibraryHandlerDeps): LibraryHandlers
   return {
     listLibrary: () =>
       guardLibrary(async () => {
-        const { items } = await loadLibrary(root);
+        const { library, invalid } = await loadLibraryWithInvalid(root);
+        const { items } = library;
         const recipes = items.flatMap((item) =>
           item.kind === 'plugin'
             ? [[item.id, buildPluginInstallRecipe(item.definition)] as const]
             : [],
         );
-        return ok({ items, pluginRecipes: Object.fromEntries(recipes) });
+        return ok({
+          items,
+          pluginRecipes: Object.fromEntries(recipes),
+          invalidItems: invalid,
+        });
       }),
     saveLibraryItem: (input) =>
       validated(input, parseSaveLibraryItem, (parsed) =>
