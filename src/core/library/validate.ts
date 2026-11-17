@@ -52,12 +52,19 @@ export function isLibraryId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= MAX_ID_LENGTH && ID_PATTERN.test(value);
 }
 
+// REGEX: OpenAI-style secret key with a long random tail
+const API_KEY_TOKEN = /\bsk-[A-Za-z0-9_-]{20,}/;
+
+export function containsSecretLiteral(text: string): boolean {
+  return maskSecretsInText(text) !== text || API_KEY_TOKEN.test(text);
+}
+
 function plainText(input: { value: unknown; field: string; min: number; max: number }): string {
   const { value, field, min, max } = input;
   if (typeof value !== 'string' || value.length < min || value.length > max) {
     throw invalid(`${field} must be a string of ${min} to ${max} characters`);
   }
-  if (maskSecretsInText(value) !== value) throw invalid(`${field} must not contain secrets`);
+  if (containsSecretLiteral(value)) throw invalid(`${field} must not contain secrets`);
   return value;
 }
 

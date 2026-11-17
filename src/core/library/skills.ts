@@ -3,9 +3,8 @@ import type { Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { isMissingFile, serialize } from '../capabilities/file-edit.js';
-import { maskSecretsInText } from '../profile-sync.js';
 import { createBackupDir, skillDir } from './store.js';
-import { isLibraryId } from './validate.js';
+import { containsSecretLiteral, isLibraryId } from './validate.js';
 
 export const SKILL_MARKER_FILE = '.inova-managed';
 export const SKILL_FILE = 'SKILL.md';
@@ -21,8 +20,6 @@ const OWNER_EXECUTE = 0o100;
 const FRONT_MATTER = /^﻿?---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 // REGEX: top-level YAML "key: value" line
 const FRONT_MATTER_LINE = /^([A-Za-z0-9_-]+):[ \t]*(.*?)[ \t]*$/;
-// REGEX: OpenAI-style secret key with a long random tail
-const API_KEY_TOKEN = /\bsk-[A-Za-z0-9_-]{20,}/;
 
 export class SkillValidationError extends Error {
   constructor(reason: string) {
@@ -84,7 +81,7 @@ export function validateSkillMarkdown(content: string): void {
       throw new SkillValidationError(`${SKILL_FILE} front matter needs a non-empty ${required}`);
     }
   }
-  if (maskSecretsInText(content) !== content || API_KEY_TOKEN.test(content)) {
+  if (containsSecretLiteral(content)) {
     throw new SkillValidationError(`${SKILL_FILE} must not contain secrets`);
   }
 }
