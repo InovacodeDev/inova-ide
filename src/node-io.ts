@@ -5,6 +5,34 @@ import type { LaunchSpec } from './core/launch.js';
 import { RUNNER_ABORTED } from './core/providers.js';
 import type { CommandRunner } from './core/providers.js';
 import type { CliIO } from './main.js';
+import {
+  findBinaryInPathSync,
+  normalizeWindowsEnv,
+  readEnvPath,
+  resolveWindowsSpawn,
+} from './win-env.js';
+
+function prepareCommand(input: {
+  command: string;
+  args: readonly string[];
+  env: NodeJS.ProcessEnv;
+}): { file: string; args: string[]; env: NodeJS.ProcessEnv; verbatim: boolean } {
+  if (process.platform !== 'win32') {
+    return { file: input.command, args: [...input.args], env: input.env, verbatim: false };
+  }
+  const env = normalizeWindowsEnv(input.env);
+  const hasSeparator = input.command.includes('\\') || input.command.includes('/');
+  const resolved = hasSeparator
+    ? input.command
+    : (findBinaryInPathSync({ name: input.command, pathValue: readEnvPath(env) }) ?? input.command);
+  const target = resolveWindowsSpawn({ file: resolved, args: input.args, env });
+  return {
+    file: target.file,
+    args: target.args,
+    env,
+    verbatim: target.verbatimArgs !== undefined,
+  };
+}
 
 function errorCode(error: unknown): unknown {
   return error instanceof Error && 'code' in error ? error.code : undefined;
@@ -21,15 +49,17 @@ function diedBySignal(error: unknown): boolean {
 }
 
 export const nodeRunner: CommandRunner = {
-  run: (cmd) =>
-    new Promise((resolve, reject) => {
+  run: (cmd) => {
+    const prepared = prepareCommand({ command: cmd.command, args: cmd.args, env: cmd.env });
+    return new Promise((resolve, reject) => {
       const options = {
-        env: cmd.env,
+        env: prepared.env,
         encoding: 'utf8',
         timeout: cmd.timeoutMs ?? RUNNER_TIMEOUT_MS,
+        ...(prepared.verbatim ? { windowsVerbatimArguments: true } : {}),
         ...(cmd.cwd === undefined ? {} : { cwd: cmd.cwd }),
       } as const;
-      execFile(cmd.command, cmd.args, options, (error, stdout) => {
+      execFile(prepared.file, prepared.args, options, (error, stdout) => {
         if (error === null) return resolve({ exitCode: 0, stdout });
         const code = errorCode(error);
         if (code === 'ENOENT') return resolve({ notFound: true });
@@ -38,7 +68,8 @@ export const nodeRunner: CommandRunner = {
         if (typeof code === 'number') return resolve({ exitCode: code, stdout });
         return reject(error);
       });
-    }),
+    });
+  },
 };
 
 const IGNORED_SIGNALS = ['SIGINT', 'SIGQUIT'] as const;
@@ -62,11 +93,13 @@ function relaySignals(child: ChildProcess): () => void {
 }
 
 function spawnInteractive(spec: LaunchSpec): Promise<number | 'not-found'> {
+  const prepared = prepareCommand({ command: spec.command, args: spec.args, env: spec.env });
   return new Promise((resolve, reject) => {
-    const child = spawn(spec.command, spec.args, {
+    const child = spawn(prepared.file, prepared.args, {
       cwd: spec.cwd,
-      env: spec.env,
+      env: prepared.env,
       stdio: 'inherit',
+      ...(prepared.verbatim ? { windowsVerbatimArguments: true } : {}),
     });
     const release = relaySignals(child);
     child.on('error', (error) => {

@@ -140,7 +140,7 @@ import { createLoginFlowManager } from './login-flow.js';
 import { isInsideRoot } from './preview-protocol.js';
 import type { PreviewRegistry } from './preview-protocol.js';
 import type { SessionManager } from './sessions.js';
-import { findBinary } from './shell-env.js';
+import { findBinary, readEnvPath } from './shell-env.js';
 import { createTurnQueue } from './turn-queue.js';
 import { parseExternalUrl } from './updates-core.js';
 import {
@@ -821,7 +821,7 @@ export function createHandlers(deps: HandlerDeps) {
       if (blocked !== null) return null;
     }
     const adapter = providers[candidate.provider];
-    const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+    const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
     if (file === undefined) return null;
     let status: AuthStatus = 'unknown';
     try {
@@ -1217,7 +1217,7 @@ export function createHandlers(deps: HandlerDeps) {
     }
     const adapter = providers[account.provider];
     const baseEnv = await deps.baseEnv();
-    const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+    const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
     if (file === undefined) {
       enqueueInboxUpdate({
         sessionId: session.id,
@@ -1739,7 +1739,7 @@ export function createHandlers(deps: HandlerDeps) {
   async function startAccountLogin(account: Account): Promise<Result<StartedLogin>> {
     const adapter = providers[account.provider];
     const baseEnv = await deps.baseEnv();
-    const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+    const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
     if (file === undefined) {
       return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
     }
@@ -2391,7 +2391,7 @@ export function createHandlers(deps: HandlerDeps) {
         let file = resolvedFile;
         if (file === undefined) {
           const adapter = providers[activeAccount.provider];
-          file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+          file = await findBinary(adapter.binary, readEnvPath(baseEnv));
           if (file === undefined) {
             return fail(`${adapter.binary} não encontrado. Instale: ${adapter.installHint}`);
           }
@@ -3050,7 +3050,7 @@ export function createHandlers(deps: HandlerDeps) {
         if (session.providerSessionId === null) return fail(CONTEXT_BREAKDOWN_EMPTY);
         const baseEnv = await deps.baseEnv();
         const adapter = providers[account.provider];
-        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
         if (file === undefined) return fail(`${adapter.binary} não encontrado.`);
         await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
         const spec = buildLaunch({
@@ -3084,7 +3084,7 @@ export function createHandlers(deps: HandlerDeps) {
         }
         const baseEnv = await deps.baseEnv();
         const adapter = providers[account.provider];
-        const file = await findBinary(adapter.binary, baseEnv['PATH'] ?? '');
+        const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
         if (file === undefined) return ok(fallback);
         await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
         const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
@@ -3208,8 +3208,8 @@ export function createHandlers(deps: HandlerDeps) {
             );
           }
           const [leftFile, rightFile] = await Promise.all([
-            findBinary(leftAdapter.binary, baseEnv['PATH'] ?? ''),
-            findBinary(rightAdapter.binary, baseEnv['PATH'] ?? ''),
+            findBinary(leftAdapter.binary, readEnvPath(baseEnv)),
+            findBinary(rightAdapter.binary, readEnvPath(baseEnv)),
           ]);
           if (leftFile === undefined) {
             return fail(

@@ -27,7 +27,13 @@ import {
 } from './updates.js';
 import { createSessionManager } from './sessions.js';
 import type { SpawnPty } from './sessions.js';
-import { findBinary, loginShellPath } from './shell-env.js';
+import {
+  findBinary,
+  loginShellPath,
+  readEnvPath,
+  resolveWindowsSpawn,
+  windowsBaseEnv,
+} from './shell-env.js';
 import { createVoiceHandlers, createVoiceService } from './voice.js';
 import { createVoiceDockerSetup } from './voice-docker.js';
 import { listOllamaModels, polishTranscript, probeOllamaEndpoint } from './voice-polish.js';
@@ -35,6 +41,7 @@ import { startWhisperServer } from './whisper-server.js';
 
 const execFileAsync = promisify(execFile);
 const SHELL_TIMEOUT_MS = 5000;
+const WIN_ENV_TTL_MS = 5000;
 const WHISPER_TIMEOUT_MS = 120_000;
 const WHISPER_MAX_OUTPUT_BYTES = 1024 * 1024;
 const AUTO_ARCHIVE_INTERVAL_MS = 60 * 60 * 1000;
@@ -44,14 +51,18 @@ const appUrl =
 const notificationSettingsUrl = NOTIFICATION_SETTINGS_URL[process.platform];
 let mainWindow: BrowserWindow | undefined;
 let cachedBaseEnv: Promise<NodeJS.ProcessEnv> | undefined;
+let cachedWinEnv: { expiresAt: number; promise: Promise<NodeJS.ProcessEnv> } | undefined;
 
 function baseEnv(): Promise<NodeJS.ProcessEnv> {
   if (process.platform === 'win32') {
-    return Promise.resolve({
-      ...process.env,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-    });
+    const now = Date.now();
+    if (cachedWinEnv === undefined || now >= cachedWinEnv.expiresAt) {
+      cachedWinEnv = {
+        expiresAt: now + WIN_ENV_TTL_MS,
+        promise: windowsBaseEnv(),
+      };
+    }
+    return cachedWinEnv.promise;
   }
   const defaultShell = process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
   cachedBaseEnv ??= loginShellPath({
@@ -71,8 +82,16 @@ function sendToWindow(channel: string, payload: unknown): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-const spawnPty: SpawnPty = ({ file, args, cwd, env, cols, rows }) =>
-  pty.spawn(file, args, { name: 'xterm-256color', cwd, env, cols, rows });
+const spawnPty: SpawnPty = ({ file, args, cwd, env, cols, rows }) => {
+  const resolved = resolveWindowsSpawn({ file, args, env });
+  return pty.spawn(resolved.file, resolved.verbatimArgs ?? resolved.args, {
+    name: 'xterm-256color',
+    cwd,
+    env,
+    cols,
+    rows,
+  });
+};
 
 const sessions = createSessionManager({
   spawnPty,
@@ -83,8 +102,17 @@ const sessions = createSessionManager({
   },
 });
 
-const spawnChild: SpawnChild = ({ file, args, cwd, env }) =>
-  spawn(file, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+const spawnChild: SpawnChild = ({ file, args, cwd, env }) => {
+  const resolved = resolveWindowsSpawn({ file, args, env });
+  return spawn(resolved.file, resolved.args, {
+    cwd,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+    windowsHide: true,
+    ...(resolved.verbatimArgs !== undefined ? { windowsVerbatimArguments: true } : {}),
+  });
+};
 
 let handlers: ReturnType<typeof createHandlers> | undefined;
 let disposeVoice: (() => Promise<void>) | undefined;
@@ -299,7 +327,7 @@ void app.whenReady().then(async () => {
       current: app.getVersion(),
       execPath: process.execPath,
       findBrew: async () =>
-        (await findBinary('brew', (await baseEnv())['PATH'] ?? '')) ??
+        (await findBinary('brew', readEnvPath(await baseEnv()))) ??
         (await findBinary('brew', '/opt/homebrew/bin:/usr/local/bin')),
       run: async (file, args) => {
         await execFileAsync(file, args, { env: await baseEnv(), timeout: INSTALL_TIMEOUT_MS });
@@ -446,7 +474,7 @@ void app.whenReady().then(async () => {
       process.platform === 'win32' ? 'whisper-server.exe' : 'whisper-server';
     const setupDocker = createVoiceDockerSetup({
       findDocker: async () => {
-        const envPath = (await baseEnv())['PATH'] ?? '';
+        const envPath = readEnvPath(await baseEnv());
         const extraPath =
           process.platform === 'darwin'
             ? `${envPath}:/usr/local/bin:/opt/homebrew/bin:/Applications/Docker.app/Contents/Resources/bin`
@@ -473,7 +501,7 @@ void app.whenReady().then(async () => {
         join(process.resourcesPath, 'whisper', whisperName),
         join(app.getAppPath(), 'resources', 'whisper', whisperName),
       ],
-      findOnPath: async () => findBinary('whisper-cli', (await baseEnv())['PATH'] ?? ''),
+      findOnPath: async () => findBinary('whisper-cli', readEnvPath(await baseEnv())),
       runWhisper: async ({ file, args, signal }) => {
         const { stdout } = await execFileAsync(file, args, {
           signal,
@@ -486,7 +514,7 @@ void app.whenReady().then(async () => {
         join(process.resourcesPath, 'whisper', whisperServerName),
         join(app.getAppPath(), 'resources', 'whisper', whisperServerName),
       ],
-      findServerOnPath: async () => findBinary('whisper-server', (await baseEnv())['PATH'] ?? ''),
+      findServerOnPath: async () => findBinary('whisper-server', readEnvPath(await baseEnv())),
       startServer: startWhisperServer,
       polish: polishTranscript,
       listPolishModels: listOllamaModels,
