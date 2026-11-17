@@ -613,6 +613,7 @@ interface PlannedTarget {
   ownedHashes?: ManagedHashes;
   removedNames?: string[];
   prunedNames?: string[];
+  projectNames?: string[];
 }
 
 interface KeyedTarget extends Omit<PlannedTarget, 'item'> {
@@ -1063,7 +1064,14 @@ async function planLibraryAccountTarget(input: {
     libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
   };
   const annotated = annotateLibraryTarget({
-    planned: withMcpRemoval({ planned: { ...planned, managedKey }, split }),
+    planned: withMcpRemoval({
+      planned: {
+        ...planned,
+        managedKey,
+        projectNames: Object.keys(projectServers).filter((name) => !unwritten.includes(name)),
+      },
+      split,
+    }),
     projection,
     managedNames,
   });
@@ -1313,8 +1321,10 @@ export async function applyProfileSync(input: {
       ...(input.now ? { now: input.now } : {}),
     });
   };
-  const pruneManaged = (planned: KeyedTarget): Promise<void> =>
-    recordManaged(planned, { add: {}, drop: planned.prunedNames ?? [] });
+  const pruneManaged = (planned: KeyedTarget): Promise<void> => {
+    const inPlace = planned.item.status === 'unchanged' ? (planned.projectNames ?? []) : [];
+    return recordManaged(planned, { add: {}, drop: [...(planned.prunedNames ?? []), ...inPlace] });
+  };
 
   const appliedIds: string[] = [];
   const skippedIds: string[] = [];
@@ -1374,6 +1384,7 @@ export async function applyProfileSync(input: {
       });
       if (removal.failed) okAll = false;
       const writtenLibraryNames: string[] = [];
+      const writtenProjectNames: string[] = [];
       for (const [name, server] of Object.entries(projection?.servers ?? {})) {
         const built = buildAgyMcpAddArgs(name, server);
         if ('incompatibleReason' in built) continue;
@@ -1388,7 +1399,7 @@ export async function applyProfileSync(input: {
           okAll = false;
           continue;
         }
-        if (isLibrary) writtenLibraryNames.push(name);
+        (isLibrary ? writtenLibraryNames : writtenProjectNames).push(name);
         if (disabledBefore.has(name)) {
           const disabled = await input.runner.run({
             command: 'agy',
@@ -1400,7 +1411,7 @@ export async function applyProfileSync(input: {
       }
       await recordManaged(planned, {
         add: Object.fromEntries(writtenLibraryNames.map((name) => [name, ''])),
-        drop: removal.dropped,
+        drop: [...removal.dropped, ...writtenProjectNames],
       });
       if (okAll) appliedIds.push(item.id);
       else skippedIds.push(item.id);
@@ -1433,7 +1444,11 @@ export async function applyProfileSync(input: {
     if (item.scope === 'mcp') {
       await recordManaged(planned, {
         add: planned.ownedHashes ?? {},
-        drop: [...(planned.removedNames ?? []), ...(planned.prunedNames ?? [])],
+        drop: [
+          ...(planned.removedNames ?? []),
+          ...(planned.prunedNames ?? []),
+          ...(planned.projectNames ?? []),
+        ],
       });
     }
     appliedIds.push(item.id);
