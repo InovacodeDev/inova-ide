@@ -67,9 +67,11 @@ export interface ProfileSyncLibraryInput {
   projectDisabled: readonly string[];
 }
 
+export type ProfileSyncScope = 'mcp' | 'rules' | 'skill';
+
 export interface ProfileSyncItem {
   id: string;
-  scope: 'mcp' | 'rules' | 'skill';
+  scope: ProfileSyncScope;
   provider: ProviderId;
   accountId?: string;
   accountLabel?: string;
@@ -98,6 +100,8 @@ export interface ProfileSyncApplyResult {
 const MCP_TABLES_PATTERN = /^\s*\[mcp_servers[.\]]/m;
 
 const RULES_FILES: readonly RulesFile[] = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md'];
+
+const ALL_SCOPES: readonly ProfileSyncScope[] = ['mcp', 'rules', 'skill'];
 
 const PROVIDER_RULE_FILE: Partial<Record<ProviderId, RulesFile>> = {
   claude: 'CLAUDE.md',
@@ -845,7 +849,9 @@ async function planProfileTargets(input: {
   sourceAccountId?: string | null;
   root?: string;
   library?: ProfileSyncLibraryInput;
+  scopes?: readonly ProfileSyncScope[];
 }): Promise<ProfileSyncPlan> {
+  const scopes = input.scopes ?? ALL_SCOPES;
   const mcp = await readCanonicalMcpConfig({ projectPath: input.projectPath });
   let servers = mcp.servers;
   if (!mcp.exists && input.sourceAccountId) {
@@ -867,7 +873,7 @@ async function planProfileTargets(input: {
     input.library && input.root ? await loadManaged(input.root) : { version: 1, mcp: {} };
   const targets: PlannedTarget[] = [];
   const projections = new Map<string, LibraryMcpProjection>();
-  for (const account of input.accounts) {
+  for (const account of scopes.includes('mcp') ? input.accounts : []) {
     const { planned, projection } = await planAccountTarget({
       account,
       projectPath: input.projectPath,
@@ -879,7 +885,7 @@ async function planProfileTargets(input: {
     projections.set(account.id, projection);
   }
 
-  if (resolvedSource) {
+  if (resolvedSource && scopes.includes('rules')) {
     const sourceContent = (await readOptionalFile(join(input.projectPath, resolvedSource))) ?? '';
     const seenRuleFiles = new Set<RulesFile>([resolvedSource]);
     for (const account of input.accounts) {
@@ -911,7 +917,7 @@ async function planProfileTargets(input: {
   }
 
   const skills =
-    input.library && input.root
+    input.library && input.root && scopes.includes('skill')
       ? await planSkillTargets({
           root: input.root,
           accounts: input.accounts,
@@ -941,6 +947,7 @@ export async function previewProfileSync(input: {
   sourceAccountId?: string | null;
   root?: string;
   library?: ProfileSyncLibraryInput;
+  scopes?: readonly ProfileSyncScope[];
 }): Promise<ProfileSyncPreview> {
   const { preview } = await planProfileTargets(input);
   return preview;
@@ -987,6 +994,7 @@ export async function applyProfileSync(input: {
   baseEnv?: NodeJS.ProcessEnv;
   now?: () => Date;
   library?: ProfileSyncLibraryInput;
+  scopes?: readonly ProfileSyncScope[];
 }): Promise<ProfileSyncApplyResult> {
   const timestamp = (input.now?.() ?? new Date()).toISOString().replace(/[:.]/g, '-');
   const backupDir = join(input.root, 'backups', 'profile-sync', timestamp);
@@ -999,6 +1007,7 @@ export async function applyProfileSync(input: {
     ...(input.rulesSource !== undefined ? { rulesSource: input.rulesSource } : {}),
     ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
     ...(input.library ? { library: input.library } : {}),
+    ...(input.scopes ? { scopes: input.scopes } : {}),
   });
   const recordManaged = async (accountId: string, names: readonly string[]): Promise<void> => {
     if (!input.library || names.length === 0) return;
