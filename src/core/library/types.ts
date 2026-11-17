@@ -52,3 +52,13 @@ export interface Library {
   version: 1;
   items: LibraryItem[];
 }
+
+export interface InvalidLibraryEntry {
+  id: string;
+  error: string;
+}
+
+export interface LoadedLibrary {
+  library: Library;
+  invalid: InvalidLibraryEntry[];
+}

@@ -240,12 +240,9 @@ describe('library store', () => {
     'invalid JSON': '{not json',
     'wrong version': JSON.stringify({ version: 2, items: [] }),
     'items that is not an array': JSON.stringify({ version: 1, items: {} }),
-    'invalid item': JSON.stringify({ version: 1, items: [baseItem({ id: 'A' })] }),
     'duplicate ids': JSON.stringify({ version: 1, items: [baseItem(), baseItem()] }),
-    'literal secret in env': JSON.stringify({
-      version: 1,
-      items: [mcp({ command: 'npx', env: { KEY: 'sk-live-123456' } })],
-    }),
+    'item without a string id': JSON.stringify({ version: 1, items: [{ name: 'x' }] }),
+    'item that is not an object': JSON.stringify({ version: 1, items: ['x'] }),
   };
   for (const [label, content] of Object.entries(corrupt)) {
     it(`throws LibraryCorruptError on ${label} and refuses to overwrite the file`, async () => {

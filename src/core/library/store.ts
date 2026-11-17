@@ -1,8 +1,8 @@
 import { copyFile, cp, lstat, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { isMissingFile, serialize, writeAtomic } from '../capabilities/file-edit.js';
-import type { Library, LibraryItem } from './types.js';
-import { validateLibraryItem } from './validate.js';
+import type { Library, LibraryItem, LoadedLibrary } from './types.js';
+import { isLibraryId, validateLibraryItem } from './validate.js';
 
 export class LibraryCorruptError extends Error {
   readonly path: string;
@@ -56,31 +56,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseLibrary(file: string, parsed: unknown): Library {
+interface QuarantinedItem {
+  id: string;
+  error: string;
+  raw: unknown;
+}
+
+interface LibraryState {
+  library: Library;
+  quarantined: QuarantinedItem[];
+}
+
+interface NextState {
+  items: LibraryItem[];
+  quarantined: QuarantinedItem[];
+}
+
+function parseLibrary(file: string, parsed: unknown): LibraryState {
   if (!isRecord(parsed) || parsed['version'] !== 1 || !Array.isArray(parsed['items'])) {
     throw new LibraryCorruptError(file, 'invalid shape');
   }
   const seen = new Set<string>();
   const items: LibraryItem[] = [];
+  const quarantined: QuarantinedItem[] = [];
   for (const raw of parsed['items'] as unknown[]) {
+    const id = isRecord(raw) ? raw['id'] : undefined;
+    if (typeof id !== 'string') throw new LibraryCorruptError(file, 'item without a string id');
+    if (seen.has(id)) throw new LibraryCorruptError(file, `duplicate id: ${id}`);
+    seen.add(id);
     const checked = validateLibraryItem(raw);
-    if (!checked.ok) throw new LibraryCorruptError(file, `invalid item: ${checked.error}`);
-    if (seen.has(checked.item.id)) {
-      throw new LibraryCorruptError(file, `duplicate id: ${checked.item.id}`);
-    }
-    seen.add(checked.item.id);
-    items.push(checked.item);
+    if (checked.ok) items.push(checked.item);
+    else quarantined.push({ id, error: checked.error, raw });
   }
-  return { version: 1, items };
+  return { library: { version: 1, items }, quarantined };
 }
 
-export async function loadLibrary(root: string): Promise<Library> {
+async function readLibraryState(root: string): Promise<LibraryState> {
   const file = libraryFile(root);
   let raw: string;
   try {
     raw = await readFile(file, 'utf8');
   } catch (error: unknown) {
-    if (isMissingFile(error)) return { version: 1, items: [] };
+    if (isMissingFile(error)) return { library: { version: 1, items: [] }, quarantined: [] };
     throw error;
   }
   let parsed: unknown;
@@ -90,6 +107,15 @@ export async function loadLibrary(root: string): Promise<Library> {
     throw new LibraryCorruptError(file, 'invalid JSON');
   }
   return parseLibrary(file, parsed);
+}
+
+export async function loadLibraryWithInvalid(root: string): Promise<LoadedLibrary> {
+  const { library, quarantined } = await readLibraryState(root);
+  return { library, invalid: quarantined.map(({ id, error }) => ({ id, error })) };
+}
+
+export async function loadLibrary(root: string): Promise<Library> {
+  return (await readLibraryState(root)).library;
 }
 
 export async function createBackupDir(input: { root: string; at: Date }): Promise<string> {
@@ -146,27 +172,27 @@ async function backupSkillDir(input: {
 }
 
 interface Mutation<T> {
-  next: Library | null;
+  next: NextState | null;
   result: T;
 }
 
 function mutateLibrary<T>(input: {
   root: string;
   at: Date;
-  update: (library: Library) => Mutation<T>;
+  update: (state: LibraryState) => Mutation<T>;
   beforeWrite?: (context: { result: T; backupDir: BackupDirProvider }) => Promise<void>;
 }): Promise<T> {
   const { root, at, update, beforeWrite } = input;
   const file = libraryFile(root);
   return serialize(resolve(file), async () => {
-    const { next, result } = update(await loadLibrary(root));
+    const { next, result } = update(await readLibraryState(root));
     if (next === null) return result;
     const backupDir = lazyBackupDir({ root, at });
     await beforeWrite?.({ result, backupDir });
     await backupLibraryFile({ root, backupDir });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });
     try {
-      await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+      await writeAtomic(file, serializeLibrary(next));
     } catch (error: unknown) {
       // NOTE: writeAtomic leaves "<file>.inova.tmp" behind when the final rename fails
       await rm(`${file}.inova.tmp`, { force: true });
@@ -174,6 +200,11 @@ function mutateLibrary<T>(input: {
     }
     return result;
   });
+}
+
+function serializeLibrary(next: NextState): string {
+  const items = [...next.items, ...next.quarantined.map((entry) => entry.raw)];
+  return `${JSON.stringify({ version: 1, items }, null, 2)}\n`;
 }
 
 function upsertItem(items: readonly LibraryItem[], item: LibraryItem): LibraryItem[] {
@@ -194,12 +225,19 @@ export async function saveLibraryItem(input: {
   await mutateLibrary({
     root: input.root,
     at,
-    update: (library) => ({
-      next: { version: 1, items: upsertItem(library.items, item) },
+    update: ({ library, quarantined }) => ({
+      next: {
+        items: upsertItem(library.items, item),
+        quarantined: quarantined.filter((entry) => entry.id !== item.id),
+      },
       result: undefined,
     }),
   });
   return item;
+}
+
+function skillIdToRemove(input: { id: string; kind: unknown }): string | null {
+  return input.kind === 'skill' && isLibraryId(input.id) ? input.id : null;
 }
 
 export async function removeLibraryItem(input: {
@@ -208,23 +246,30 @@ export async function removeLibraryItem(input: {
   now?: () => Date;
 }): Promise<{ removed: boolean }> {
   const at = (input.now ?? (() => new Date()))();
-  const removedItem = await mutateLibrary({
+  const removal = await mutateLibrary({
     root: input.root,
     at,
-    update: (library) => {
+    update: ({ library, quarantined }) => {
       const found = library.items.find((current) => current.id === input.id);
-      if (!found) return { next: null, result: null };
-      const items = library.items.filter((current) => current.id !== input.id);
-      return { next: { version: 1, items }, result: found };
+      const stale = quarantined.find((entry) => entry.id === input.id);
+      if (!found && !stale) return { next: null, result: null };
+      const rawKind = stale && isRecord(stale.raw) ? stale.raw['kind'] : undefined;
+      return {
+        next: {
+          items: library.items.filter((current) => current.id !== input.id),
+          quarantined: quarantined.filter((entry) => entry.id !== input.id),
+        },
+        result: { skillId: skillIdToRemove({ id: input.id, kind: found?.kind ?? rawKind }) },
+      };
     },
     beforeWrite: async ({ result, backupDir }) => {
-      if (result?.kind === 'skill')
-        await backupSkillDir({ root: input.root, id: result.id, backupDir });
+      if (result?.skillId)
+        await backupSkillDir({ root: input.root, id: result.skillId, backupDir });
     },
   });
-  if (!removedItem) return { removed: false };
-  if (removedItem.kind === 'skill') {
-    await rm(skillDir(input.root, removedItem.id), { recursive: true, force: true });
+  if (!removal) return { removed: false };
+  if (removal.skillId) {
+    await rm(skillDir(input.root, removal.skillId), { recursive: true, force: true });
   }
   return { removed: true };
 }
@@ -239,7 +284,7 @@ export async function setLibraryItemEnabled(input: {
   return mutateLibrary({
     root: input.root,
     at,
-    update: (library) => {
+    update: ({ library, quarantined }) => {
       const found = library.items.find((current) => current.id === input.id);
       if (!found) throw new LibraryItemNotFoundError(input.id);
       const updated: LibraryItem = {
@@ -247,7 +292,7 @@ export async function setLibraryItemEnabled(input: {
         enabled: input.enabled,
         updatedAt: at.toISOString(),
       };
-      return { next: { version: 1, items: upsertItem(library.items, updated) }, result: updated };
+      return { next: { items: upsertItem(library.items, updated), quarantined }, result: updated };
     },
   });
 }
