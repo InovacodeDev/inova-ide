@@ -2,7 +2,10 @@ import { useRef, useState } from 'react';
 import type { ProviderId } from '@inova/core/types';
 import {
   CloseIcon,
+  EyeIcon,
   GitBranchIcon,
+  MaximizeIcon,
+  MinimizeIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   PencilIcon,
@@ -27,7 +30,11 @@ interface SessionHeaderProps {
   status: SessionStatus | null;
   exited?: boolean;
   detailsCollapsed?: boolean;
+  fileViewerOpen?: boolean;
+  fileViewerMaximized?: boolean;
   onToggleDetails?: () => void;
+  onToggleFileViewer?: () => void;
+  onToggleFileViewerMaximized?: () => void;
   onRename?: (title: string) => void;
   onInspectWorktree?: () => void;
   onApplyWorktree?: () => void;
@@ -49,7 +56,11 @@ export function SessionHeader(props: SessionHeaderProps) {
     status,
     exited,
     detailsCollapsed = false,
+    fileViewerOpen = false,
+    fileViewerMaximized = false,
     onToggleDetails,
+    onToggleFileViewer,
+    onToggleFileViewerMaximized,
     onRename,
     onInspectWorktree,
     onApplyWorktree,
@@ -226,6 +237,38 @@ export function SessionHeader(props: SessionHeaderProps) {
             ) : (
               <PanelRightCloseIcon size={15} />
             )}
+          </button>
+        ) : null}
+        {onToggleFileViewer ? (
+          <button
+            type="button"
+            className={fileViewerOpen ? 'icon-btn icon-btn-active' : 'icon-btn'}
+            aria-label={t('sessionHeader.toggleFileViewer')}
+            aria-pressed={fileViewerOpen}
+            data-tooltip={t('sessionHeader.toggleFileViewer')}
+            onClick={onToggleFileViewer}
+          >
+            <EyeIcon size={15} />
+          </button>
+        ) : null}
+        {onToggleFileViewerMaximized ? (
+          <button
+            type="button"
+            className={fileViewerMaximized ? 'icon-btn icon-btn-active' : 'icon-btn'}
+            aria-label={
+              fileViewerMaximized
+                ? t('sessionHeader.restoreFileViewer')
+                : t('sessionHeader.maximizeFileViewer')
+            }
+            aria-pressed={fileViewerMaximized}
+            data-tooltip={
+              fileViewerMaximized
+                ? t('sessionHeader.restoreFileViewer')
+                : t('sessionHeader.maximizeFileViewer')
+            }
+            onClick={onToggleFileViewerMaximized}
+          >
+            {fileViewerMaximized ? <MinimizeIcon size={15} /> : <MaximizeIcon size={15} />}
           </button>
         ) : null}
         <button

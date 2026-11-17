@@ -28,7 +28,13 @@ import type {
 } from '@inova/core/types';
 import { UsageError } from '@inova/core/usage';
 import { ATTACHMENT_KINDS, SESSION_EXPIRED_USAGE_MESSAGE } from '../shared/api.js';
-import type { AttachmentKind, Result } from '../shared/api.js';
+import type {
+  AttachmentKind,
+  FilePreviewSource,
+  OpenFilePathInput,
+  ReadFilePreviewInput,
+  Result,
+} from '../shared/api.js';
 
 const MAX_TEXT = 255;
 const MAX_PATH = 4096;
@@ -110,6 +116,49 @@ function isSafeId(value: unknown): value is string {
     !value.includes('\\') &&
     !value.includes('\0')
   );
+}
+
+function isFilePreviewSource(value: unknown): value is FilePreviewSource {
+  return value === 'project' || value === 'user-drop' || value === 'picker';
+}
+
+function parseFilePreviewInput(
+  input: unknown,
+): { path: string; source: FilePreviewSource; projectId?: string; sessionId?: string } | undefined {
+  if (!isRecord(input)) return undefined;
+  const { path, source, projectId, sessionId } = input;
+  if (!isFilePreviewSource(source)) return undefined;
+  if (
+    typeof path !== 'string' ||
+    path.length === 0 ||
+    path.length > MAX_PATH ||
+    path.includes('\0')
+  ) {
+    return undefined;
+  }
+  if (source !== 'project' && !isAbsolute(path)) {
+    return undefined;
+  }
+  if (projectId !== undefined && !isSafeId(projectId)) {
+    return undefined;
+  }
+  if (sessionId !== undefined && !isSafeId(sessionId)) {
+    return undefined;
+  }
+  return {
+    path,
+    source,
+    ...(projectId === undefined ? {} : { projectId }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+  };
+}
+
+export function parseReadFilePreview(input: unknown): ReadFilePreviewInput | undefined {
+  return parseFilePreviewInput(input);
+}
+
+export function parseOpenFilePath(input: unknown): OpenFilePathInput | undefined {
+  return parseFilePreviewInput(input);
 }
 
 export function parseProjectRef(input: unknown): { projectId: string } | undefined {

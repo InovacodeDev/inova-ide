@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   buildCommandPaletteItems,
+  buildViewerPaletteActions,
   filterCommandPaletteItems,
   groupCommandPaletteItems,
   moveCommandPaletteIndex,
@@ -117,5 +118,35 @@ describe('command-palette-state', () => {
     expect(moveCommandPaletteIndex({ current: 0, total: 3, delta: -1 })).toBe(2);
     expect(moveCommandPaletteIndex({ current: 2, total: 3, delta: 1 })).toBe(0);
     expect(moveCommandPaletteIndex({ current: 1, total: 3, delta: 1 })).toBe(2);
+  });
+
+  test('buildViewerPaletteActions generates toggle and open file actions based on open state', () => {
+    const actionsClosed = buildViewerPaletteActions({ open: false, locale: 'pt-BR' });
+    expect(actionsClosed).toHaveLength(2);
+    expect(actionsClosed[0]?.id).toBe('action:toggle-file-viewer');
+    expect(actionsClosed[0]?.title).toBe('Abrir leitor de arquivos');
+    expect(actionsClosed[1]?.id).toBe('action:open-file-viewer');
+    expect(actionsClosed[1]?.title).toBe('Abrir arquivo no leitor');
+
+    const actionsOpen = buildViewerPaletteActions({ open: true, locale: 'en-US' });
+    expect(actionsOpen[0]?.title).toBe('Close file viewer');
+    expect(actionsOpen[1]?.title).toBe('Open file in viewer');
+  });
+
+  test('buildCommandPaletteItems includes file viewer actions when fileViewer option is provided', () => {
+    const items = buildCommandPaletteItems({
+      actions: [],
+      sessions: [],
+      projects: [],
+      models: [],
+      modes: [],
+      fileViewer: { open: false },
+    });
+    const viewerActions = items.filter(
+      (item) => item.id === 'action:toggle-file-viewer' || item.id === 'action:open-file-viewer',
+    );
+    expect(viewerActions).toHaveLength(2);
+    expect(viewerActions[0]?.title).toBe('Abrir leitor de arquivos');
+    expect(viewerActions[1]?.title).toBe('Abrir arquivo no leitor');
   });
 });

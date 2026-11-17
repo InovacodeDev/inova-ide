@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { appendFile, mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 import { AccountError, addAccount, findAccount, removeAccount } from '@inova/core/accounts';
 import type {
   ChatEvent,
@@ -125,6 +125,7 @@ import type {
   ExternalSessionView,
   FailoverEvent,
   LoginEvent,
+  OpenFilePathInput,
   PickedAttachment,
   ProjectView,
   Result,
@@ -134,7 +135,10 @@ import type {
 } from '../shared/api.js';
 import { parseTranscriptLine } from './chat.js';
 import type { ChatRunner } from './chat.js';
+import { readFilePreviewContent } from './file-preview.js';
 import { createLoginFlowManager } from './login-flow.js';
+import { isInsideRoot } from './preview-protocol.js';
+import type { PreviewRegistry } from './preview-protocol.js';
 import type { SessionManager } from './sessions.js';
 import { findBinary } from './shell-env.js';
 import { createTurnQueue } from './turn-queue.js';
@@ -158,10 +162,12 @@ import {
   parseMessage,
   parseNewAccount,
   parseNewSession,
+  parseOpenFilePath,
   parsePath,
   parsePreviewProfileSync,
   parseProjectRef,
   parseProjectVerification,
+  parseReadFilePreview,
   parseRemoval,
   parseResolveComparison,
   parseRestoreCheckpoint,
@@ -204,6 +210,8 @@ export interface HandlerDeps {
   capabilityAdapters?: Record<ProviderId, CapabilityAdapter>;
   pickFolder: () => Promise<string | null>;
   pickAttachments: (kind: AttachmentKind) => Promise<PickedAttachment[]>;
+  pickViewerFiles?: () => Promise<string[]>;
+  previewRegistry?: PreviewRegistry;
 }
 
 const DEFAULT_TITLES: ReadonlySet<string> = new Set(['Nova sessão', 'Subsessão']);
@@ -333,6 +341,87 @@ export function createHandlers(deps: HandlerDeps) {
   const streamUsage = new Map<string, UsageSnapshot>();
   const modelsCache = new Map<string, ProviderModels>();
   const capabilityCache = new Map<string, CapabilityListing>();
+  const pickerAllowlist = new Set<string>();
+
+  async function authorizeFilePath(parsed: OpenFilePathInput): Promise<Result<string>> {
+    let resolvedTarget: string;
+
+    if (parsed.source === 'project') {
+      const store = await loadStore(deps.root);
+      if (!parsed.projectId) {
+        return fail('Projeto não especificado.');
+      }
+      const project = store.projects.find((item) => item.id === parsed.projectId);
+      if (!project) {
+        return fail('Projeto não encontrado.');
+      }
+      const session = parsed.sessionId
+        ? sessionsOf(store).find(
+            (item) => item.id === parsed.sessionId && item.projectId === project.id,
+          )
+        : undefined;
+      const cwd = session ? effectiveCwd(session, project) : project.path;
+      const allowedRoots = session
+        ? [effectiveCwd(session, project), project.path]
+        : [project.path];
+      const targetPath = isAbsolute(parsed.path) ? parsed.path : resolve(cwd, parsed.path);
+
+      try {
+        resolvedTarget = await realpath(targetPath);
+      } catch {
+        return fail('Arquivo não encontrado.');
+      }
+
+      let isAllowed = false;
+      for (const root of allowedRoots) {
+        try {
+          const realRoot = await realpath(root);
+          if (isInsideRoot(realRoot, resolvedTarget)) {
+            isAllowed = true;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      if (!isAllowed) {
+        return fail('Acesso negado: o arquivo está fora da pasta do projeto.');
+      }
+    } else if (parsed.source === 'picker') {
+      if (!isAbsolute(parsed.path)) {
+        return fail('Caminho deve ser absoluto para seleção externa.');
+      }
+      try {
+        resolvedTarget = await realpath(parsed.path);
+      } catch {
+        return fail('Arquivo não encontrado.');
+      }
+      if (!pickerAllowlist.has(parsed.path) && !pickerAllowlist.has(resolvedTarget)) {
+        return fail('Arquivo não autorizado pelo seletor.');
+      }
+    } else {
+      if (!isAbsolute(parsed.path)) {
+        return fail('Caminho deve ser absoluto para arquivo solto.');
+      }
+      try {
+        resolvedTarget = await realpath(parsed.path);
+      } catch {
+        return fail('Arquivo não encontrado.');
+      }
+    }
+
+    try {
+      const fileStat = await stat(resolvedTarget);
+      if (!fileStat.isFile()) {
+        return fail('O caminho informado não é um arquivo regular.');
+      }
+    } catch {
+      return fail('Arquivo não encontrado.');
+    }
+
+    return ok(resolvedTarget);
+  }
 
   function newBackupRoot(): string {
     return join(
@@ -3395,5 +3484,81 @@ export function createHandlers(deps: HandlerDeps) {
           : fail('Sessão de login não encontrada ou já encerrada.'),
       ),
     cancelLogin: (sessionId: string): void => loginFlow.cancel(sessionId),
+    readFilePreview: (input: unknown) =>
+      validated(input, parseReadFilePreview, async (parsed) => {
+        const { previewRegistry } = deps;
+        const createPreviewUrl = previewRegistry
+          ? (target: { rootDir: string; filePath: string }) => previewRegistry.buildUrl(target)
+          : undefined;
+
+        if (parsed.source === 'project') {
+          const store = await loadStore(deps.root);
+          if (!parsed.projectId) {
+            return fail('Projeto não especificado.');
+          }
+          const project = store.projects.find((item) => item.id === parsed.projectId);
+          if (!project) {
+            return fail('Projeto não encontrado.');
+          }
+          const session = parsed.sessionId
+            ? sessionsOf(store).find(
+                (item) => item.id === parsed.sessionId && item.projectId === project.id,
+              )
+            : undefined;
+          const cwd = session ? effectiveCwd(session, project) : project.path;
+          const allowedRoots = session
+            ? [effectiveCwd(session, project), project.path]
+            : [project.path];
+          return readFilePreviewContent({
+            filePath: parsed.path,
+            source: 'project',
+            cwd,
+            allowedRoots,
+            ...(createPreviewUrl !== undefined ? { createPreviewUrl } : {}),
+          });
+        }
+
+        if (parsed.source === 'picker') {
+          return readFilePreviewContent({
+            filePath: parsed.path,
+            source: 'picker',
+            allowExternal: pickerAllowlist,
+            ...(createPreviewUrl !== undefined ? { createPreviewUrl } : {}),
+          });
+        }
+
+        return readFilePreviewContent({
+          filePath: parsed.path,
+          source: 'user-drop',
+          ...(createPreviewUrl !== undefined ? { createPreviewUrl } : {}),
+        });
+      }),
+    pickViewerFiles: async () => {
+      if (!deps.pickViewerFiles) return ok([]);
+      const paths = await deps.pickViewerFiles();
+      for (const selected of paths) {
+        pickerAllowlist.add(selected);
+        try {
+          const canonical = await realpath(selected);
+          pickerAllowlist.add(canonical);
+        } catch {}
+      }
+      return ok(paths);
+    },
+    openFilePath: (input: unknown) =>
+      validated(input, parseOpenFilePath, async (parsed) => {
+        const authResult = await authorizeFilePath(parsed);
+        if (!authResult.ok) return authResult;
+        if (!deps.openPath) {
+          return fail('Abertura externa de arquivos não configurada.');
+        }
+        try {
+          await deps.openPath(authResult.value);
+          return ok(null);
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Falha ao abrir arquivo.';
+          return fail(message);
+        }
+      }),
   };
 }

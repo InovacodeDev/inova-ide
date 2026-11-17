@@ -152,6 +152,7 @@ export interface ChatViewProps {
   composerSeed?: string | null;
   onComposerSeedApplied?: () => void;
   onPinNote?: (note: string) => void;
+  onOpenFile?: (path: string) => void;
   onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
 }
@@ -161,7 +162,13 @@ const NEAR_BOTTOM_PX = 80;
 const NO_ACTIVE_FORMATS: ReadonlySet<ComposerFormat> = new Set();
 const FILE_SEARCH_DEBOUNCE_MS = 80;
 
-function ThinkingCard({ item }: { item: Extract<ChatItem, { type: 'thinking' }> }) {
+function ThinkingCard({
+  item,
+  onOpenFile,
+}: {
+  item: Extract<ChatItem, { type: 'thinking' }>;
+  onOpenFile?: (path: string) => void;
+}) {
   const { t } = useI18n();
   const first =
     item.text
@@ -191,7 +198,7 @@ function ThinkingCard({ item }: { item: Extract<ChatItem, { type: 'thinking' }> 
         ) : null}
       </summary>
       <div className="chat-tool-body chat-thinking-body">
-        <Markdown text={item.text} streaming={item.streaming} />
+        <Markdown text={item.text} streaming={item.streaming} onOpenFile={onOpenFile} />
       </div>
     </details>
   );
@@ -431,6 +438,7 @@ interface MessageProps {
   onResumeQueue?: () => void;
   onClearAndContinue?: () => void;
   onCompactAndContinue?: () => void;
+  onOpenFile?: (path: string) => void;
 }
 
 interface AgentMetaProps {
@@ -553,6 +561,7 @@ function Message({
   onResumeQueue,
   onClearAndContinue,
   onCompactAndContinue,
+  onOpenFile,
 }: MessageProps) {
   const { t, locale } = useI18n();
   const label = showAgentLabel ? <AgentLabel provider={provider} /> : null;
@@ -633,7 +642,7 @@ function Message({
         <div className="chat-row chat-row-assistant">
           {label}
           <div>
-            <Markdown text={item.text} streaming={item.streaming} />
+            <Markdown text={item.text} streaming={item.streaming} onOpenFile={onOpenFile} />
             {item.streaming ? <span className="chat-caret" aria-hidden="true" /> : null}
           </div>
           {agentMeta}
@@ -643,14 +652,19 @@ function Message({
       return (
         <div className="chat-row">
           {label}
-          <ToolCard item={item} defaultOpen={isLatestTurn} onCopyText={onCopyText} />
+          <ToolCard
+            item={item}
+            defaultOpen={isLatestTurn}
+            onCopyText={onCopyText}
+            onOpenFile={onOpenFile}
+          />
         </div>
       );
     case 'thinking':
       return (
         <div className="chat-row">
           {label}
-          <ThinkingCard item={item} />
+          <ThinkingCard item={item} onOpenFile={onOpenFile} />
         </div>
       );
     case 'checkpoint':
@@ -960,6 +974,7 @@ export function ChatView({
   composerSeed = null,
   onComposerSeedApplied,
   onPinNote,
+  onOpenFile,
   onSend,
   onCancel,
 }: ChatViewProps) {
@@ -1400,6 +1415,7 @@ export function ChatView({
         onResumeQueue={onResumeQueue}
         onClearAndContinue={readOnly ? undefined : onClearAndContinue}
         onCompactAndContinue={readOnly ? undefined : onCompactAndContinue}
+        onOpenFile={onOpenFile}
         onFixVerification={(fixPrompt) => {
           if (!running && !readOnly) onSend(fixPrompt, grantedDirs);
         }}

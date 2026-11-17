@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, expect, test, vi } from 'vitest';
 import { addAccount } from '@inova/core/accounts';
@@ -20,6 +20,7 @@ import type { ChatRunner } from '../src/main/chat.js';
 import { createHandlers, isExternalWebUrl } from '../src/main/handlers.js';
 import type { HandlerDeps } from '../src/main/handlers.js';
 import type { SessionManager } from '../src/main/sessions.js';
+import { createPreviewRegistry } from '../src/main/preview-protocol.js';
 import type { FailoverEvent, LoginEvent, Result } from '../src/shared/api.js';
 
 const INVALID = { ok: false, message: 'Entrada inválida.' };
@@ -48,6 +49,8 @@ async function setup(
     home?: string;
     withOpenPath?: boolean;
     capabilityAdapters?: HandlerDeps['capabilityAdapters'];
+    pickViewerFiles?: () => Promise<string[]>;
+    previewRegistry?: HandlerDeps['previewRegistry'];
   } = {},
 ) {
   const root = await tmp();
@@ -129,6 +132,8 @@ async function setup(
     baseEnv: async () => baseEnv,
     pickFolder: async () => '/picked',
     pickAttachments: async (kind) => [{ path: `/picked/${kind}`, isDirectory: kind === 'any' }],
+    ...(options.pickViewerFiles === undefined ? {} : { pickViewerFiles: options.pickViewerFiles }),
+    ...(options.previewRegistry === undefined ? {} : { previewRegistry: options.previewRegistry }),
   });
   createdHandlers.push(handlers);
   return {
@@ -3564,5 +3569,199 @@ test('tracks cumulative USD cost and tokens per session, preserves across clear/
     outputTokens: 10,
     cacheReadTokens: 100,
     cacheWriteTokens: 0,
+  });
+});
+
+test('readFilePreview validates input and enforces project, picker, and drop boundaries', async () => {
+  const previewRegistry = createPreviewRegistry();
+  const externalFile = join(await tmp(), 'external.txt');
+  await writeFile(externalFile, 'conteúdo externo', 'utf-8');
+
+  const { root, handlers } = await setup({
+    previewRegistry,
+    pickViewerFiles: async () => [externalFile],
+  });
+  const { project, session } = await seedSession(root);
+
+  const projectHtml = join(project.path, 'index.html');
+  await writeFile(projectHtml, '<h1>Título</h1>', 'utf-8');
+
+  expect(await handlers.readFilePreview(null)).toEqual(INVALID);
+  expect(await handlers.readFilePreview({ path: 'index.html', source: 'invalid' })).toEqual(
+    INVALID,
+  );
+
+  const missingProject = await handlers.readFilePreview({
+    path: 'index.html',
+    source: 'project',
+  });
+  expect(missingProject).toEqual({ ok: false, message: 'Projeto não especificado.' });
+
+  const unknownProject = await handlers.readFilePreview({
+    path: 'index.html',
+    projectId: 'p-inexistente',
+    source: 'project',
+  });
+  expect(unknownProject).toEqual({ ok: false, message: 'Projeto não encontrado.' });
+
+  const validPreview = unwrap(
+    await handlers.readFilePreview({
+      path: 'index.html',
+      projectId: project.id,
+      sessionId: session.id,
+      source: 'project',
+    }),
+  );
+  expect(validPreview.kind).toBe('html');
+  expect(validPreview.resolvedPath).toBe(projectHtml);
+  if (validPreview.kind === 'html') {
+    expect(validPreview.content).toBe('<h1>Título</h1>');
+    expect(validPreview.previewUrl).toMatch(/^inova-preview:\/\/view\/[0-9a-f-]+\/index\.html$/);
+  }
+
+  const traversalResult = await handlers.readFilePreview({
+    path: relative(project.path, externalFile),
+    projectId: project.id,
+    source: 'project',
+  });
+  expect(traversalResult).toEqual({
+    ok: false,
+    message: 'Acesso negado: o arquivo está fora da pasta do projeto.',
+  });
+
+  const unauthorizedPicker = await handlers.readFilePreview({
+    path: externalFile,
+    source: 'picker',
+  });
+  expect(unauthorizedPicker).toEqual({
+    ok: false,
+    message: 'Arquivo não autorizado pelo seletor.',
+  });
+
+  const pickedPaths = unwrap(await handlers.pickViewerFiles());
+  expect(pickedPaths).toEqual([externalFile]);
+
+  const authorizedPicker = unwrap(
+    await handlers.readFilePreview({
+      path: externalFile,
+      source: 'picker',
+    }),
+  );
+  expect(authorizedPicker.kind).toBe('text');
+  expect(authorizedPicker.resolvedPath).toBe(externalFile);
+
+  const droppedFile = join(await tmp(), 'dropped.md');
+  await writeFile(droppedFile, '# Documento', 'utf-8');
+
+  const droppedPreview = unwrap(
+    await handlers.readFilePreview({
+      path: droppedFile,
+      source: 'user-drop',
+    }),
+  );
+  expect(droppedPreview.kind).toBe('markdown');
+  expect(droppedPreview.resolvedPath).toBe(droppedFile);
+
+  const missingDrop = await handlers.readFilePreview({
+    path: join(await tmp(), 'missing.txt'),
+    source: 'user-drop',
+  });
+  expect(missingDrop).toEqual({
+    ok: false,
+    message: 'Arquivo não encontrado.',
+  });
+});
+
+test('pickViewerFiles returns empty list when unconfigured', async () => {
+  const { handlers } = await setup();
+  expect(await handlers.pickViewerFiles()).toEqual({ ok: true, value: [] });
+});
+
+test('openFilePath enforces origin boundaries and opens regular files', async () => {
+  const outsideRoot = await tmp();
+  const pickedFile = join(outsideRoot, 'picked.txt');
+  await writeFile(pickedFile, 'conteúdo', 'utf-8');
+
+  const droppedFile = join(outsideRoot, 'dropped.txt');
+  await writeFile(droppedFile, 'conteúdo', 'utf-8');
+
+  const { root, handlers, openPath } = await setup({
+    pickViewerFiles: async () => [pickedFile],
+  });
+  const { project, session } = await seedSession(root);
+
+  const projectFile = join(project.path, 'main.ts');
+  await writeFile(projectFile, 'console.log("main");', 'utf-8');
+
+  expect(await handlers.openFilePath(null)).toEqual(INVALID);
+
+  const traversalResult = await handlers.openFilePath({
+    path: relative(project.path, pickedFile),
+    projectId: project.id,
+    source: 'project',
+  });
+  expect(traversalResult).toEqual({
+    ok: false,
+    message: 'Acesso negado: o arquivo está fora da pasta do projeto.',
+  });
+
+  const projectOpen = await handlers.openFilePath({
+    path: 'main.ts',
+    projectId: project.id,
+    sessionId: session.id,
+    source: 'project',
+  });
+  expect(projectOpen).toEqual({ ok: true, value: null });
+  expect(openPath).toHaveBeenCalledWith(projectFile);
+
+  const unpickedOpen = await handlers.openFilePath({
+    path: pickedFile,
+    source: 'picker',
+  });
+  expect(unpickedOpen).toEqual({
+    ok: false,
+    message: 'Arquivo não autorizado pelo seletor.',
+  });
+
+  unwrap(await handlers.pickViewerFiles());
+
+  const pickedOpen = await handlers.openFilePath({
+    path: pickedFile,
+    source: 'picker',
+  });
+  expect(pickedOpen).toEqual({ ok: true, value: null });
+  expect(openPath).toHaveBeenCalledWith(pickedFile);
+
+  const droppedOpen = await handlers.openFilePath({
+    path: droppedFile,
+    source: 'user-drop',
+  });
+  expect(droppedOpen).toEqual({ ok: true, value: null });
+  expect(openPath).toHaveBeenCalledWith(droppedFile);
+
+  const missingOpen = await handlers.openFilePath({
+    path: join(outsideRoot, 'not-exists.txt'),
+    source: 'user-drop',
+  });
+  expect(missingOpen).toEqual({
+    ok: false,
+    message: 'Arquivo não encontrado.',
+  });
+});
+
+test('openFilePath fails gracefully when openPath is not configured', async () => {
+  const { root, handlers } = await setup({ withOpenPath: false });
+  const { project } = await seedSession(root);
+  const file = join(project.path, 'test.txt');
+  await writeFile(file, 'teste', 'utf-8');
+
+  const result = await handlers.openFilePath({
+    path: 'test.txt',
+    projectId: project.id,
+    source: 'project',
+  });
+  expect(result).toEqual({
+    ok: false,
+    message: 'Abertura externa de arquivos não configurada.',
   });
 });

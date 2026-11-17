@@ -12,6 +12,9 @@ function subscribe<T>(channel: string, callback: (payload: T) => void): () => vo
 }
 
 const api: InovaApi = {
+  readFilePreview: (input) => ipcRenderer.invoke(CHANNELS.readFilePreview, input),
+  pickViewerFiles: () => ipcRenderer.invoke(CHANNELS.pickViewerFiles),
+  openFilePath: (input) => ipcRenderer.invoke(CHANNELS.openFilePath, input),
   listAccounts: () => ipcRenderer.invoke(CHANNELS.listAccounts),
   addAccount: (input) => ipcRenderer.invoke(CHANNELS.addAccount, input),
   removeAccount: (input) => ipcRenderer.invoke(CHANNELS.removeAccount, input),

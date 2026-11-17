@@ -806,6 +806,7 @@
   font-size: 11px;
 }
 
+.session-git-item-preview,
 .session-git-item-revert,
 .session-diff-file-revert {
   flex: none;

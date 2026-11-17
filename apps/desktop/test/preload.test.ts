@@ -258,3 +258,17 @@ test('login calls go through invoke and send channels and pty/openLogin are abse
     approvedIds: ['mcp:a1'],
   });
 });
+
+test('file viewer calls go through invoke channels', async () => {
+  const api = await loadApi();
+  const readInput = { path: 'a.txt', source: 'project' as const };
+  void api.readFilePreview(readInput);
+  expect(electron.invoke).toHaveBeenCalledWith('inova:readFilePreview', readInput);
+
+  void api.pickViewerFiles();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:pickViewerFiles');
+
+  const openInput = { path: '/abs/a.txt', source: 'user-drop' as const };
+  void api.openFilePath(openInput);
+  expect(electron.invoke).toHaveBeenCalledWith('inova:openFilePath', openInput);
+});

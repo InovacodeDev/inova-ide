@@ -82,6 +82,9 @@ function setup() {
       'resolveComparison',
       'previewProfileSync',
       'applyProfileSync',
+      'readFilePreview',
+      'pickViewerFiles',
+      'openFilePath',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
@@ -274,6 +277,33 @@ test('chat invokes reach their handlers and openProject is gone', async () => {
   });
   expect(handlers['runVerification']).toHaveBeenCalledWith({ sessionId: 's' });
   expect(electron.invokes.has('inova:openProject')).toBe(false);
+});
+
+test('file viewer calls dispatch to handlers and reject untrusted senders', async () => {
+  const { handlers } = setup();
+  const readInput = { path: 'a.txt', source: 'project' as const };
+  const readResult = await invoke('inova:readFilePreview', trusted, readInput);
+  expect(readResult).toEqual({ ok: true, value: 'readFilePreview' });
+  expect(handlers['readFilePreview']).toHaveBeenCalledWith(readInput);
+
+  const pickResult = await invoke('inova:pickViewerFiles', trusted);
+  expect(pickResult).toEqual({ ok: true, value: 'pickViewerFiles' });
+  expect(handlers['pickViewerFiles']).toHaveBeenCalled();
+
+  const openInput = { path: '/abs/a.txt', source: 'user-drop' as const };
+  const openResult = await invoke('inova:openFilePath', trusted, openInput);
+  expect(openResult).toEqual({ ok: true, value: 'openFilePath' });
+  expect(handlers['openFilePath']).toHaveBeenCalledWith(openInput);
+
+  await expect(invoke('inova:readFilePreview', foreign, readInput)).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
+  await expect(invoke('inova:pickViewerFiles', foreign)).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
+  await expect(invoke('inova:openFilePath', foreign, openInput)).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
 });
 
 test('cancelTurn is forwarded only from a trusted sender with a string id', () => {

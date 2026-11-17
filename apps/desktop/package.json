@@ -22,7 +22,8 @@
     "pack:linux": "node scripts/package.mjs --platform linux --arch x64"
   },
   "dependencies": {
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
