@@ -6,6 +6,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Painel lateral direito de visualização de arquivos (`FileViewerPane`) redimensionável e maximizável, com múltiplas abas, drag-and-drop e seletor nativo.
+- Renderizadores somente-leitura para código e texto (com números de linha, destaque `shiki` e busca interna), Markdown, HTML isolado via protocolo `inova-preview://`, planilhas (`.xls`, `.xlsx`, `.xlsm`, `.ods`, `.csv`, `.tsv`), imagens, PDF e fallback externo.
+- Gatilhos de abertura ao clicar em links/caminhos nas respostas, cartões de ferramenta, alterações Git do inspetor e Paleta de Comandos.
+
 ### Corrigido
 
 - Detecção de CLIs no Windows quando o ambiente herdado usa a chave `Path` em vez de `PATH`, lê o `Path` do Registro do Windows (`HKCU` e `HKLM`) e inclui diretórios padrão de instalação (`.local\bin`, `pnpm`, `npm`, `WinGet\Links`, `.bun\bin`, `scoop\shims` e `.cargo\bin`).
