@@ -82,13 +82,37 @@ export function saveManaged(input: {
   names: readonly string[];
   now?: () => Date;
 }): Promise<void> {
+  return updateManaged({ ...input, next: () => input.names });
+}
+
+export function changeManaged(input: {
+  root: string;
+  targetKey: string;
+  add: readonly string[];
+  drop: readonly string[];
+  now?: () => Date;
+}): Promise<void> {
+  const { add, drop } = input;
+  return updateManaged({
+    ...input,
+    next: (current) => [...current.filter((name) => !drop.includes(name)), ...add],
+  });
+}
+
+function updateManaged(input: {
+  root: string;
+  targetKey: string;
+  next: (current: readonly string[]) => readonly string[];
+  now?: () => Date;
+}): Promise<void> {
   const { root, targetKey } = input;
   const at = (input.now ?? (() => new Date()))();
   const file = managedFile(root);
-  const names = [...new Set(input.names)].sort();
   return serialize(resolve(file), async () => {
     const current = await loadManaged(root);
-    if (managedNamesFor(current, targetKey).join('\n') === names.join('\n')) return;
+    const previous = managedNamesFor(current, targetKey);
+    const names = [...new Set(input.next(previous))].sort();
+    if (previous.join('\n') === names.join('\n')) return;
     const next: ManagedRegistry = { version: 1, mcp: { ...current.mcp, [targetKey]: names } };
     await backupManagedFile({ root, at });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });

@@ -317,7 +317,7 @@ describe('library MCP projection edges', () => {
       join(home, '.claude.json'),
       JSON.stringify({ mcpServers: { docs: { command: 'user-own' } } }),
     );
-    const library = libraryOf(mcpItem('docs'));
+    const library = { items: [mcpItem('docs'), mcpItem('older')], projectDisabled: ['older'] };
 
     const applied = await applyProfileSync({
       root,

@@ -20,12 +20,25 @@ import {
 } from './capabilities/file-edit.js';
 import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
-import { loadManaged, managedNamesFor, managedTargetKey, saveManaged } from './library/managed.js';
+import {
+  changeManaged,
+  loadManaged,
+  managedNamesFor,
+  managedTargetKey,
+} from './library/managed.js';
 import type { ManagedRegistry } from './library/managed.js';
 import { approvalKey, approvalToken } from './library/approval.js';
 import type { ApprovalMode } from './library/approval.js';
 import { codexMcpTablesText, stripCodexServerTables } from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
+import {
+  removalCandidates,
+  removalReason,
+  removeAgyServers,
+  retainedMcpNames,
+  statusWithRemoval,
+  withoutJsonServers,
+} from './library/mcp-removal.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
 import type { SkillPlanEntry } from './library/skills-projection.js';
@@ -397,11 +410,11 @@ export function formatCodexMcpToml(
 function formatCodexLibraryToml(input: {
   existingToml: string;
   servers: CanonicalMcpMap;
-  managedNames: readonly string[];
+  strippedNames: readonly string[];
 }): CodexFormatResult {
-  const { existingToml, servers, managedNames } = input;
+  const { existingToml, servers, strippedNames } = input;
   const { blocks, incompatible } = codexServerBlocks(existingToml, servers);
-  const replaced = new Set([...blocks.map((block) => block.name), ...managedNames]);
+  const replaced = new Set([...blocks.map((block) => block.name), ...strippedNames]);
   const base = stripCodexServerTables({ toml: existingToml, names: replaced });
   return { content: joinCodexSections(base, blocks), incompatible };
 }
@@ -590,6 +603,8 @@ interface PlannedTarget {
   unwrittenNames?: string[];
   managedKey?: string;
   adoptedNames?: string[];
+  removedNames?: string[];
+  prunedNames?: string[];
 }
 
 interface KeyedTarget extends Omit<PlannedTarget, 'item'> {
@@ -631,9 +646,9 @@ async function planAccountMcpTarget(input: {
   account: ProfileSyncAccountInput;
   projectPath: string;
   servers: CanonicalMcpMap;
-  managedNames?: readonly string[];
+  strippedNames?: readonly string[];
 }): Promise<PlannedTarget> {
-  const { account, projectPath, servers, managedNames } = input;
+  const { account, projectPath, servers, strippedNames } = input;
   const maskedPreview = JSON.stringify({ mcpServers: maskMcpConfig(servers) }, null, 2);
   const targetPath = mcpTargetPath(account, projectPath);
 
@@ -670,8 +685,8 @@ async function planAccountMcpTarget(input: {
     const before = (await readOptionalFile(targetPath)) ?? '';
     let formatted: CodexFormatResult;
     try {
-      formatted = managedNames
-        ? formatCodexLibraryToml({ existingToml: before, servers, managedNames })
+      formatted = strippedNames
+        ? formatCodexLibraryToml({ existingToml: before, servers, strippedNames })
         : formatCodexMcpToml(before, servers);
     } catch (error: unknown) {
       if (!(error instanceof CapabilityFileError)) throw error;
@@ -865,7 +880,8 @@ function annotateLibraryTarget(input: {
   let status = item.status;
   if (projection.unverifiedNames.length > 0) {
     notes.push(libraryExclusionReason(projection.unverifiedNames));
-    if (Object.keys(projection.servers).length === 0) status = 'incompatible';
+    const removes = (planned.removedNames ?? []).length > 0;
+    if (Object.keys(projection.servers).length === 0 && !removes) status = 'incompatible';
   }
   const writable = (status === 'create' || status === 'update') && item.provider !== 'gemini';
   const entries = writable
@@ -970,11 +986,20 @@ async function planLibraryAccountTarget(input: {
     targetPath: mcpTargetPath(account, projectPath),
   });
   const managedNames = managedNamesFor(managed, managedKey);
+  const candidates = removalCandidates({
+    managedNames,
+    retained: retainedMcpNames({
+      library,
+      projectServers,
+      accountDisabled: account.disabledCapabilities ?? [],
+      provider: account.provider,
+    }),
+  });
   const planned = await planAccountMcpTarget({
     account,
     projectPath,
     servers: projected.servers,
-    managedNames,
+    strippedNames: candidates,
   });
   const unwritten = planned.unwrittenNames ?? [];
   const projection = {
@@ -982,11 +1007,54 @@ async function planLibraryAccountTarget(input: {
     libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
   };
   const annotated = annotateLibraryTarget({
-    planned: { ...planned, managedKey },
+    planned: withMcpRemoval({ planned: { ...planned, managedKey }, candidates }),
     projection,
     managedNames,
   });
   return { planned: withLibraryView(annotated), projection };
+}
+
+function splitRemoval(input: {
+  planned: PlannedTarget;
+  candidates: readonly string[];
+}): { removed: string[]; pruned: string[] } | null {
+  const { planned, candidates } = input;
+  const { provider } = planned.item;
+  if (provider === 'gemini') return { removed: [...candidates], pruned: [] };
+  if (planned.rawBefore === undefined || planned.rawAfter === undefined) return null;
+  const present = targetMcpEntries({ provider, raw: planned.rawBefore }).names;
+  return {
+    removed: candidates.filter((name) => present.has(name)),
+    pruned: candidates.filter((name) => !present.has(name)),
+  };
+}
+
+function withMcpRemoval(input: {
+  planned: PlannedTarget;
+  candidates: readonly string[];
+}): PlannedTarget {
+  const { planned } = input;
+  const split = splitRemoval(input);
+  if (split === null) return planned;
+  const { removed, pruned } = split;
+  if (removed.length === 0) return { ...planned, prunedNames: pruned };
+  const { item, rawAfter } = planned;
+  const rawWithout =
+    rawAfter === undefined || item.provider === 'codex'
+      ? rawAfter
+      : withoutJsonServers({
+          raw: rawAfter,
+          key: item.provider === 'opencode' ? 'mcp' : 'mcpServers',
+          names: removed,
+        });
+  const reason = [item.reason, removalReason(removed)].filter(Boolean).join(' ');
+  return {
+    ...planned,
+    ...(rawWithout === undefined ? {} : { rawAfter: rawWithout }),
+    removedNames: removed,
+    prunedNames: pruned,
+    item: { ...item, status: statusWithRemoval(item.status), reason },
+  };
 }
 
 function libraryMcpView(input: { provider: ProviderId; raw: string }): string {
@@ -1044,7 +1112,8 @@ async function planProfileTargets(input: {
       library: input.library,
       managed,
     });
-    targets.push(withApprovalKey({ planned, fallbackAfter: JSON.stringify(projection.servers) }));
+    const fallbackAfter = JSON.stringify([projection.servers, planned.removedNames ?? []]);
+    targets.push(withApprovalKey({ planned, fallbackAfter }));
     projections.set(account.id, projection);
   }
 
@@ -1176,17 +1245,21 @@ export async function applyProfileSync(input: {
     ...(input.scopes ? { scopes: input.scopes } : {}),
   });
   const recordManaged = async (
-    targetKey: string | undefined,
-    names: readonly string[],
+    planned: KeyedTarget,
+    change: { add: readonly string[]; drop: readonly string[] },
   ): Promise<void> => {
-    if (!input.library || targetKey === undefined || names.length === 0) return;
-    await saveManaged({
+    const targetKey = planned.managedKey;
+    if (!input.library || targetKey === undefined) return;
+    if (change.add.length === 0 && change.drop.length === 0) return;
+    await changeManaged({
       root: input.root,
       targetKey,
-      names: [...managedNamesFor(managed, targetKey), ...names],
+      ...change,
       ...(input.now ? { now: input.now } : {}),
     });
   };
+  const pruneManaged = (planned: KeyedTarget): Promise<void> =>
+    recordManaged(planned, { add: [], drop: planned.prunedNames ?? [] });
 
   const appliedIds: string[] = [];
   const skippedIds: string[] = [];
@@ -1196,11 +1269,13 @@ export async function applyProfileSync(input: {
   for (const planned of targets) {
     const { item } = planned;
     if (item.status === 'unchanged' || item.status === 'incompatible') {
+      await pruneManaged(planned);
       skippedIds.push(item.id);
       continue;
     }
     const isApproved = approved.has(approvalToken({ mode: input.approvals, item }));
     if ((item.status === 'update' || item.status === 'conflict') && !isApproved) {
+      await pruneManaged(planned);
       skippedIds.push(item.id);
       continue;
     }
@@ -1229,6 +1304,13 @@ export async function applyProfileSync(input: {
       const libraryNames = new Set(projection?.libraryNames ?? []);
       const managedNames =
         planned.managedKey === undefined ? [] : managedNamesFor(managed, planned.managedKey);
+      const removal = await removeAgyServers({
+        runner: input.runner,
+        env,
+        names: planned.removedNames ?? [],
+        listed: listedNames,
+      });
+      if (removal.failed) okAll = false;
       const writtenLibraryNames: string[] = [];
       for (const [name, server] of Object.entries(projection?.servers ?? {})) {
         const built = buildAgyMcpAddArgs(name, server);
@@ -1254,7 +1336,7 @@ export async function applyProfileSync(input: {
           if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
-      await recordManaged(planned.managedKey, writtenLibraryNames);
+      await recordManaged(planned, { add: writtenLibraryNames, drop: removal.dropped });
       if (okAll) appliedIds.push(item.id);
       else skippedIds.push(item.id);
       continue;
@@ -1283,7 +1365,12 @@ export async function applyProfileSync(input: {
     }
 
     await writeSerialized(planned.rawPath, planned.rawAfter);
-    if (item.scope === 'mcp') await recordManaged(planned.managedKey, planned.adoptedNames ?? []);
+    if (item.scope === 'mcp') {
+      await recordManaged(planned, {
+        add: planned.adoptedNames ?? [],
+        drop: [...(planned.removedNames ?? []), ...(planned.prunedNames ?? [])],
+      });
+    }
     appliedIds.push(item.id);
   }
 
