@@ -24,7 +24,7 @@ const STATUS_ICONS: Record<StatusIcon, ReactElement> = {
 interface LibrarySyncItemProps {
   item: ProfileSyncItem;
   approved: boolean;
-  onToggle: (id: string) => void;
+  onToggle: (approvalKey: string) => void;
 }
 
 function showsDiff(status: string): boolean {
@@ -49,7 +49,7 @@ export function LibrarySyncItem({ item, approved, onToggle }: LibrarySyncItemPro
               type="checkbox"
               checked={approved}
               aria-label={`${t('library.sync.approve')}: ${item.targetPath}`}
-              onChange={() => onToggle(item.id)}
+              onChange={() => onToggle(item.approvalKey)}
             />
             <span>{t('library.sync.approve')}</span>
           </label>

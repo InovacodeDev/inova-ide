@@ -369,11 +369,11 @@ describe('sync selection', () => {
 
   test('counts creates as automatic and approvals as explicit', () => {
     const items = [
-      { id: 'c', status: 'create' },
-      { id: 'u', status: 'update' },
-      { id: 'k', status: 'conflict' },
-      { id: 'r', status: 'remove' },
-      { id: 'i', status: 'incompatible' },
+      { id: 'c', status: 'create', approvalKey: 'c' },
+      { id: 'u', status: 'update', approvalKey: 'u' },
+      { id: 'k', status: 'conflict', approvalKey: 'k' },
+      { id: 'r', status: 'remove', approvalKey: 'r' },
+      { id: 'i', status: 'incompatible', approvalKey: 'i' },
     ];
     expect(selectionSummary({ items, approvedIds: ['u'] })).toEqual({
       autoCount: 1,
@@ -385,8 +385,8 @@ describe('sync selection', () => {
 
   test('deduplicates repeated approvals and ignores ids outside the preview', () => {
     const items = [
-      { id: 'u', status: 'update' },
-      { id: 'u', status: 'update' },
+      { id: 'u', status: 'update', approvalKey: 'u' },
+      { id: 'u', status: 'update', approvalKey: 'u' },
     ];
     expect(applyableIds({ items, approvedIds: ['u', 'u', 'ghost'] })).toEqual(['u']);
     expect(selectionSummary({ items, approvedIds: ['u', 'u'] }).pendingCount).toBe(0);
@@ -398,7 +398,7 @@ describe('sync selection', () => {
       expect(presentation).toMatchObject({ known: false, labelKey: 'library.status.unknown' });
       expect(needsApproval({ status })).toBe(false);
     }
-    const items = [{ id: 'w', status: 'weird' }];
+    const items = [{ id: 'w', status: 'weird', approvalKey: 'w' }];
     expect(selectionSummary({ items, approvedIds: ['w'] }).willApplyCount).toBe(0);
     expect(reasonText({ item: { id: 'w', status: 'weird' }, fallback: 'f' })).toBeNull();
   });

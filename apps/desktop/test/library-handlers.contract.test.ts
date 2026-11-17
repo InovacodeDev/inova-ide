@@ -227,7 +227,7 @@ describe('a sincronização da biblioteca não cria arquivos de regras', () => {
     const applied = unwrap(
       await handlers.applyLibrarySync({
         projectId: 'proj-1',
-        approvedIds: result.items.map((item) => item.id),
+        approvedIds: result.items.map((item) => item.approvalKey),
       }),
     );
     expect(applied.appliedIds.some((id) => id.startsWith('rules:'))).toBe(false);
@@ -300,7 +300,10 @@ describe('regra 8: remover da biblioteca remove só a projeção marcada, após 
     expect(await exists(join(root, 'library', 'skills', 'demo-skill'))).toBe(false);
     expect(unwrap(await handlers.listLibrary()).items).toEqual([]);
 
-    expect(statusOf(await preview(handlers), 'skill:acc-claude:demo-skill')).toBe('remove');
+    const removal = (await preview(handlers)).items.find(
+      (item) => item.id === 'skill:acc-claude:demo-skill',
+    );
+    expect(removal?.status).toBe('remove');
     expect(await exists(projected)).toBe(true);
 
     unwrap(await handlers.applyLibrarySync({ projectId: 'proj-1', approvedIds: [] }));
@@ -309,7 +312,7 @@ describe('regra 8: remover da biblioteca remove só a projeção marcada, após 
     unwrap(
       await handlers.applyLibrarySync({
         projectId: 'proj-1',
-        approvedIds: ['skill:acc-claude:demo-skill'],
+        approvedIds: [removal?.approvalKey ?? ''],
       }),
     );
     expect(await exists(projected)).toBe(false);

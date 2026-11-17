@@ -96,15 +96,16 @@ describe('approval of sync items', () => {
 
   test('applyableIds never includes an item without explicit approval', () => {
     const items = ['create', 'update', 'unchanged', 'conflict', 'incompatible', 'remove'].map(
-      (status) => ({ id: `item-${status}`, status }),
+      (status) => ({ id: `item-${status}`, status, approvalKey: `key-${status}` }),
     );
     expect(applyableIds({ items, approvedIds: [] })).toEqual([]);
-    expect(applyableIds({ items, approvedIds: ['item-conflict'] })).toEqual(['item-conflict']);
-    const everything = items.map((item) => item.id);
+    expect(applyableIds({ items, approvedIds: ['key-conflict'] })).toEqual(['key-conflict']);
+    expect(applyableIds({ items, approvedIds: ['item-conflict'] })).toEqual([]);
+    const everything = items.map((item) => item.approvalKey);
     expect(applyableIds({ items, approvedIds: everything }).sort()).toEqual([
-      'item-conflict',
-      'item-remove',
-      'item-update',
+      'key-conflict',
+      'key-remove',
+      'key-update',
     ]);
   });
 });

@@ -228,6 +228,7 @@ export function createLibraryHandlers(deps: LibraryHandlerDeps): LibraryHandlers
                 root,
                 scopes: LIBRARY_SYNC_SCOPES,
                 approvedIds,
+                approvals: 'key',
                 runner: deps.runner,
                 baseEnv: await deps.baseEnv(),
               }),

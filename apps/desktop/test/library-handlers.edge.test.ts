@@ -544,3 +544,40 @@ describe('prototype pollution e segredos', () => {
     expect(JSON.stringify(await loadStore(root))).not.toContain('plain-secret-9876');
   });
 });
+
+describe('a aprovação vale só para o estado mostrado no preview', () => {
+  async function previewedUpdate() {
+    const context = await setup();
+    const target = join(context.account.homeDir, '.claude.json');
+    await writeFile(target, JSON.stringify({ mcpServers: {} }));
+    unwrap(await context.handlers.saveLibraryItem(mcpInput('demo-mcp')));
+    const result = unwrap(await context.handlers.previewLibrarySync({ projectId: 'proj-1' }));
+    const item = result.items.find((entry) => entry.id === 'mcp:acc-claude');
+    expect(item?.status).toBe('update');
+    return { ...context, target, key: item?.approvalKey ?? '' };
+  }
+
+  test('o id puro não aprova e a chave do preview aprova', async () => {
+    const { handlers, target, key } = await previewedUpdate();
+    const apply = (approvedIds: string[]) =>
+      handlers.applyLibrarySync({ projectId: 'proj-1', approvedIds });
+
+    expect(unwrap(await apply(['mcp:acc-claude'])).skippedIds).toEqual(['mcp:acc-claude']);
+    expect(await readFile(target, 'utf8')).not.toContain('demo-mcp');
+    expect(unwrap(await apply([key])).appliedIds).toEqual(['mcp:acc-claude']);
+    expect(await readFile(target, 'utf8')).toContain('demo-mcp');
+  });
+
+  test('um alvo alterado depois do preview é pulado', async () => {
+    const { handlers, target, key } = await previewedUpdate();
+    const userOwn = JSON.stringify({ mcpServers: { 'demo-mcp': { command: 'mine' } } });
+    await writeFile(target, userOwn);
+
+    const result = unwrap(
+      await handlers.applyLibrarySync({ projectId: 'proj-1', approvedIds: [key] }),
+    );
+
+    expect(result.skippedIds).toEqual(['mcp:acc-claude']);
+    expect(await readFile(target, 'utf8')).toBe(userOwn);
+  });
+});

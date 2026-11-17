@@ -102,15 +102,19 @@ export function needsApproval(item: { status: string }): boolean {
   return APPROVAL_STATUSES.has(item.status);
 }
 
+export interface ApprovableItemLike extends SyncItemLike {
+  approvalKey: string;
+}
+
 export function applyableIds(input: {
-  items: readonly SyncItemLike[];
+  items: readonly ApprovableItemLike[];
   approvedIds: readonly string[];
 }): string[] {
   const approved = new Set(input.approvedIds);
-  const ids = input.items
-    .filter((item) => needsApproval(item) && approved.has(item.id))
-    .map((item) => item.id);
-  return [...new Set(ids)];
+  const keys = input.items
+    .filter((item) => needsApproval(item) && approved.has(item.approvalKey))
+    .map((item) => item.approvalKey);
+  return [...new Set(keys)];
 }
 
 export interface SelectionSummary {
@@ -121,13 +125,13 @@ export interface SelectionSummary {
 }
 
 export function selectionSummary(input: {
-  items: readonly SyncItemLike[];
+  items: readonly ApprovableItemLike[];
   approvedIds: readonly string[];
 }): SelectionSummary {
   const { items } = input;
   const autoCount = items.filter((item) => AUTO_STATUSES.has(item.status)).length;
   const approvedCount = applyableIds(input).length;
-  const approvalIds = new Set(items.filter(needsApproval).map((item) => item.id));
+  const approvalIds = new Set(items.filter(needsApproval).map((item) => item.approvalKey));
   const pendingCount = approvalIds.size - approvedCount;
   return { autoCount, approvedCount, pendingCount, willApplyCount: autoCount + approvedCount };
 }

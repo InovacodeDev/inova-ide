@@ -235,8 +235,8 @@ export function LibrarySyncPanel({ projects, accounts, libraryVersion }: Library
               <LibrarySyncItem
                 key={item.id}
                 item={item}
-                approved={approvedIds.includes(item.id)}
-                onToggle={(id) => setApprovedIds((current) => toggleId(current, id))}
+                approved={approvedIds.includes(item.approvalKey)}
+                onToggle={(key) => setApprovedIds((current) => toggleId(current, key))}
               />
             ))}
           </ul>

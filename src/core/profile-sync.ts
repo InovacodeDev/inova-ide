@@ -22,6 +22,8 @@ import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
 import { loadManaged, managedNamesFor, managedTargetKey, saveManaged } from './library/managed.js';
 import type { ManagedRegistry } from './library/managed.js';
+import { approvalKey, approvalToken } from './library/approval.js';
+import type { ApprovalMode } from './library/approval.js';
 import { codexMcpTablesText, stripCodexServerTables } from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
@@ -82,6 +84,7 @@ export interface ProfileSyncItem {
   reason?: string;
   maskedBefore: string;
   maskedAfter: string;
+  approvalKey: string;
 }
 
 export interface ProfileSyncPreview {
@@ -580,13 +583,29 @@ async function detectAvailableRules(projectPath: string): Promise<RulesFile[]> {
 }
 
 interface PlannedTarget {
-  item: ProfileSyncItem;
+  item: Omit<ProfileSyncItem, 'approvalKey'>;
   rawPath: string;
   rawBefore?: string;
   rawAfter?: string;
   unwrittenNames?: string[];
   managedKey?: string;
   adoptedNames?: string[];
+}
+
+interface KeyedTarget extends Omit<PlannedTarget, 'item'> {
+  item: ProfileSyncItem;
+}
+
+function withApprovalKey(input: { planned: PlannedTarget; fallbackAfter: string }): KeyedTarget {
+  const { planned, fallbackAfter } = input;
+  const { id, status } = planned.item;
+  const key = approvalKey({
+    id,
+    status,
+    before: planned.rawBefore ?? '',
+    after: planned.rawAfter ?? fallbackAfter,
+  });
+  return { ...planned, item: { ...planned.item, approvalKey: key } };
 }
 
 function mcpTargetPath(account: ProfileSyncAccountInput, projectPath: string): string {
@@ -873,7 +892,7 @@ function annotateLibraryTarget(input: {
 
 interface ProfileSyncPlan {
   preview: ProfileSyncPreview;
-  targets: PlannedTarget[];
+  targets: KeyedTarget[];
   skills: SkillPlanEntry[];
   projections: Map<string, LibraryMcpProjection>;
   managed: ManagedRegistry;
@@ -1015,7 +1034,7 @@ async function planProfileTargets(input: {
 
   const managed: ManagedRegistry =
     input.library && input.root ? await loadManaged(input.root) : { version: 1, mcp: {} };
-  const targets: PlannedTarget[] = [];
+  const targets: KeyedTarget[] = [];
   const projections = new Map<string, LibraryMcpProjection>();
   for (const account of scopes.includes('mcp') ? input.accounts : []) {
     const { planned, projection } = await planAccountTarget({
@@ -1025,7 +1044,7 @@ async function planProfileTargets(input: {
       library: input.library,
       managed,
     });
-    targets.push(planned);
+    targets.push(withApprovalKey({ planned, fallbackAfter: JSON.stringify(projection.servers) }));
     projections.set(account.id, projection);
   }
 
@@ -1041,8 +1060,9 @@ async function planProfileTargets(input: {
       const existing = await readOptionalFile(targetPath);
       const status: ProfileSyncStatus =
         existing === null ? 'create' : existing === sourceContent ? 'unchanged' : 'conflict';
-      targets.push({
+      const planned: PlannedTarget = {
         rawPath: targetPath,
+        rawBefore: existing ?? '',
         rawAfter: sourceContent,
         item: {
           id: `rules:${targetRule}`,
@@ -1056,7 +1076,8 @@ async function planProfileTargets(input: {
           maskedBefore: existing ?? '',
           maskedAfter: sourceContent,
         },
-      });
+      };
+      targets.push(withApprovalKey({ planned, fallbackAfter: '' }));
     }
   }
 
@@ -1139,6 +1160,7 @@ export async function applyProfileSync(input: {
   now?: () => Date;
   library?: ProfileSyncLibraryInput;
   scopes?: readonly ProfileSyncScope[];
+  approvals?: ApprovalMode;
 }): Promise<ProfileSyncApplyResult> {
   const timestamp = (input.now?.() ?? new Date()).toISOString().replace(/[:.]/g, '-');
   const backupDir = join(input.root, 'backups', 'profile-sync', timestamp);
@@ -1177,7 +1199,8 @@ export async function applyProfileSync(input: {
       skippedIds.push(item.id);
       continue;
     }
-    if ((item.status === 'update' || item.status === 'conflict') && !approved.has(item.id)) {
+    const isApproved = approved.has(approvalToken({ mode: input.approvals, item }));
+    if ((item.status === 'update' || item.status === 'conflict') && !isApproved) {
       skippedIds.push(item.id);
       continue;
     }
@@ -1265,7 +1288,13 @@ export async function applyProfileSync(input: {
   }
 
   for (const entry of skills) {
-    const outcome = await applySkillEntry({ root: input.root, entry, backupDir, approved });
+    const outcome = await applySkillEntry({
+      root: input.root,
+      entry,
+      backupDir,
+      approved,
+      ...(input.approvals ? { approvals: input.approvals } : {}),
+    });
     (outcome === 'applied' ? appliedIds : skippedIds).push(entry.item.id);
   }
 

@@ -8,6 +8,8 @@ import type {
   ProfileSyncStatus,
 } from '../profile-sync.js';
 import type { ProviderId } from '../types.js';
+import { approvalKey, approvalToken } from './approval.js';
+import type { ApprovalMode } from './approval.js';
 import { resolveEffectiveItems } from './effective.js';
 import {
   backupEntry,
@@ -50,6 +52,7 @@ interface ItemFacts {
   reason?: string;
   before?: string;
   after?: string;
+  state?: TargetState;
 }
 
 type TargetState =
@@ -128,8 +131,16 @@ function buildEntry(input: {
   const { account, skillId, libraryHash, facts } = input;
   const skillsDir = skillsDirOf(account);
   const targetDir = join(skillsDir, skillId);
+  const id = skillId === '' ? `skill:${account.id}` : `skill:${account.id}:${skillId}`;
+  const key = approvalKey({
+    id,
+    status: facts.status,
+    before: JSON.stringify(facts.state ?? null),
+    after: libraryHash ?? '',
+  });
   const item: ProfileSyncItem = {
-    id: skillId === '' ? `skill:${account.id}` : `skill:${account.id}:${skillId}`,
+    id,
+    approvalKey: key,
     scope: 'skill',
     provider: account.provider,
     accountId: account.id,
@@ -146,12 +157,12 @@ function buildEntry(input: {
 function projectionFacts(input: { state: TargetState; libraryHash: string }): ItemFacts {
   const { state, libraryHash } = input;
   const after = describeHash(libraryHash);
-  if (state.kind === 'missing') return { status: 'create', after };
+  if (state.kind === 'missing') return { status: 'create', after, state };
   if (state.kind === 'managed') {
     const status = state.hash === libraryHash ? 'unchanged' : 'update';
-    return { status, before: describeHash(state.hash), after };
+    return { status, before: describeHash(state.hash), after, state };
   }
-  return { status: 'conflict', reason: state.reason, after };
+  return { status: 'conflict', reason: state.reason, after, state };
 }
 
 async function planSkill(input: {
@@ -189,7 +200,7 @@ async function planRemovals(input: {
     if (retainedIds.has(skillId)) continue;
     const state = await inspectTarget({ skillsDir, skillId });
     if (state.kind !== 'managed') continue;
-    const facts: ItemFacts = { status: 'remove', before: describeHash(state.hash) };
+    const facts: ItemFacts = { status: 'remove', before: describeHash(state.hash), state };
     entries.push(buildEntry({ account, skillId, libraryHash: null, facts }));
   }
   return entries;
@@ -321,11 +332,13 @@ export async function applySkillEntry(input: {
   entry: SkillPlanEntry;
   backupDir: string;
   approved: ReadonlySet<string>;
+  approvals?: ApprovalMode;
 }): Promise<SkillApplyOutcome> {
   const { root, entry, backupDir, approved } = input;
-  const { status, id } = entry.item;
+  const { status } = entry.item;
   if (status === 'unchanged' || status === 'incompatible') return 'skipped';
-  if (status !== 'create' && !approved.has(id)) return 'skipped';
+  const token = approvalToken({ mode: input.approvals, item: entry.item });
+  if (status !== 'create' && !approved.has(token)) return 'skipped';
   try {
     return await serialize(entry.targetDir, () => executeEntry({ root, entry, backupDir }));
   } catch {
