@@ -24,6 +24,8 @@ import { loadManaged, managedNamesFor, saveManaged } from './library/managed.js'
 import type { ManagedRegistry } from './library/managed.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
+import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
+import type { SkillPlanEntry } from './library/skills-projection.js';
 import type { LibraryItem } from './library/types.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
@@ -32,7 +34,8 @@ export type RulesFile = 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md';
 
 export type RulesStrategy = 'copy' | 'symlink';
 
-export type ProfileSyncStatus = 'create' | 'update' | 'unchanged' | 'conflict' | 'incompatible';
+export type ProfileSyncStatus =
+  'create' | 'update' | 'unchanged' | 'conflict' | 'incompatible' | 'remove';
 
 export interface McpStdioServer {
   type?: 'stdio';
@@ -66,7 +69,7 @@ export interface ProfileSyncLibraryInput {
 
 export interface ProfileSyncItem {
   id: string;
-  scope: 'mcp' | 'rules';
+  scope: 'mcp' | 'rules' | 'skill';
   provider: ProviderId;
   accountId?: string;
   accountLabel?: string;
@@ -792,6 +795,7 @@ async function annotateLibraryTarget(input: {
 interface ProfileSyncPlan {
   preview: ProfileSyncPreview;
   targets: PlannedTarget[];
+  skills: SkillPlanEntry[];
   projections: Map<string, LibraryMcpProjection>;
   managed: ManagedRegistry;
 }
@@ -906,15 +910,25 @@ async function planProfileTargets(input: {
     }
   }
 
+  const skills =
+    input.library && input.root
+      ? await planSkillTargets({
+          root: input.root,
+          accounts: input.accounts,
+          library: input.library,
+        })
+      : [];
+
   return {
     preview: {
       mcpSourceExists: mcp.exists,
       mcpServerCount: Object.keys(servers).length,
       rulesSource: resolvedSource,
       availableRulesFiles,
-      items: targets.map((entry) => entry.item),
+      items: [...targets.map((entry) => entry.item), ...skills.map((entry) => entry.item)],
     },
     targets,
+    skills,
     projections,
     managed,
   };
@@ -978,7 +992,7 @@ export async function applyProfileSync(input: {
   const backupDir = join(input.root, 'backups', 'profile-sync', timestamp);
   const approved = new Set(input.approvedIds);
   const strategy = input.rulesStrategy ?? 'copy';
-  const { targets, projections, managed, preview } = await planProfileTargets({
+  const { targets, skills, projections, managed, preview } = await planProfileTargets({
     root: input.root,
     projectPath: input.projectPath,
     accounts: input.accounts,
@@ -1093,6 +1107,11 @@ export async function applyProfileSync(input: {
       await recordManaged(item.accountId, projections.get(item.accountId)?.libraryNames ?? []);
     }
     appliedIds.push(item.id);
+  }
+
+  for (const entry of skills) {
+    const outcome = await applySkillEntry({ root: input.root, entry, backupDir, approved });
+    (outcome === 'applied' ? appliedIds : skippedIds).push(entry.item.id);
   }
 
   return { backupDir, appliedIds, skippedIds };
