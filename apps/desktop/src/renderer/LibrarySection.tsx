@@ -100,7 +100,20 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
     else setRowError(result.message);
   };
 
+  const removeInvalid = async (id: string) => {
+    setPendingId(id);
+    setRowError(null);
+    const result = await libraryCall({
+      action: () => window.inova.removeLibraryItem({ id }),
+      locale,
+    });
+    setPendingId(null);
+    if (result.ok) await refresh();
+    else setRowError(result.message);
+  };
+
   const groups = listing ? groupLibraryItems(listing.items) : [];
+  const invalidItems = listing?.invalidItems ?? [];
 
   return (
     <>
@@ -139,7 +152,39 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
           {rowError}
         </p>
       ) : null}
-      {listing && groups.length === 0 ? <p className="library-hint">{t('library.empty')}</p> : null}
+      {invalidItems.length > 0 ? (
+        <SettingGroup title={t('library.invalid.title')}>
+          <p className="library-warning" role="alert">
+            {t('library.invalid.warning')}
+          </p>
+          <ul className="library-list">
+            {invalidItems.map((entry) => (
+              <li key={entry.id} className="library-row">
+                <div className="library-row-main">
+                  <div className="library-row-text">
+                    <span className="library-row-name mono">{entry.id}</span>
+                    <span className="library-row-desc">{entry.error}</span>
+                  </div>
+                  <div className="library-row-actions">
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={pendingId === entry.id}
+                      aria-label={t('library.removeAria', { name: entry.id })}
+                      onClick={() => void removeInvalid(entry.id)}
+                    >
+                      {t('library.remove')}
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </SettingGroup>
+      ) : null}
+      {listing && groups.length === 0 && invalidItems.length === 0 ? (
+        <p className="library-hint">{t('library.empty')}</p>
+      ) : null}
       {!listing && !loadError ? <p className="library-hint">{t('common.loading')}</p> : null}
       {groups.map((group) => (
         <SettingGroup key={group.kind} title={t(`capabilities.tab.${group.kind}`)}>

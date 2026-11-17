@@ -12,6 +12,9 @@ export const LIBRARY_PT_BR = {
   'library.editAria': 'Editar {name}',
   'library.remove': 'Remover',
   'library.removeAria': 'Remover {name}',
+  'library.invalid.title': 'Itens com problema',
+  'library.invalid.warning':
+    'Estes itens da biblioteca são inválidos e não são sincronizados. Remova cada um e crie de novo, se precisar.',
   'library.state.on': 'Ligado',
   'library.state.off': 'Desligado',
   'library.remove.title': 'Remover da biblioteca?',
@@ -134,6 +137,9 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.editAria': 'Edit {name}',
   'library.remove': 'Remove',
   'library.removeAria': 'Remove {name}',
+  'library.invalid.title': 'Items with problems',
+  'library.invalid.warning':
+    'These library items are invalid and are not synced. Remove each one and create it again if you need it.',
   'library.state.on': 'On',
   'library.state.off': 'Off',
   'library.remove.title': 'Remove from the library?',
