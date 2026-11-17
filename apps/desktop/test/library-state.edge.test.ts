@@ -18,6 +18,7 @@ import {
   canPreviewSync,
   groupLibraryItems,
   itemDetail,
+  libraryIdTaken,
   needsApproval,
   pluginInstallState,
   projectItemRows,
@@ -157,6 +158,21 @@ describe('mcp and connector form', () => {
     expect(failureCode(form('mcp', { command: 'npx', env: [{ key: 'TOKEN', value: '' }] }))).toBe(
       'pair-value-reference',
     );
+  });
+
+  test('reports a literal value as a missing reference on env and headers', () => {
+    const rows = [{ key: 'TOKEN', value: 'ghp_abcdefghijklmnopqrstuvwxyz123456' }];
+    expect(failureCode(form('mcp', { command: 'npx', env: rows }))).toBe('pair-value-reference');
+    expect(
+      failureCode(form('mcp', { transport: 'http', url: 'https://example.com', headers: rows })),
+    ).toBe('pair-value-reference');
+  });
+
+  test('detects an id that already exists in the library', () => {
+    const items = [skillItem('taken', 'Taken')];
+    expect(libraryIdTaken({ items, id: 'taken' })).toBe(true);
+    expect(libraryIdTaken({ items, id: 'free' })).toBe(false);
+    expect(libraryIdTaken({ items: [], id: 'taken' })).toBe(false);
   });
 
   test('never echoes the rejected value in the error detail', () => {

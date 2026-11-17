@@ -29,6 +29,10 @@ export function groupLibraryItems(items: readonly LibraryItem[]): LibraryGroup[]
   })).filter((group) => group.items.length > 0);
 }
 
+export function libraryIdTaken(input: { items: readonly LibraryItem[]; id: string }): boolean {
+  return input.items.some((item) => item.id === input.id);
+}
+
 export function itemDetail(item: LibraryItem): string {
   switch (item.kind) {
     case 'skill':

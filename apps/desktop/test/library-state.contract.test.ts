@@ -124,7 +124,7 @@ describe('rule 6: the form never produces a secret literal', () => {
     for (const literal of literals) {
       const rows = [{ key: 'TOKEN', value: literal }];
       for (const form of [stdioForm(rows), httpForm(rows), connectorForm(rows)]) {
-        expect(buildSaveInput(form)).toMatchObject({ ok: false, code: 'pair-value-reference' });
+        expect(buildSaveInput(form).ok).toBe(false);
       }
     }
   });

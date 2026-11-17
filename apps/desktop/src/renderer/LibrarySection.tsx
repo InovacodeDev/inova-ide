@@ -11,7 +11,7 @@ import {
   toggleInput,
   type LibraryFormState,
 } from './library-form';
-import { LIBRARY_KINDS, groupLibraryItems, recipeFor } from './library-state';
+import { LIBRARY_KINDS, groupLibraryItems, libraryIdTaken, recipeFor } from './library-state';
 import { LibraryItemForm } from './LibraryItemForm';
 import { LibraryItemRow } from './LibraryItemRow';
 import type { RunCommand } from './LibraryPluginInstall';
@@ -35,6 +35,12 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<LibraryItem | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [libraryVersion, setLibraryVersion] = useState(0);
+
+  const refresh = async () => {
+    await reload();
+    setLibraryVersion((version) => version + 1);
+  };
 
   const openForm = (next: LibraryFormState) => {
     setFormError(null);
@@ -50,6 +56,10 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       );
       return;
     }
+    if (!form.editing && libraryIdTaken({ items: listing?.items ?? [], id: built.input.id })) {
+      setFormError(t('library.error.idExists'));
+      return;
+    }
     setSaving(true);
     setFormError(null);
     const result = await libraryCall({
@@ -62,7 +72,7 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       return;
     }
     setForm(null);
-    await reload();
+    await refresh();
   };
 
   const toggle = async (item: LibraryItem, enabled: boolean) => {
@@ -73,7 +83,7 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       locale,
     });
     setPendingId(null);
-    if (result.ok) await reload();
+    if (result.ok) await refresh();
     else setRowError(result.message);
   };
 
@@ -86,7 +96,7 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       action: () => window.inova.removeLibraryItem({ id: target.id }),
       locale,
     });
-    if (result.ok) await reload();
+    if (result.ok) await refresh();
     else setRowError(result.message);
   };
 
@@ -150,7 +160,7 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
           </ul>
         </SettingGroup>
       ))}
-      <LibrarySyncPanel projects={projects} accounts={accounts} />
+      <LibrarySyncPanel projects={projects} accounts={accounts} libraryVersion={libraryVersion} />
       {removing ? (
         <ConfirmModal
           title={t('library.remove.title')}

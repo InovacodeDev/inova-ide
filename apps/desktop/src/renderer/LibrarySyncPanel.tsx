@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AccountView, ProfileSyncPreview, ProjectView } from '../shared/api';
 import { useI18n } from './I18nContext';
 import {
@@ -22,6 +22,7 @@ import './library.css';
 interface LibrarySyncPanelProps {
   projects: readonly ProjectView[];
   accounts: readonly AccountView[];
+  libraryVersion: number;
 }
 
 function ApplyResult({ result }: { result: ApplySummary }) {
@@ -34,21 +35,27 @@ function ApplyResult({ result }: { result: ApplySummary }) {
       <p>
         {t('library.sync.backup')} <span className="mono">{result.backupDir}</span>
       </p>
-      {result.skippedCount > 0 ? (
-        <details>
-          <summary>{t('library.sync.skippedList')}</summary>
-          <ul className="library-skipped mono">
-            {result.skippedIds.map((id) => (
-              <li key={id}>{id}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+      <IdList summary={t('library.sync.appliedList')} ids={result.appliedIds} />
+      <IdList summary={t('library.sync.skippedList')} ids={result.skippedIds} />
     </div>
   );
 }
 
-export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) {
+function IdList({ summary, ids }: { summary: string; ids: readonly string[] }) {
+  if (ids.length === 0) return null;
+  return (
+    <details>
+      <summary>{summary}</summary>
+      <ul className="library-skipped mono">
+        {ids.map((id) => (
+          <li key={id}>{id}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+export function LibrarySyncPanel({ projects, accounts, libraryVersion }: LibrarySyncPanelProps) {
   const { locale, t } = useI18n();
   const [chosenProject, setChosenProject] = useState<string | null>(null);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
@@ -83,6 +90,13 @@ export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) 
     setBusy(null);
   };
 
+  useEffect(() => {
+    sequence.current += 1;
+    setPreview(null);
+    setApprovedIds([]);
+    setBusy(null);
+  }, [libraryVersion]);
+
   const selectionInput = (id: string) => ({
     projectId: id,
     ...(selection.request ? { accountIds: selection.request } : {}),
@@ -111,7 +125,6 @@ export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) 
   const runApply = async () => {
     if (projectId === null || preview === null) return;
     sequence.current += 1;
-    const mine = sequence.current;
     setBusy('apply');
     setError(null);
     const response = await libraryCall({
@@ -122,7 +135,6 @@ export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) 
         }),
       locale,
     });
-    if (mine !== sequence.current) return;
     if (!response.ok) {
       setBusy(null);
       setError(response.message);
@@ -144,6 +156,7 @@ export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) 
             <PlatformSelect
               ariaLabel={t('library.sync.project')}
               value={projectId ?? ''}
+              disabled={busy !== null}
               options={projects.map((project) => ({
                 value: project.id,
                 label: folderName(project.path),
@@ -163,6 +176,7 @@ export function LibrarySyncPanel({ projects, accounts }: LibrarySyncPanelProps) 
                   <input
                     type="checkbox"
                     checked={!excludedIds.includes(account.id)}
+                    disabled={busy !== null}
                     onChange={() => {
                       setExcludedIds((current) => toggleId(current, account.id));
                       reset();

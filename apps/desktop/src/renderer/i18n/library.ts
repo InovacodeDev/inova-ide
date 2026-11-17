@@ -69,6 +69,8 @@ export const LIBRARY_PT_BR = {
     'O valor de "{key}" deve ser uma referência como {example}. A IDE nunca guarda o valor do segredo.',
   'library.error.labelRequired': 'Informe o rótulo.',
   'library.error.pluginNameRequired': 'Informe o nome do plugin.',
+  'library.error.idExists':
+    'Já existe um item com este ID. Edite o item existente ou use outro ID.',
 
   'library.plugin.install': 'Instalar na conta…',
   'library.plugin.account': 'Conta de destino',
@@ -94,14 +96,14 @@ export const LIBRARY_PT_BR = {
   'library.sync.approve': 'Aprovar',
   'library.sync.warnConflict':
     'Sobrescreve um item existente no destino (pasta ou entrada). Será feito backup.',
-  'library.sync.warnRemove':
-    'Remove um item existente no destino (pasta ou entrada). Será feito backup.',
+  'library.sync.warnRemove': 'Remove pasta existente. Será feito backup.',
   'library.sync.noReason': 'Sem motivo informado.',
   'library.sync.diff': 'Ver antes e depois (valores mascarados)',
   'library.sync.before': 'Antes',
   'library.sync.after': 'Depois',
   'library.sync.result': 'Aplicados: {applied}. Ignorados: {skipped}.',
   'library.sync.backup': 'Backup em',
+  'library.sync.appliedList': 'Itens aplicados',
   'library.sync.skippedList': 'Itens ignorados',
   'library.status.unknown': 'Desconhecido ({status})',
 
@@ -186,6 +188,7 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
     'The value of "{key}" must be a reference such as {example}. The IDE never stores the secret value.',
   'library.error.labelRequired': 'Enter the label.',
   'library.error.pluginNameRequired': 'Enter the plugin name.',
+  'library.error.idExists': 'An item with this ID already exists. Edit it or use another ID.',
 
   'library.plugin.install': 'Install on account…',
   'library.plugin.account': 'Target account',
@@ -211,14 +214,14 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.sync.approve': 'Approve',
   'library.sync.warnConflict':
     'Overwrites an existing item at the target (folder or entry). A backup will be made.',
-  'library.sync.warnRemove':
-    'Removes an existing item at the target (folder or entry). A backup will be made.',
+  'library.sync.warnRemove': 'Removes the existing folder. A backup will be made.',
   'library.sync.noReason': 'No reason given.',
   'library.sync.diff': 'See before and after (masked values)',
   'library.sync.before': 'Before',
   'library.sync.after': 'After',
   'library.sync.result': 'Applied: {applied}. Skipped: {skipped}.',
   'library.sync.backup': 'Backup at',
+  'library.sync.appliedList': 'Applied items',
   'library.sync.skippedList': 'Skipped items',
   'library.status.unknown': 'Unknown ({status})',
 
