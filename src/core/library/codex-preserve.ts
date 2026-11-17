@@ -71,6 +71,20 @@ export function codexMcpTablesText(toml: string): string {
   return kept.join('\n').trimEnd();
 }
 
+// REGEX: "enabled = ..." assignment, toggled by the account capability switch
+const ENABLED_LINE = /^\s*enabled\s*=/;
+
+export function codexServerTableText(input: { toml: string; name: string }): string | null {
+  const kept: string[] = [];
+  let inside = false;
+  for (const line of input.toml.split('\n')) {
+    const path = headerPath(line);
+    if (path !== undefined) inside = serverOf(path) === input.name;
+    if (inside && !isTrivia(line) && !ENABLED_LINE.test(line)) kept.push(line.trim());
+  }
+  return kept.length === 0 ? null : kept.join('\n');
+}
+
 export function stripCodexServerTables(input: {
   toml: string;
   names: ReadonlySet<string>;

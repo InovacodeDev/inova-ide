@@ -36,6 +36,22 @@ export function removalCandidates(input: {
   return input.managedNames.filter((name) => !input.retained.has(name));
 }
 
+export function splitRemovalByHash(input: {
+  candidates: readonly string[];
+  stored: Readonly<Record<string, string>>;
+  current: (name: string) => string | null;
+}): { removed: string[]; pruned: string[] } {
+  const { candidates, stored, current } = input;
+  const matches = (name: string): boolean => {
+    const hash = Object.hasOwn(stored, name) ? stored[name] : undefined;
+    return hash !== undefined && hash !== '' && current(name) === hash;
+  };
+  return {
+    removed: candidates.filter(matches),
+    pruned: candidates.filter((name) => !matches(name)),
+  };
+}
+
 export function removalReason(names: readonly string[]): string {
   return `Remove MCP gerenciado: ${names.join(', ')}.`;
 }

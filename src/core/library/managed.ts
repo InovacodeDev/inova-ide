@@ -4,9 +4,12 @@ import { isMissingFile, serialize, writeAtomic } from '../capabilities/file-edit
 import type { ProviderId } from '../types.js';
 import { createBackupDir, LibraryCorruptError, libraryDir } from './store.js';
 
+export type ManagedHashes = Record<string, string>;
+
 export interface ManagedRegistry {
   version: 1;
   mcp: Record<string, string[]>;
+  hashes: Record<string, ManagedHashes>;
 }
 
 export function managedFile(root: string): string {
@@ -21,18 +24,43 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.values(value).every((entry) => typeof entry === 'string');
+}
+
+function parseTargets<T>(input: {
+  file: string;
+  value: unknown;
+  isEntry: (entry: unknown) => entry is T;
+}): Record<string, T> {
+  const { file, value, isEntry } = input;
+  const result: Record<string, T> = {};
+  if (!isRecord(value)) return result;
+  for (const [targetKey, entry] of Object.entries(value)) {
+    if (targetKey === '__proto__' || !isEntry(entry)) {
+      throw new LibraryCorruptError(file, 'invalid entry');
+    }
+    result[targetKey] = entry;
+  }
+  return result;
+}
+
 function parseManaged(file: string, parsed: unknown): ManagedRegistry {
   if (!isRecord(parsed) || parsed['version'] !== 1 || !isRecord(parsed['mcp'])) {
     throw new LibraryCorruptError(file, 'invalid shape');
   }
-  const mcp: Record<string, string[]> = {};
-  for (const [targetKey, names] of Object.entries(parsed['mcp'])) {
-    if (targetKey === '__proto__' || !isStringArray(names)) {
-      throw new LibraryCorruptError(file, 'invalid entry');
-    }
-    mcp[targetKey] = names;
+  if (parsed['hashes'] !== undefined && !isRecord(parsed['hashes'])) {
+    throw new LibraryCorruptError(file, 'invalid shape');
   }
-  return { version: 1, mcp };
+  return {
+    version: 1,
+    mcp: parseTargets({ file, value: parsed['mcp'], isEntry: isStringArray }),
+    hashes: parseTargets({ file, value: parsed['hashes'], isEntry: isStringRecord }),
+  };
+}
+
+export function emptyManaged(): ManagedRegistry {
+  return { version: 1, mcp: {}, hashes: {} };
 }
 
 export function managedTargetKey(input: {
@@ -49,7 +77,7 @@ export async function loadManaged(root: string): Promise<ManagedRegistry> {
   try {
     raw = await readFile(file, 'utf8');
   } catch (error: unknown) {
-    if (isMissingFile(error)) return { version: 1, mcp: {} };
+    if (isMissingFile(error)) return emptyManaged();
     throw error;
   }
   let parsed: unknown;
@@ -65,6 +93,10 @@ export function managedNamesFor(registry: ManagedRegistry, targetKey: string): s
   return Object.hasOwn(registry.mcp, targetKey) ? (registry.mcp[targetKey] ?? []) : [];
 }
 
+export function managedHashesFor(registry: ManagedRegistry, targetKey: string): ManagedHashes {
+  return Object.hasOwn(registry.hashes, targetKey) ? (registry.hashes[targetKey] ?? {}) : {};
+}
+
 async function backupManagedFile(input: { root: string; at: Date }): Promise<void> {
   const file = managedFile(input.root);
   try {
@@ -76,33 +108,55 @@ async function backupManagedFile(input: { root: string; at: Date }): Promise<voi
   await copyFile(file, join(await createBackupDir(input), 'managed.json'));
 }
 
+interface ManagedTargetState {
+  names: readonly string[];
+  hashes: Readonly<ManagedHashes>;
+}
+
 export function saveManaged(input: {
   root: string;
   targetKey: string;
   names: readonly string[];
+  hashes?: Readonly<ManagedHashes>;
   now?: () => Date;
 }): Promise<void> {
-  return updateManaged({ ...input, next: () => input.names });
+  const { names, hashes = {} } = input;
+  return updateManaged({ ...input, next: () => ({ names, hashes }) });
 }
 
 export function changeManaged(input: {
   root: string;
   targetKey: string;
-  add: readonly string[];
+  add: Readonly<ManagedHashes>;
   drop: readonly string[];
   now?: () => Date;
 }): Promise<void> {
   const { add, drop } = input;
   return updateManaged({
     ...input,
-    next: (current) => [...current.filter((name) => !drop.includes(name)), ...add],
+    next: (current) => {
+      const kept = (name: string) => !drop.includes(name);
+      const hashes = Object.entries(current.hashes).filter(([name]) => kept(name));
+      return {
+        names: [...current.names.filter(kept), ...Object.keys(add)],
+        hashes: { ...Object.fromEntries(hashes), ...add },
+      };
+    },
   });
+}
+
+function sortedState(state: ManagedTargetState): { names: string[]; hashes: ManagedHashes } {
+  const names = [...new Set(state.names)].sort();
+  const hashes = names
+    .filter((name) => Object.hasOwn(state.hashes, name))
+    .map((name) => [name, state.hashes[name] ?? ''] as const);
+  return { names, hashes: Object.fromEntries(hashes) };
 }
 
 function updateManaged(input: {
   root: string;
   targetKey: string;
-  next: (current: readonly string[]) => readonly string[];
+  next: (current: ManagedTargetState) => ManagedTargetState;
   now?: () => Date;
 }): Promise<void> {
   const { root, targetKey } = input;
@@ -110,10 +164,17 @@ function updateManaged(input: {
   const file = managedFile(root);
   return serialize(resolve(file), async () => {
     const current = await loadManaged(root);
-    const previous = managedNamesFor(current, targetKey);
-    const names = [...new Set(input.next(previous))].sort();
-    if (previous.join('\n') === names.join('\n')) return;
-    const next: ManagedRegistry = { version: 1, mcp: { ...current.mcp, [targetKey]: names } };
+    const previous = sortedState({
+      names: managedNamesFor(current, targetKey),
+      hashes: managedHashesFor(current, targetKey),
+    });
+    const state = sortedState(input.next(previous));
+    if (JSON.stringify(previous) === JSON.stringify(state)) return;
+    const next: ManagedRegistry = {
+      version: 1,
+      mcp: { ...current.mcp, [targetKey]: state.names },
+      hashes: { ...current.hashes, [targetKey]: state.hashes },
+    };
     await backupManagedFile({ root, at });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });
     try {

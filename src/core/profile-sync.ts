@@ -22,20 +22,27 @@ import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
 import {
   changeManaged,
+  emptyManaged,
   loadManaged,
+  managedHashesFor,
   managedNamesFor,
   managedTargetKey,
 } from './library/managed.js';
-import type { ManagedRegistry } from './library/managed.js';
-import { approvalKey, approvalToken } from './library/approval.js';
+import type { ManagedHashes, ManagedRegistry } from './library/managed.js';
+import { approvalKey, approvalToken, stableHash } from './library/approval.js';
 import type { ApprovalMode } from './library/approval.js';
-import { codexMcpTablesText, stripCodexServerTables } from './library/codex-preserve.js';
+import {
+  codexMcpTablesText,
+  codexServerTableText,
+  stripCodexServerTables,
+} from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import {
   removalCandidates,
   removalReason,
   removeAgyServers,
   retainedMcpNames,
+  splitRemovalByHash,
   statusWithRemoval,
   withoutJsonServers,
 } from './library/mcp-removal.js';
@@ -602,7 +609,7 @@ interface PlannedTarget {
   rawAfter?: string;
   unwrittenNames?: string[];
   managedKey?: string;
-  adoptedNames?: string[];
+  ownedHashes?: ManagedHashes;
   removedNames?: string[];
   prunedNames?: string[];
 }
@@ -647,13 +654,16 @@ async function planAccountMcpTarget(input: {
   projectPath: string;
   servers: CanonicalMcpMap;
   strippedNames?: readonly string[];
+  before?: string;
 }): Promise<PlannedTarget> {
   const { account, projectPath, servers, strippedNames } = input;
   const maskedPreview = JSON.stringify({ mcpServers: maskMcpConfig(servers) }, null, 2);
   const targetPath = mcpTargetPath(account, projectPath);
+  const readBefore = async (): Promise<string> =>
+    input.before ?? (await readOptionalFile(targetPath)) ?? '';
 
   if (account.provider === 'claude') {
-    const before = (await readOptionalFile(targetPath)) ?? '';
+    const before = await readBefore();
     const after = mergeMcpServersJson(before, servers, '.claude.json');
     const status: ProfileSyncStatus =
       Object.keys(servers).length === 0
@@ -682,7 +692,7 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'codex') {
-    const before = (await readOptionalFile(targetPath)) ?? '';
+    const before = await readBefore();
     let formatted: CodexFormatResult;
     try {
       formatted = strippedNames
@@ -770,7 +780,7 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'opencode') {
-    const before = (await readOptionalFile(targetPath)) ?? '';
+    const before = await readBefore();
     const merged = mergeOpencodeMcpJson(before, servers);
     const firstBad = merged.incompatible[0];
     const status: ProfileSyncStatus =
@@ -804,7 +814,7 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'qwen') {
-    const before = (await readOptionalFile(targetPath)) ?? '';
+    const before = await readBefore();
     const after = mergeMcpServersJson(before, servers, '.qwen/settings.json');
     const status: ProfileSyncStatus =
       Object.keys(servers).length === 0
@@ -899,11 +909,32 @@ function annotateLibraryTarget(input: {
       `MCP existente sem marcador da IDE e com definição diferente: ${conflicts.join(', ')}.`,
     );
   }
-  const adoptedNames = projection.libraryNames.filter(
-    (name) => !entries.names.has(name) || conflicts.includes(name),
+  const ownedNames = projection.libraryNames.filter(
+    (name) => !entries.names.has(name) || conflicts.includes(name) || managedNames.includes(name),
   );
   const reason = notes.length > 0 ? { reason: notes.join(' ') } : {};
-  return { ...planned, adoptedNames, item: { ...item, status, ...reason } };
+  const ownedHashes = ownedHashesOf({ planned, names: ownedNames });
+  return { ...planned, ownedHashes, item: { ...item, status, ...reason } };
+}
+
+function mcpEntryHash(input: { provider: ProviderId; raw: string; name: string }): string | null {
+  const { provider, raw, name } = input;
+  if (provider === 'codex') {
+    const text = codexServerTableText({ toml: raw, name });
+    return text === null ? null : stableHash(text);
+  }
+  const { servers } = targetMcpEntries({ provider, raw });
+  return Object.hasOwn(servers, name) ? stableHash(servers[name]) : null;
+}
+
+function ownedHashesOf(input: { planned: PlannedTarget; names: readonly string[] }): ManagedHashes {
+  const { rawAfter, item } = input.planned;
+  if (rawAfter === undefined) return {};
+  const hashes = input.names.map((name) => [
+    name,
+    mcpEntryHash({ provider: item.provider, raw: rawAfter, name }),
+  ]);
+  return Object.fromEntries(hashes.filter((entry): entry is [string, string] => entry[1] !== null));
 }
 
 interface ProfileSyncPlan {
@@ -980,10 +1011,11 @@ async function planLibraryAccountTarget(input: {
     accountDisabled: account.disabledCapabilities ?? [],
     provider: account.provider,
   });
+  const targetPath = mcpTargetPath(account, projectPath);
   const managedKey = managedTargetKey({
     provider: account.provider,
     accountId: account.id,
-    targetPath: mcpTargetPath(account, projectPath),
+    targetPath,
   });
   const managedNames = managedNamesFor(managed, managedKey);
   const candidates = removalCandidates({
@@ -995,11 +1027,23 @@ async function planLibraryAccountTarget(input: {
       provider: account.provider,
     }),
   });
+  const before = FILE_MCP_PROVIDERS.includes(account.provider)
+    ? ((await readOptionalFile(targetPath)) ?? '')
+    : undefined;
+  const split =
+    before === undefined
+      ? { removed: candidates, pruned: [] }
+      : splitRemovalByHash({
+          candidates,
+          stored: managedHashesFor(managed, managedKey),
+          current: (name) => mcpEntryHash({ provider: account.provider, raw: before, name }),
+        });
   const planned = await planAccountMcpTarget({
     account,
     projectPath,
     servers: projected.servers,
-    strippedNames: candidates,
+    strippedNames: split.removed,
+    ...(before === undefined ? {} : { before }),
   });
   const unwritten = planned.unwrittenNames ?? [];
   const projection = {
@@ -1007,36 +1051,23 @@ async function planLibraryAccountTarget(input: {
     libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
   };
   const annotated = annotateLibraryTarget({
-    planned: withMcpRemoval({ planned: { ...planned, managedKey }, candidates }),
+    planned: withMcpRemoval({ planned: { ...planned, managedKey }, split }),
     projection,
     managedNames,
   });
   return { planned: withLibraryView(annotated), projection };
 }
 
-function splitRemoval(input: {
-  planned: PlannedTarget;
-  candidates: readonly string[];
-}): { removed: string[]; pruned: string[] } | null {
-  const { planned, candidates } = input;
-  const { provider } = planned.item;
-  if (provider === 'gemini') return { removed: [...candidates], pruned: [] };
-  if (planned.rawBefore === undefined || planned.rawAfter === undefined) return null;
-  const present = targetMcpEntries({ provider, raw: planned.rawBefore }).names;
-  return {
-    removed: candidates.filter((name) => present.has(name)),
-    pruned: candidates.filter((name) => !present.has(name)),
-  };
-}
+const FILE_MCP_PROVIDERS: readonly ProviderId[] = ['claude', 'codex', 'opencode', 'qwen'];
 
 function withMcpRemoval(input: {
   planned: PlannedTarget;
-  candidates: readonly string[];
+  split: { removed: string[]; pruned: string[] };
 }): PlannedTarget {
   const { planned } = input;
-  const split = splitRemoval(input);
-  if (split === null) return planned;
-  const { removed, pruned } = split;
+  const { provider } = planned.item;
+  if (provider !== 'gemini' && planned.rawAfter === undefined) return planned;
+  const { removed, pruned } = input.split;
   if (removed.length === 0) return { ...planned, prunedNames: pruned };
   const { item, rawAfter } = planned;
   const rawWithout =
@@ -1101,7 +1132,7 @@ async function planProfileTargets(input: {
       : (availableRulesFiles[0] ?? null);
 
   const managed: ManagedRegistry =
-    input.library && input.root ? await loadManaged(input.root) : { version: 1, mcp: {} };
+    input.library && input.root ? await loadManaged(input.root) : emptyManaged();
   const targets: KeyedTarget[] = [];
   const projections = new Map<string, LibraryMcpProjection>();
   for (const account of scopes.includes('mcp') ? input.accounts : []) {
@@ -1246,11 +1277,11 @@ export async function applyProfileSync(input: {
   });
   const recordManaged = async (
     planned: KeyedTarget,
-    change: { add: readonly string[]; drop: readonly string[] },
+    change: { add: ManagedHashes; drop: readonly string[] },
   ): Promise<void> => {
     const targetKey = planned.managedKey;
     if (!input.library || targetKey === undefined) return;
-    if (change.add.length === 0 && change.drop.length === 0) return;
+    if (Object.keys(change.add).length === 0 && change.drop.length === 0) return;
     await changeManaged({
       root: input.root,
       targetKey,
@@ -1259,7 +1290,7 @@ export async function applyProfileSync(input: {
     });
   };
   const pruneManaged = (planned: KeyedTarget): Promise<void> =>
-    recordManaged(planned, { add: [], drop: planned.prunedNames ?? [] });
+    recordManaged(planned, { add: {}, drop: planned.prunedNames ?? [] });
 
   const appliedIds: string[] = [];
   const skippedIds: string[] = [];
@@ -1343,7 +1374,10 @@ export async function applyProfileSync(input: {
           if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
-      await recordManaged(planned, { add: writtenLibraryNames, drop: removal.dropped });
+      await recordManaged(planned, {
+        add: Object.fromEntries(writtenLibraryNames.map((name) => [name, ''])),
+        drop: removal.dropped,
+      });
       if (okAll) appliedIds.push(item.id);
       else skippedIds.push(item.id);
       continue;
@@ -1374,7 +1408,7 @@ export async function applyProfileSync(input: {
     await writeSerialized(planned.rawPath, planned.rawAfter);
     if (item.scope === 'mcp') {
       await recordManaged(planned, {
-        add: planned.adoptedNames ?? [],
+        add: planned.ownedHashes ?? {},
         drop: [...(planned.removedNames ?? []), ...(planned.prunedNames ?? [])],
       });
     }
