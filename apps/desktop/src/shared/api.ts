@@ -100,6 +100,7 @@ export interface RunCommandInput {
   commandId: string;
   params?: unknown;
   projectId?: string;
+  accountId?: string;
 }
 
 export type RunCommandOutcome =

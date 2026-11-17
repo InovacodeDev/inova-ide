@@ -5,9 +5,11 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { isolatedEnv } from '@inova/core/launch';
 import { getSettings } from '@inova/core/settings';
 import { dataRoot, loadStore } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
+import type { ProviderId } from '@inova/core/types';
 import { nodeRunner } from '@inova/node-io';
 import { Notification, app, BrowserWindow, dialog, protocol, shell } from 'electron';
 import * as pty from 'node-pty';
@@ -126,6 +128,19 @@ const chat = createChatRunner({
   killTree: killProcessGroup,
   emit: (sessionId, event) => handlers?.handleChatEvent(sessionId, event),
 });
+
+async function accountCommandEnv(
+  accountId: string,
+  provider: ProviderId,
+): Promise<Record<string, string> | undefined> {
+  const store = await loadStore(dataRoot(process.env));
+  const account = store.accounts.find((item) => item.id === accountId);
+  if (account === undefined || account.provider !== provider) return undefined;
+  const entries = Object.entries(isolatedEnv(account, {}));
+  return Object.fromEntries(
+    entries.flatMap(([name, value]) => (value === undefined ? [] : [[name, value]])),
+  );
+}
 
 const commandExecutor = createCommandExecutor({
   spawnChild,
@@ -548,6 +563,7 @@ void app.whenReady().then(async () => {
         projectPath: async (projectId) =>
           (await loadStore(dataRoot(process.env))).projects.find((item) => item.id === projectId)
             ?.path,
+        accountEnv: accountCommandEnv,
         ideRoot: dataRoot(process.env),
         neutralCwd: homedir(),
       }),

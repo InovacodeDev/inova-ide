@@ -704,13 +704,15 @@ function isBoundedJson(value: unknown): boolean {
 
 export function parseRunCommand(input: unknown): RunCommandInput | undefined {
   if (!isRecord(input)) return undefined;
-  const { commandId, params, projectId } = input;
+  const { commandId, params, projectId, accountId } = input;
   if (!isText(commandId) || !isBoundedJson(params)) return undefined;
   if (projectId !== undefined && !isSafeId(projectId)) return undefined;
+  if (accountId !== undefined && !isSafeId(accountId)) return undefined;
   return {
     commandId,
     ...(params === undefined ? {} : { params }),
     ...(projectId === undefined ? {} : { projectId }),
+    ...(accountId === undefined ? {} : { accountId }),
   };
 }
 
