@@ -4,7 +4,6 @@ import type {
   ProfileSyncLibraryInput,
   ProfileSyncStatus,
 } from '../profile-sync.js';
-import type { CommandRunner } from '../providers.js';
 import type { ProviderId } from '../types.js';
 import { projectLibraryMcp } from './mcp.js';
 
@@ -60,21 +59,17 @@ export function withoutJsonServers(input: {
 }
 
 export async function removeAgyServers(input: {
-  runner: CommandRunner;
-  env: NodeJS.ProcessEnv;
   names: readonly string[];
   listed: ReadonlySet<string>;
+  remove: (name: string) => Promise<boolean>;
 }): Promise<{ dropped: string[]; failed: boolean }> {
-  const { runner, env, names, listed } = input;
+  const { names, listed, remove } = input;
   const dropped: string[] = [];
   let failed = false;
   for (const name of names) {
-    if (listed.has(name)) {
-      const result = await runner.run({ command: 'agy', args: ['mcp', 'remove', name], env });
-      if ('notFound' in result || result.exitCode !== 0) {
-        failed = true;
-        continue;
-      }
+    if (listed.has(name) && !(await remove(name))) {
+      failed = true;
+      continue;
     }
     dropped.push(name);
   }

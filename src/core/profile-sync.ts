@@ -1304,11 +1304,18 @@ export async function applyProfileSync(input: {
       const libraryNames = new Set(projection?.libraryNames ?? []);
       const managedNames =
         planned.managedKey === undefined ? [] : managedNamesFor(managed, planned.managedKey);
+      const { runner } = input;
       const removal = await removeAgyServers({
-        runner: input.runner,
-        env,
         names: planned.removedNames ?? [],
         listed: listedNames,
+        remove: async (name) => {
+          const result = await runner.run({
+            command: 'agy',
+            args: buildAgyMcpRemoveArgs(name),
+            env,
+          });
+          return 'exitCode' in result && result.exitCode === 0;
+        },
       });
       if (removal.failed) okAll = false;
       const writtenLibraryNames: string[] = [];
