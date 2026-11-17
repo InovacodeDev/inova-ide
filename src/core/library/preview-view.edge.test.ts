@@ -146,6 +146,31 @@ describe('library preview shows only the MCP subset of the target file', () => {
     }
   });
 
+  it('ends the codex view at a commented non-MCP header after an MCP table', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const home = await tmp();
+    const toml = [
+      '[mcp_servers.github]',
+      'command = "gh"',
+      '',
+      '[profiles.work] # personal',
+      'token = "profile-REALSECRET"',
+      '',
+    ].join('\n');
+    await writeFile(join(home, 'config.toml'), toml);
+
+    const preview = await previewProfileSync({
+      root,
+      projectPath: project,
+      accounts: [account('codex', home)],
+      library,
+    });
+
+    expect(preview.items[0]?.maskedBefore).toBe('[mcp_servers.github]\ncommand = "gh"');
+    expect(preview.items[0]?.maskedAfter).not.toContain('REALSECRET');
+  });
+
   it('keeps the legacy full-file preview without a library', async () => {
     const project = await tmp();
     const home = await tmp();

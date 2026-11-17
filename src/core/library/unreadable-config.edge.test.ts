@@ -1,7 +1,8 @@
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import type * as FsPromises from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyProfileSync,
   previewProfileSync,
@@ -10,8 +11,24 @@ import {
 import { installSkillFromText } from './skills.js';
 import type { LibraryItem } from './types.js';
 
+const denied = vi.hoisted(() => new Set<string>());
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  const refuse = (syscall: string): Promise<never> =>
+    Promise.reject(
+      Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES', syscall }),
+    );
+  return {
+    ...actual,
+    readFile: (...args: Parameters<typeof actual.readFile>) =>
+      denied.has(String(args[0])) ? refuse('open') : actual.readFile(...args),
+    lstat: (...args: Parameters<typeof actual.lstat>) =>
+      denied.has(String(args[0])) ? refuse('lstat') : actual.lstat(...args),
+  };
+});
+
 const dirs: string[] = [];
-const locked: string[] = [];
 
 async function tmp(): Promise<string> {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'inova-unreadable-')));
@@ -19,13 +36,12 @@ async function tmp(): Promise<string> {
   return dir;
 }
 
-async function lock(path: string): Promise<void> {
-  locked.push(path);
-  await chmod(path, 0o000);
+function lock(path: string): void {
+  denied.add(path);
 }
 
 afterEach(async () => {
-  await Promise.all(locked.splice(0).map((path) => chmod(path, 0o700)));
+  denied.clear();
   await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -92,7 +108,7 @@ describe('an unreadable MCP file of one account does not stop the others', () =>
     const project = await tmp();
     const home = await tmp();
     await writeFile(join(home, 'config.toml'), '[mcp_servers.x]\ncommand = "x"\n');
-    await lock(join(home, 'config.toml'));
+    lock(join(home, 'config.toml'));
 
     const preview = await previewProfileSync({
       root,
@@ -142,7 +158,7 @@ describe('an unreadable skills folder of one account does not stop the others', 
       updatedAt: UPDATED_AT,
     };
     await mkdir(join(blockedHome, 'skills'));
-    await lock(join(blockedHome, 'skills'));
+    lock(join(blockedHome, 'skills'));
     const accounts = [
       { ...account('claude', blockedHome), id: 'blocked' },
       { ...account('claude', okHome), id: 'ok' },
