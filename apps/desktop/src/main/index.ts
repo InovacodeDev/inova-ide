@@ -20,6 +20,7 @@ import type { SpawnChild } from './chat.js';
 import { createCommandExecutor } from './command-executor.js';
 import { createCommandHandlers } from './command-handlers.js';
 import { createCommandService } from './command-service.js';
+import type { AccountCommandEnv } from './command-service.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { createLibraryHandlers } from './library-handlers.js';
@@ -133,14 +134,17 @@ const chat = createChatRunner({
 async function accountCommandEnv(
   accountId: string,
   provider: ProviderId,
-): Promise<Record<string, string> | undefined> {
+): Promise<AccountCommandEnv | undefined> {
   const store = await loadStore(dataRoot(process.env));
   const account = store.accounts.find((item) => item.id === accountId);
   if (account === undefined || account.provider !== provider) return undefined;
   const entries = Object.entries(isolatedEnv(account, {}));
-  return Object.fromEntries(
-    entries.flatMap(([name, value]) => (value === undefined ? [] : [[name, value]])),
-  );
+  return {
+    env: Object.fromEntries(
+      entries.flatMap(([name, value]) => (value === undefined ? [] : [[name, value]])),
+    ),
+    unsetEnv: providers[account.provider].strippedEnvVars,
+  };
 }
 
 const commandExecutor = createCommandExecutor({

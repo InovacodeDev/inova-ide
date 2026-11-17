@@ -14,14 +14,16 @@ export interface CommandInput {
   accountId?: unknown;
 }
 
-type ResolvedAccount = { id: string; env: Record<string, string> } | undefined;
+export interface AccountCommandEnv {
+  env: Record<string, string>;
+  unsetEnv: readonly string[];
+}
+
+type ResolvedAccount = ({ id: string } & AccountCommandEnv) | undefined;
 
 export interface CommandServiceDeps {
   projectPath: (projectId: string) => Promise<string | undefined>;
-  accountEnv?: (
-    accountId: string,
-    provider: ProviderId,
-  ) => Promise<Record<string, string> | undefined>;
+  accountEnv?: (accountId: string, provider: ProviderId) => Promise<AccountCommandEnv | undefined>;
   ideRoot: string;
   neutralCwd: string;
   registry?: Readonly<Record<string, CommandSpec>>;
@@ -54,8 +56,10 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
     if (!isBoundedId(accountId) || deps.accountEnv === undefined) {
       return fail('Conta não encontrada.');
     }
-    const env = await deps.accountEnv(accountId, spec.account.provider);
-    return env === undefined ? fail('Conta não encontrada.') : ok({ id: accountId, env });
+    const resolved = await deps.accountEnv(accountId, spec.account.provider);
+    return resolved === undefined
+      ? fail('Conta não encontrada.')
+      : ok({ id: accountId, ...resolved });
   }
 
   function queueKeyOf(spec: CommandSpec, projectId: unknown, account: ResolvedAccount): string {
@@ -76,7 +80,9 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
     const account = await accountOf(spec, input.accountId);
     if (!account.ok) return account;
     return ok({
-      ...(account.value === undefined ? {} : { env: account.value.env }),
+      ...(account.value === undefined
+        ? {}
+        : { env: account.value.env, unsetEnv: account.value.unsetEnv }),
       commandId: spec.id,
       binary: spec.binary,
       args,

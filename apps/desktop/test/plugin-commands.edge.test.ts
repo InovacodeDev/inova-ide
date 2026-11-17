@@ -6,7 +6,8 @@ import { microtasks, request, setup as setupExecutor } from './command-executor-
 
 function setup() {
   const accountEnv = vi.fn<NonNullable<CommandServiceDeps['accountEnv']>>(async () => ({
-    CLAUDE_CONFIG_DIR: '/accounts/a',
+    env: { CLAUDE_CONFIG_DIR: '/accounts/a' },
+    unsetEnv: [],
   }));
   const service = createCommandService({
     projectPath: async () => undefined,

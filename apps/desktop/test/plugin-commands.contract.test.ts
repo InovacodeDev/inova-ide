@@ -3,11 +3,14 @@ import { createCommandService } from '../src/main/command-service.js';
 import type { CommandServiceDeps } from '../src/main/command-service.js';
 
 const CLAUDE_ENV = { CLAUDE_CONFIG_DIR: '/accounts/claude-a' };
+const CLAUDE_UNSET = ['ANTHROPIC_API_KEY'];
 
 function setup() {
   const accountEnv = vi.fn<NonNullable<CommandServiceDeps['accountEnv']>>(
     async (accountId, provider) =>
-      accountId === 'acc-claude' && provider === 'claude' ? CLAUDE_ENV : undefined,
+      accountId === 'acc-claude' && provider === 'claude'
+        ? { env: CLAUDE_ENV, unsetEnv: CLAUDE_UNSET }
+        : undefined,
   );
   const service = createCommandService({
     projectPath: async () => undefined,
@@ -36,6 +39,7 @@ describe('plugin por receita vira comando mutante com a conta', () => {
         mutating: true,
         mode: 'exec',
         env: CLAUDE_ENV,
+        unsetEnv: CLAUDE_UNSET,
       },
     });
     expect(accountEnv).toHaveBeenCalledWith('acc-claude', 'claude');
@@ -45,7 +49,7 @@ describe('plugin por receita vira comando mutante com a conta', () => {
     ['codex.plugin.add', 'codex', ['plugin', 'add', 'p@m'], 'codex'],
     ['agy.plugin.install', 'agy', ['plugin', 'install', 'p@m'], 'gemini'],
   ] as const)('%s usa o binário %s e o provider %s', async (commandId, binary, args, provider) => {
-    const accountEnv = vi.fn(async () => ({ HOME_X: '/h' }));
+    const accountEnv = vi.fn(async () => ({ env: { HOME_X: '/h' }, unsetEnv: [] }));
     const service = createCommandService({
       projectPath: async () => undefined,
       accountEnv,

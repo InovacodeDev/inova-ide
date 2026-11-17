@@ -18,6 +18,7 @@ export interface ExecRequest {
   maxOutputBytes: number;
   mode?: 'exec' | 'pty';
   env?: Readonly<Record<string, string>>;
+  unsetEnv?: readonly string[];
   signal?: AbortSignal;
 }
 
@@ -286,7 +287,9 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
   }
 
   function spawnEnv(run: Run, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-    return { ...base, ...run.request.env, ...EXEC_ENV };
+    const kept = { ...base };
+    for (const name of run.request.unsetEnv ?? []) delete kept[name];
+    return { ...kept, ...run.request.env, ...EXEC_ENV };
   }
 
   function spawnTty(run: Run, file: string, env: NodeJS.ProcessEnv): void {
