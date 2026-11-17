@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.9.3] - 2026-11-17
+
 ### Adicionado
 
 - Painel lateral direito de visualização de arquivos (`FileViewerPane`) redimensionável e maximizável, com múltiplas abas, drag-and-drop e seletor nativo.
