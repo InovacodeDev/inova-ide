@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
+import type { CommandHandlers } from '../src/main/command-handlers.js';
 import type { VoiceHandlers } from '../src/main/voice.js';
 
 type Listener = (event: unknown, ...args: unknown[]) => unknown;
@@ -98,12 +99,18 @@ function setup() {
     deleteVoiceModel: vi.fn(async () => ({ ok: true as const, value: 'deleteVoiceModel' })),
     transcribeAudio: vi.fn(async () => ({ ok: true as const, value: 'transcribeAudio' })),
   };
+  const commands = {
+    runCommand: vi.fn(async () => ({ ok: true as const, value: 'runCommand' })),
+    confirmCommand: vi.fn(async () => ({ ok: true as const, value: 'confirmCommand' })),
+    cancelCommand: vi.fn(),
+  };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
     voice: voice as unknown as VoiceHandlers,
+    commands: commands as unknown as CommandHandlers,
     allowedOrigin: APP,
   });
-  return { handlers, voice };
+  return { handlers, voice, commands };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -134,13 +141,17 @@ test('a trusted invoke reaches the handler with the payload only', async () => {
 });
 
 test('invokes from a foreign or unknown sender are rejected', async () => {
-  const { handlers, voice } = setup();
+  const { handlers, voice, commands } = setup();
   for (const event of [foreign, { senderFrame: null }, {}]) {
     for (const channel of electron.invokes.keys()) {
       await expect(invoke(channel, event, {})).rejects.toThrow('Remetente não autorizado.');
     }
   }
-  for (const handler of [...Object.values(handlers), ...Object.values(voice)]) {
+  for (const handler of [
+    ...Object.values(handlers),
+    ...Object.values(voice),
+    ...Object.values(commands),
+  ]) {
     expect(handler).not.toHaveBeenCalled();
   }
 });
@@ -162,6 +173,26 @@ test('voice invokes reach the voice handlers', async () => {
   expect(voice.downloadVoiceModel).toHaveBeenLastCalledWith({ modelId: 'base' });
   await invoke('inova:deleteVoiceModel', trusted, { modelId: 'base' });
   expect(voice.deleteVoiceModel).toHaveBeenCalledWith({ modelId: 'base' });
+});
+
+test('command invokes and cancelCommand enforce trusted sender', async () => {
+  const { commands } = setup();
+  const input = { commandId: 'gh.version' };
+  await invoke('inova:runCommand', trusted, input);
+  expect(commands.runCommand).toHaveBeenCalledWith(input);
+  await invoke('inova:confirmCommand', trusted, { confirmationId: 'c' });
+  expect(commands.confirmCommand).toHaveBeenCalledWith({ confirmationId: 'c' });
+  send('inova:cancelCommand', foreign, 'r');
+  expect(commands.cancelCommand).not.toHaveBeenCalled();
+  send('inova:cancelCommand', trusted, 'r');
+  expect(commands.cancelCommand).toHaveBeenCalledWith('r');
+});
+
+test('there is no channel that accepts a raw command line', () => {
+  setup();
+  for (const channel of [...electron.invokes.keys(), ...electron.sends.keys()]) {
+    expect(channel).not.toMatch(/exec|shell|spawn|terminal/i);
+  }
 });
 
 test('terminal pty and openLogin channels are not registered', () => {

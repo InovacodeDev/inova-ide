@@ -82,6 +82,25 @@ test('chat calls go through invoke and send channels', async () => {
   expect('openProject' in api).toBe(false);
 });
 
+test('command calls use their channels and the event delivers only the payload', async () => {
+  const api = await loadApi();
+  void api.runCommand({ commandId: 'gh.version' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:runCommand', { commandId: 'gh.version' });
+  void api.confirmCommand({ confirmationId: 'c' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:confirmCommand', { confirmationId: 'c' });
+  api.cancelCommand('r');
+  expect(electron.send).toHaveBeenCalledWith('inova:cancelCommand', 'r');
+  electron.on.mockClear();
+  const callback = vi.fn();
+  const unsubscribe = api.onCommandEvent(callback);
+  const [channel, listener] = electron.on.mock.calls[0] ?? [];
+  expect(channel).toBe('inova:command:event');
+  listener?.({ sender: 'secret' }, { kind: 'start' });
+  expect(callback).toHaveBeenCalledWith({ kind: 'start' });
+  unsubscribe();
+  expect(electron.removeListener).toHaveBeenCalledWith(channel, listener);
+});
+
 test('session update and workspace calls use their channels', async () => {
   const api = await loadApi();
   void api.updateSession({ sessionId: 's', archived: true });

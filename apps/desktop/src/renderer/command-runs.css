@@ -1,0 +1,95 @@
+.command-runs {
+  position: relative;
+}
+
+.command-runs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.command-runs-btn:hover,
+.command-runs-btn[aria-expanded='true'] {
+  background: var(--panel-hover, var(--border));
+}
+
+.command-runs-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent, var(--border));
+  color: var(--accent-contrast, inherit);
+  text-align: center;
+}
+
+.command-runs-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 60vh;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 25%);
+}
+
+.command-runs-head {
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.command-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.command-run-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.command-run-argv {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-run-status {
+  flex: none;
+}
+
+.command-run-status-failed,
+.command-run-status-error,
+.command-run-status-timed-out {
+  color: var(--error);
+}
+
+.command-run-output {
+  max-height: 180px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg, rgb(0 0 0 / 15%));
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}

@@ -37,6 +37,8 @@ import { AgentsView } from './AgentsView';
 import { ChatView, type ChatViewHandle } from './ChatView';
 import { buildCommandPaletteItems, type CommandPaletteItem } from './command-palette-state';
 import { CommandPaletteModal } from './CommandPaletteModal';
+import { CommandRunsIndicator } from './CommandRunsIndicator';
+import { formatArgv } from './command-runs-state';
 import { CompareView } from './CompareView';
 import { ConfirmModal } from './ConfirmModal';
 import { chatStoreReducer } from './chat-store';
@@ -77,6 +79,7 @@ import { localizeModelOption } from './model-picker-state';
 import { openModalCount } from './modal-layers';
 import { UpdateProgress } from './UpdateProgress';
 import { UpdateToast } from './UpdateToast';
+import { useCommandRuns } from './useCommandRuns';
 import { useUpdates } from './useUpdates';
 import { refreshableUsageLabels, settleUsage, USAGE_REFRESH_INTERVAL_MS } from './usage-refresh';
 import { isMacPlatform, type ShortcutCommand } from './shortcuts';
@@ -197,6 +200,7 @@ export function App() {
     warn,
   } = useWarning();
   const updates = useUpdates(call);
+  const commandRuns = useCommandRuns();
   const [confirmUpdateRestart, setConfirmUpdateRestart] = useState(false);
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -2399,7 +2403,22 @@ export function App() {
           version={updates.version}
           updateAvailable={updates.updateAvailable}
           onOpenChangelog={updates.openChangelog}
+          commandsSlot={
+            <CommandRunsIndicator runs={commandRuns.runs} onCancel={commandRuns.cancelRun} />
+          }
         />
+        {commandRuns.pending ? (
+          <ConfirmModal
+            title={t('commands.confirmTitle')}
+            description={t('commands.confirmDescription', {
+              command: formatArgv(commandRuns.pending.argv),
+              cwd: commandRuns.pending.cwd,
+            })}
+            confirmLabel={t('commands.confirmRun')}
+            onConfirm={() => void commandRuns.confirmPending()}
+            onCancel={commandRuns.dismissPending}
+          />
+        ) : null}
         {updates.installing ? (
           <UpdateProgress latest={updates.info?.latest ?? null} stage={updates.installStage} />
         ) : (

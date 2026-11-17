@@ -34,6 +34,7 @@ import type {
   OpenFilePathInput,
   ReadFilePreviewInput,
   Result,
+  RunCommandInput,
 } from '../shared/api.js';
 
 const MAX_TEXT = 255;
@@ -687,6 +688,40 @@ export function parseLoginCode(input: unknown): { sessionId: string; code: strin
   const code = typeof input['code'] === 'string' ? input['code'].trim() : '';
   if (code === '' || code.length > MAX_LOGIN_CODE) return undefined;
   return { sessionId: input['sessionId'], code };
+}
+
+const MAX_COMMAND_PARAMS_JSON = 4096;
+
+function isBoundedJson(value: unknown): boolean {
+  if (value === undefined) return true;
+  try {
+    const json = JSON.stringify(value);
+    return json !== undefined && json.length <= MAX_COMMAND_PARAMS_JSON;
+  } catch {
+    return false;
+  }
+}
+
+export function parseRunCommand(input: unknown): RunCommandInput | undefined {
+  if (!isRecord(input)) return undefined;
+  const { commandId, params, projectId } = input;
+  if (!isText(commandId) || !isBoundedJson(params)) return undefined;
+  if (projectId !== undefined && !isSafeId(projectId)) return undefined;
+  return {
+    commandId,
+    ...(params === undefined ? {} : { params }),
+    ...(projectId === undefined ? {} : { projectId }),
+  };
+}
+
+export function parseConfirmCommand(input: unknown): { confirmationId: string } | undefined {
+  return isRecord(input) && isSafeId(input['confirmationId'])
+    ? { confirmationId: input['confirmationId'] }
+    : undefined;
+}
+
+export function parseCommandRunId(input: unknown): string | undefined {
+  return isSafeId(input) ? input : undefined;
 }
 
 export function requireAccount(store: Store, label: string): Account {

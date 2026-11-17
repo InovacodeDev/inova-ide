@@ -100,6 +100,10 @@ const api: InovaApi = {
   submitLoginCode: (input) => ipcRenderer.invoke(CHANNELS.submitLoginCode, input),
   cancelLogin: (sessionId) => ipcRenderer.send(CHANNELS.cancelLogin, sessionId),
   onLoginEvent: (callback) => subscribe(CHANNELS.loginEvent, callback),
+  runCommand: (input) => ipcRenderer.invoke(CHANNELS.runCommand, input),
+  confirmCommand: (input) => ipcRenderer.invoke(CHANNELS.confirmCommand, input),
+  cancelCommand: (runId) => ipcRenderer.send(CHANNELS.cancelCommand, runId),
+  onCommandEvent: (callback) => subscribe(CHANNELS.commandEvent, callback),
 };
 
 contextBridge.exposeInMainWorld('inova', api);
