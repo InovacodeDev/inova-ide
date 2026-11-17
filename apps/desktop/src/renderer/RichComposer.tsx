@@ -11,6 +11,11 @@ import {
   type Ref,
 } from 'react';
 import {
+  detectBlockAutoformat,
+  detectInlineAutoformat,
+  type InlineAutoformat,
+} from './composer-autoformat';
+import {
   formatForShortcut,
   formatsForAncestors,
   lineBreakCommand,
@@ -266,6 +271,159 @@ function resetBlockAtCaretStart(root: HTMLElement): boolean {
   return true;
 }
 
+interface AutoformatUndo {
+  element: Element;
+  exit: Text;
+  literal: string;
+}
+
+interface TypedContext {
+  node: Text;
+  offset: number;
+  ancestors: string[];
+}
+
+const FORMAT_TAGS: ReadonlySet<string> = new Set([
+  'b',
+  'strong',
+  'i',
+  'em',
+  's',
+  'strike',
+  'del',
+  'code',
+]);
+const BLOCK_AUTOFORMAT_BLOCKED: ReadonlySet<string> = new Set([
+  'code',
+  'pre',
+  'li',
+  'blockquote',
+  'h1',
+  'h2',
+  'h3',
+]);
+const INLINE_TRIGGERS = '`*_~';
+
+function typedContext(root: HTMLElement): TypedContext | null {
+  const selection = selectionInside(root);
+  if (selection === null || !selection.isCollapsed) return null;
+  const { focusNode, focusOffset } = selection;
+  if (!(focusNode instanceof Text)) return null;
+  return {
+    node: focusNode,
+    offset: focusOffset,
+    ancestors: ancestorNames({ node: focusNode, root }),
+  };
+}
+
+function selectTextRange(input: { node: Text; start: number; end: number }): Selection | null {
+  const selection = window.getSelection();
+  if (selection === null) return null;
+  const range = document.createRange();
+  range.setStart(input.node, input.start);
+  range.setEnd(input.node, input.end);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  return selection;
+}
+
+function formatElementAround(input: { selection: Selection; root: HTMLElement }): Element | null {
+  const { selection, root } = input;
+  if (selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const inside = ancestorElements({ node: range.endContainer, root }).find((element) =>
+    FORMAT_TAGS.has(element.tagName.toLowerCase()),
+  );
+  if (inside !== undefined) return inside;
+  const before =
+    range.endContainer.nodeType === Node.ELEMENT_NODE
+      ? range.endContainer.childNodes[range.endOffset - 1]
+      : range.endOffset === 0
+        ? range.endContainer.previousSibling
+        : null;
+  return before instanceof Element && FORMAT_TAGS.has(before.tagName.toLowerCase()) ? before : null;
+}
+
+function applyInlineAutoformat(input: {
+  root: HTMLElement;
+  hit: InlineAutoformat;
+  context: TypedContext;
+}): AutoformatUndo | null {
+  const { root, hit, context } = input;
+  const { node, offset } = context;
+  const literal = node.data.slice(hit.start, offset);
+  if (selectTextRange({ node, start: hit.start, end: offset }) === null) return null;
+  document.execCommand('insertText', false, hit.inner);
+  const selection = selectionInside(root);
+  const focus = selection?.focusNode;
+  if (selection === null || !(focus instanceof Text)) return null;
+  const end = selection.focusOffset;
+  const start = end - hit.inner.length;
+  if (start < 0 || focus.data.slice(start, end) !== hit.inner) return null;
+  selectTextRange({ node: focus, start, end });
+  const command = FORMAT_COMMAND[hit.format];
+  if (command !== undefined) document.execCommand(command);
+  else toggleInlineCode(root);
+  const formatted = selectionInside(root);
+  const element = formatted === null ? null : formatElementAround({ selection: formatted, root });
+  if (element === null) return null;
+  const exit = document.createTextNode('​');
+  element.after(exit);
+  setCaret({ node: exit, offset: 1 });
+  return { element, exit, literal };
+}
+
+function applyBlockAutoformat(input: { root: HTMLElement; context: TypedContext }): boolean {
+  const { root, context } = input;
+  const { node, offset, ancestors } = context;
+  if (ancestors.some((name) => BLOCK_AUTOFORMAT_BLOCKED.has(name))) return false;
+  const previous = node.previousSibling;
+  if (previous !== null && previous.nodeName !== 'BR') return false;
+  const hit = detectBlockAutoformat(node.data.slice(0, offset).replace(/ /g, ' '));
+  if (hit === null) return false;
+  if (selectTextRange({ node, start: 0, end: offset }) === null) return false;
+  document.execCommand('delete');
+  const command = FORMAT_COMMAND[hit.format];
+  if (command !== undefined) document.execCommand(command);
+  else runBlockFormat({ root, format: hit.format, active: new Set() });
+  return true;
+}
+
+function autoformatTyped(input: { root: HTMLElement; char: string }): AutoformatUndo | null {
+  const { root, char } = input;
+  const context = typedContext(root);
+  if (context === null) return null;
+  if (context.ancestors.some((name) => name === 'code' || name === 'pre')) return null;
+  if ((char === ' ' || char === '`') && applyBlockAutoformat({ root, context })) return null;
+  if (!INLINE_TRIGGERS.includes(char)) return null;
+  const { node, offset } = context;
+  const hit = detectInlineAutoformat({
+    before: node.data.slice(0, offset),
+    after: node.data.slice(offset),
+  });
+  return hit === null ? null : applyInlineAutoformat({ root, hit, context });
+}
+
+function undoAutoformat(input: { root: HTMLElement; undo: AutoformatUndo }): boolean {
+  const { root, undo } = input;
+  const selection = selectionInside(root);
+  if (selection === null || !selection.isCollapsed) return false;
+  if (!undo.element.isConnected || !undo.exit.isConnected) return false;
+  const atExit =
+    selection.focusNode === undo.exit &&
+    selection.focusOffset === undo.exit.data.length &&
+    undo.exit.data === '​';
+  if (!atExit) return false;
+  const range = document.createRange();
+  range.setStartBefore(undo.element);
+  range.setEndAfter(undo.exit);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  // NOTE: insertText would keep the monospace typing style of the removed code span.
+  document.execCommand('insertHTML', false, escapeHtml(undo.literal));
+  return true;
+}
+
 function isImeEvent(event: KeyboardEvent): boolean {
   return event.nativeEvent.isComposing || event.keyCode === 229;
 }
@@ -285,6 +443,9 @@ export function RichComposer({
   const linkInputRef = useRef<HTMLInputElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const activeKeyRef = useRef('');
+  const autoformatBusyRef = useRef(false);
+  const autoformatTimerRef = useRef<number | undefined>(undefined);
+  const autoformatUndoRef = useRef<AutoformatUndo | null>(null);
   const [linkPrompt, setLinkPrompt] = useState<LinkPromptState | null>(null);
   const latest = useRef({ onChange, onCaretChange, onActiveFormatsChange });
 
@@ -518,9 +679,56 @@ export function RichComposer({
     }
   };
 
+  const handleInput = (event: FormEvent<HTMLDivElement>) => {
+    if (autoformatBusyRef.current) return;
+    const native = event.nativeEvent as InputEvent;
+    autoformatUndoRef.current = null;
+    window.clearTimeout(autoformatTimerRef.current);
+    const char = native.data;
+    if (
+      !readOnly &&
+      native.inputType === 'insertText' &&
+      !native.isComposing &&
+      typeof char === 'string' &&
+      char.length === 1
+    ) {
+      // NOTE: Chromium rejects execCommand while an input event is dispatching, so the conversion runs on the next task.
+      autoformatTimerRef.current = window.setTimeout(() => {
+        const root = editorRef.current;
+        if (root === null) return;
+        autoformatBusyRef.current = true;
+        try {
+          autoformatUndoRef.current = autoformatTyped({ root, char });
+        } finally {
+          autoformatBusyRef.current = false;
+        }
+        afterEdit();
+      }, 0);
+    }
+    afterEdit();
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const root = editorRef.current;
     if (root === null || readOnly) return;
+    const undo = autoformatUndoRef.current;
+    if (event.key !== 'Backspace' || event.metaKey || event.ctrlKey || event.altKey) {
+      autoformatUndoRef.current = null;
+    } else if (undo !== null) {
+      autoformatUndoRef.current = null;
+      autoformatBusyRef.current = true;
+      let reverted = false;
+      try {
+        reverted = undoAutoformat({ root, undo });
+      } finally {
+        autoformatBusyRef.current = false;
+      }
+      if (reverted) {
+        event.preventDefault();
+        afterEdit();
+        return;
+      }
+    }
     const format = formatForShortcut({ event, isMac });
     if (format !== null) {
       event.preventDefault();
@@ -599,7 +807,7 @@ export function RichComposer({
         data-placeholder={placeholder}
         data-empty="true"
         spellCheck
-        onInput={afterEdit}
+        onInput={handleInput}
         onKeyDown={handleKeyDown}
         onPaste={handlePaste}
         onDrop={handleDrop}
