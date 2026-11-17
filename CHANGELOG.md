@@ -6,9 +6,24 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Detecção de CLIs no Windows quando o ambiente herdado usa a chave `Path` em vez de `PATH`, lê o `Path` do Registro do Windows (`HKCU` e `HKLM`) e inclui diretórios padrão de instalação (`.local\bin`, `pnpm`, `npm`, `WinGet\Links`, `.bun\bin`, `scoop\shims` e `.cargo\bin`).
+- Resolução de binários no Windows prioriza `.exe`, `.com`, `.cmd` e `.bat` sobre arquivos sem extensão (evitando selecionar o script POSIX gerado pelo `npm`/`pnpm`) e executa wrappers `.cmd`/`.bat` via `cmd.exe /d /s /c`.
+
 ## [0.9.2] - 2026-11-16
 
+### Corrigido
+
+- Manifesto do Winget corrigido para declarar `InstallerType: nullsoft` no instalador NSIS do Windows.
+
 ## [0.9.1] - 2026-11-16
+
+### Adicionado
+
+- Publicação automática de manifestos do Winget (`InovacodeDev.InovaIDE`) no pipeline de release e documentação em `docs/release-winget.md`.
+- Instalador Windows (NSIS) adiciona o comando `inova` ao `Path` do usuário automaticamente e remove na desinstalação.
+- Atualização dentro do aplicativo no Windows via Winget com verificação prévia de disponibilidade e reinício automático após o upgrade.
 
 ## [0.9.0] - 2026-11-16
 
