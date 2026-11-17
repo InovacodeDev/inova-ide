@@ -22,7 +22,7 @@ import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
 import { loadManaged, managedNamesFor, managedTargetKey, saveManaged } from './library/managed.js';
 import type { ManagedRegistry } from './library/managed.js';
-import { stripCodexServerTables } from './library/codex-preserve.js';
+import { codexMcpTablesText, stripCodexServerTables } from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
@@ -967,7 +967,23 @@ async function planLibraryAccountTarget(input: {
     projection,
     managedNames,
   });
-  return { planned: annotated, projection };
+  return { planned: withLibraryView(annotated), projection };
+}
+
+function libraryMcpView(input: { provider: ProviderId; raw: string }): string {
+  const { provider, raw } = input;
+  if (raw.trim() === '') return '';
+  if (provider === 'codex') return maskSecretsInText(codexMcpTablesText(raw));
+  const servers = maskMcpConfig(targetMcpEntries({ provider, raw }).servers);
+  return JSON.stringify({ [provider === 'opencode' ? 'mcp' : 'mcpServers']: servers }, null, 2);
+}
+
+function withLibraryView(planned: PlannedTarget): PlannedTarget {
+  const { item, rawBefore, rawAfter } = planned;
+  if (rawBefore === undefined) return planned;
+  const maskedBefore = libraryMcpView({ provider: item.provider, raw: rawBefore });
+  const maskedAfter = libraryMcpView({ provider: item.provider, raw: rawAfter ?? rawBefore });
+  return { ...planned, item: { ...item, maskedBefore, maskedAfter } };
 }
 
 async function planProfileTargets(input: {

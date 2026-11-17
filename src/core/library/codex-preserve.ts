@@ -58,6 +58,20 @@ function flushTrivia(kept: string[], pending: readonly string[]): void {
   kept.push(...pending.slice(start));
 }
 
+export function codexMcpTablesText(toml: string): string {
+  const kept: string[] = [];
+  let inside = false;
+  for (const line of toml.split('\n')) {
+    const header = /^\[(.+)\]$/.exec(line.trim());
+    if (header) {
+      const section = header[1]?.trim() ?? '';
+      inside = section === 'mcp_servers' || section.startsWith('mcp_servers.');
+    }
+    if (inside) kept.push(line);
+  }
+  return kept.join('\n').trimEnd();
+}
+
 export function stripCodexServerTables(input: {
   toml: string;
   names: ReadonlySet<string>;
