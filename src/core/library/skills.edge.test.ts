@@ -96,8 +96,8 @@ describe('SKILL.md validation', () => {
     ['empty name', '---\nname: ""\ndescription: b\n---\nbody\n'],
     ['blank description', '---\nname: a\ndescription:    \n---\nbody\n'],
     ['oversized file', skillText('big', 'x'.repeat(256 * 1024))],
-    ['Bearer token', skillText('tok', 'Authorization: Bearer abc123\n')],
-    ['uppercase assignment secret', skillText('env', 'API_KEY="abc123"\n')],
+    ['GitHub token', skillText('tok', `export GH=ghp_${'a1B2'.repeat(9)}\n`)],
+    ['private key block', skillText('pem', '-----BEGIN RSA PRIVATE KEY-----\n')],
     ['api key token', skillText('key', 'use sk-abcdefghijklmnopqrstuvwxyz123456\n')],
   ])('rejects %s and leaves nothing behind', async (_label, content) => {
     await expect(installSkillFromText({ root, id: 'bad', content })).rejects.toBeInstanceOf(
@@ -115,7 +115,7 @@ describe('SKILL.md validation', () => {
   });
 
   it('rejects a SKILL.md with a secret during folder import too', async () => {
-    const sourceDir = await source({ 'SKILL.md': skillText('s', 'Bearer abc123\n') });
+    const sourceDir = await source({ 'SKILL.md': skillText('s', `use npm_${'A'.repeat(36)}\n`) });
     await expect(importSkillFolder({ root, id: 's', sourceDir })).rejects.toThrow(/secrets/);
     expect(await skillsRootEntries()).toEqual([]);
   });

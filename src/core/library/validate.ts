@@ -1,6 +1,6 @@
 import type { McpHttpServer, McpServerConfig, McpStdioServer } from '../profile-sync.js';
-import { maskSecretsInText } from '../profile-sync.js';
 import { isProviderId } from '../providers.js';
+import { containsSecretLiteral, isSecretFlagArgument } from './credential-detect.js';
 import type { LibraryItem, LibraryItemSource, PluginDefinition, SkillDefinition } from './types.js';
 
 export const MAX_PROJECT_DISABLED_ITEMS = 200;
@@ -52,36 +52,12 @@ export function isLibraryId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= MAX_ID_LENGTH && ID_PATTERN.test(value);
 }
 
-// REGEX: well-known token shapes (GitHub, GitHub PAT, OpenAI/Anthropic sk-, Slack, AWS key id, Google API key, JWT)
-const TOKEN_SHAPE =
-  /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*)/;
-// REGEX: secret-named word (key, token, secret, password, auth) assigned a literal; skips ${VAR}, $VAR and <placeholder> values
-const SECRET_ASSIGNMENT =
-  /(?<![A-Za-z])(?:api[_-]?key|key|token|secret|password|passwd|auth(?:orization)?)\s*=\s*(?!["']?[$<])["']?[^\s"']/i;
-// REGEX: camelCase secret name such as authToken or apiKey assigned a literal (case sensitive, so monkey and hotkey pass)
-const CAMEL_SECRET_ASSIGNMENT =
-  /(?<=[a-z])(?:Key|Token|Secret|Password|Passwd)\s*=\s*(?!["']?[$<])["']?[^\s"']/;
-// REGEX: secret flag followed by a space and a long value that contains a digit, e.g. --token abc12345
-const SECRET_FLAG_VALUE =
-  /(?<![A-Za-z0-9-])--(?:[a-z0-9]+-)*(?:api-?key|token|password|passwd|secret|auth(?:orization)?)\s+(?!["']?[$<-])(?=\S*\d)["']?[^\s"']{8,}/i;
-// REGEX: whole argument is a secret-named flag such as --token or -api-key
-const SECRET_FLAG_NAME =
-  /^--?(?:[a-z0-9]+-)*(?:api-?key|token|password|passwd|secret|auth(?:orization)?)$/i;
 // REGEX: environment variable name
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // REGEX: HTTP header field name (RFC 9110 token)
 const HEADER_KEY = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
-const SECRET_PATTERNS: readonly RegExp[] = [
-  TOKEN_SHAPE,
-  SECRET_ASSIGNMENT,
-  CAMEL_SECRET_ASSIGNMENT,
-  SECRET_FLAG_VALUE,
-];
-
-export function containsSecretLiteral(text: string): boolean {
-  return maskSecretsInText(text) !== text || SECRET_PATTERNS.some((pattern) => pattern.test(text));
-}
+export { containsSecretLiteral, containsSecretShape } from './credential-detect.js';
 
 function plainText(input: { value: unknown; field: string; min: number; max: number }): string {
   const { value, field, min, max } = input;
@@ -125,15 +101,11 @@ function stringArray(value: unknown, field: string): string[] {
   );
   args.forEach((arg, index) => {
     const next = args[index + 1];
-    if (SECRET_FLAG_NAME.test(arg) && next !== undefined && !isReferenceOrFlag(next)) {
+    if (next !== undefined && isSecretFlagArgument({ flag: arg, value: next })) {
       throw invalid(`${field}[${index + 1}] must be a \${VAR} reference after ${arg}`);
     }
   });
   return args;
-}
-
-function isReferenceOrFlag(arg: string): boolean {
-  return arg === '' || arg.startsWith('-') || VARIABLE_REFERENCE.test(arg);
 }
 
 function remoteUrl(value: unknown): string {

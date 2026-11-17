@@ -4,7 +4,7 @@ import { cp, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node
 import { dirname, join } from 'node:path';
 import { isMissingFile, serialize } from '../capabilities/file-edit.js';
 import { createBackupDir, skillDir } from './store.js';
-import { containsSecretLiteral, isLibraryId } from './validate.js';
+import { containsSecretShape, isLibraryId } from './validate.js';
 
 export const SKILL_MARKER_FILE = '.inova-managed';
 export const SKILL_FILE = 'SKILL.md';
@@ -82,7 +82,7 @@ export function validateSkillMarkdown(content: string): void {
       throw new SkillValidationError(`${SKILL_FILE} front matter needs a non-empty ${required}`);
     }
   }
-  if (containsSecretLiteral(content)) {
+  if (containsSecretShape(content)) {
     throw new SkillValidationError(`${SKILL_FILE} must not contain secrets`);
   }
 }
@@ -296,7 +296,7 @@ async function assertNoSecretsInFiles(files: readonly SkillFile[]): Promise<void
     if (file.relative === SKILL_FILE || file.size > MAX_SCANNED_FILE_BYTES) continue;
     const content = await readFile(file.absolute);
     if (content.includes(0)) continue;
-    if (containsSecretLiteral(content.toString('utf8'))) {
+    if (containsSecretShape(content.toString('utf8'))) {
       throw new SkillValidationError(`${file.relative} must not contain secrets`);
     }
   }

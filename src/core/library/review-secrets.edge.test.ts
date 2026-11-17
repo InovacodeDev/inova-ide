@@ -28,7 +28,7 @@ const POSITIVES: readonly string[] = [
   '--api-key=abc123',
   '--token=abc123',
   '--password=abc123',
-  '--auth=abc123',
+  '--auth=abc12345',
   '--auth-token abc12345678',
   '--secret hunter2hunter2',
 ];

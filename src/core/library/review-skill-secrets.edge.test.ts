@@ -49,8 +49,8 @@ describe('importSkillFolder scans every text file for secrets', () => {
     await expect(readdir(skillDir(root, 'sk'))).rejects.toThrow();
   });
 
-  it('detects a secret assignment in a script', async () => {
-    const dir = await sourceWith({ 'run.sh': 'export GITHUB_TOKEN=hunter2value\n' });
+  it('detects a token shape in a script', async () => {
+    const dir = await sourceWith({ 'run.sh': `export GITHUB_TOKEN=${GITHUB}\n` });
     expect((await importError(dir)).message).toContain('run.sh');
   });
 
@@ -88,8 +88,8 @@ describe('importSkillFolder scans every text file for secrets', () => {
 });
 
 describe('installSkillFromText', () => {
-  it('rejects a non-sk token and an assignment in the body', async () => {
-    for (const body of [`Use ${GITHUB}`, 'API_KEY=hunter2value']) {
+  it('rejects a non-sk token shape in the body', async () => {
+    for (const body of [`Use ${GITHUB}`, `Use sk-${'a'.repeat(30)}`]) {
       await expect(
         installSkillFromText({
           root,
