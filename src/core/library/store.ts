@@ -1,5 +1,5 @@
-import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { copyFile, cp, lstat, mkdir, readFile, rm, stat } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import { isMissingFile, serialize, writeAtomic } from '../capabilities/file-edit.js';
 import type { Library, LibraryItem } from './types.js';
 import { validateLibraryItem } from './validate.js';
@@ -107,7 +107,17 @@ export async function createBackupDir(input: { root: string; at: Date }): Promis
   }
 }
 
-async function backupLibraryFile(input: { root: string; at: Date }): Promise<void> {
+type BackupDirProvider = () => Promise<string>;
+
+function lazyBackupDir(input: { root: string; at: Date }): BackupDirProvider {
+  let pending: Promise<string> | undefined;
+  return () => (pending ??= createBackupDir(input));
+}
+
+async function backupLibraryFile(input: {
+  root: string;
+  backupDir: BackupDirProvider;
+}): Promise<void> {
   const file = libraryFile(input.root);
   try {
     await stat(file);
@@ -115,7 +125,24 @@ async function backupLibraryFile(input: { root: string; at: Date }): Promise<voi
     if (isMissingFile(error)) return;
     throw error;
   }
-  await copyFile(file, join(await createBackupDir(input), 'library.json'));
+  await copyFile(file, join(await input.backupDir(), 'library.json'));
+}
+
+async function backupSkillDir(input: {
+  root: string;
+  id: string;
+  backupDir: BackupDirProvider;
+}): Promise<void> {
+  const source = skillDir(input.root, input.id);
+  try {
+    await lstat(source);
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return;
+    throw error;
+  }
+  const dest = join(await input.backupDir(), 'skills', input.id);
+  await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
+  await cp(source, dest, { recursive: true, verbatimSymlinks: true });
 }
 
 interface Mutation<T> {
@@ -127,13 +154,16 @@ function mutateLibrary<T>(input: {
   root: string;
   at: Date;
   update: (library: Library) => Mutation<T>;
+  beforeWrite?: (context: { result: T; backupDir: BackupDirProvider }) => Promise<void>;
 }): Promise<T> {
-  const { root, at, update } = input;
+  const { root, at, update, beforeWrite } = input;
   const file = libraryFile(root);
   return serialize(resolve(file), async () => {
     const { next, result } = update(await loadLibrary(root));
     if (next === null) return result;
-    await backupLibraryFile({ root, at });
+    const backupDir = lazyBackupDir({ root, at });
+    await beforeWrite?.({ result, backupDir });
+    await backupLibraryFile({ root, backupDir });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });
     try {
       await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
@@ -186,6 +216,10 @@ export async function removeLibraryItem(input: {
       if (!found) return { next: null, result: null };
       const items = library.items.filter((current) => current.id !== input.id);
       return { next: { version: 1, items }, result: found };
+    },
+    beforeWrite: async ({ result, backupDir }) => {
+      if (result?.kind === 'skill')
+        await backupSkillDir({ root: input.root, id: result.id, backupDir });
     },
   });
   if (!removedItem) return { removed: false };

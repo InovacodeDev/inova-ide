@@ -10,6 +10,7 @@ export const SKILL_MARKER_FILE = '.inova-managed';
 export const SKILL_FILE = 'SKILL.md';
 
 const MAX_SKILL_FILE_BYTES = 256 * 1024;
+const MAX_SCANNED_FILE_BYTES = 1024 * 1024;
 const MAX_FILES = 200;
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
 const MAX_DEPTH = 5;
@@ -290,6 +291,17 @@ export async function installSkillFromText(input: {
   });
 }
 
+async function assertNoSecretsInFiles(files: readonly SkillFile[]): Promise<void> {
+  for (const file of files) {
+    if (file.relative === SKILL_FILE || file.size > MAX_SCANNED_FILE_BYTES) continue;
+    const content = await readFile(file.absolute);
+    if (content.includes(0)) continue;
+    if (containsSecretLiteral(content.toString('utf8'))) {
+      throw new SkillValidationError(`${file.relative} must not contain secrets`);
+    }
+  }
+}
+
 export async function importSkillFolder(input: {
   root: string;
   id: string;
@@ -305,6 +317,7 @@ export async function importSkillFolder(input: {
     throw new SkillValidationError(`${SKILL_FILE} exceeds ${MAX_SKILL_FILE_BYTES} bytes`);
   }
   validateSkillMarkdown(await readFile(skillFile.absolute, 'utf8'));
+  await assertNoSecretsInFiles(files);
   return commitSkill({
     root,
     id,

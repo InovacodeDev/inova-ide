@@ -1,6 +1,14 @@
 import type { CapabilityRef } from '../capabilities/types.js';
 import type { LibraryItem } from './types.js';
 
+function isDisabledOnAccount(item: LibraryItem, refs: readonly CapabilityRef[]): boolean {
+  return refs.some(
+    (ref) =>
+      ref.id === item.id &&
+      (ref.kind === item.kind || (item.kind === 'connector' && ref.kind === 'mcp')),
+  );
+}
+
 export function resolveEffectiveItems(input: {
   items: readonly LibraryItem[];
   projectDisabled: readonly string[];
@@ -11,6 +19,6 @@ export function resolveEffectiveItems(input: {
     (item) =>
       item.enabled &&
       !projectDisabled.includes(item.id) &&
-      !accountDisabled.some((ref) => ref.kind === item.kind && ref.id === item.id),
+      !isDisabledOnAccount(item, accountDisabled),
   );
 }

@@ -52,11 +52,35 @@ export function isLibraryId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= MAX_ID_LENGTH && ID_PATTERN.test(value);
 }
 
-// REGEX: OpenAI-style secret key with a long random tail
-const API_KEY_TOKEN = /\bsk-[A-Za-z0-9_-]{20,}/;
+// REGEX: well-known token shapes (GitHub, GitHub PAT, OpenAI/Anthropic sk-, Slack, AWS key id, Google API key, JWT)
+const TOKEN_SHAPE =
+  /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*)/;
+// REGEX: secret-named word (key, token, secret, password, auth) assigned a literal; skips ${VAR}, $VAR and <placeholder> values
+const SECRET_ASSIGNMENT =
+  /(?<![A-Za-z])(?:api[_-]?key|key|token|secret|password|passwd|auth(?:orization)?)\s*=\s*(?!["']?[$<])["']?[^\s"']/i;
+// REGEX: camelCase secret name such as authToken or apiKey assigned a literal (case sensitive, so monkey and hotkey pass)
+const CAMEL_SECRET_ASSIGNMENT =
+  /(?<=[a-z])(?:Key|Token|Secret|Password|Passwd)\s*=\s*(?!["']?[$<])["']?[^\s"']/;
+// REGEX: secret flag followed by a space and a long value that contains a digit, e.g. --token abc12345
+const SECRET_FLAG_VALUE =
+  /(?<![A-Za-z0-9-])--(?:[a-z0-9]+-)*(?:api-?key|token|password|passwd|secret|auth(?:orization)?)\s+(?!["']?[$<-])(?=\S*\d)["']?[^\s"']{8,}/i;
+// REGEX: whole argument is a secret-named flag such as --token or -api-key
+const SECRET_FLAG_NAME =
+  /^--?(?:[a-z0-9]+-)*(?:api-?key|token|password|passwd|secret|auth(?:orization)?)$/i;
+// REGEX: environment variable name
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// REGEX: HTTP header field name (RFC 9110 token)
+const HEADER_KEY = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const SECRET_PATTERNS: readonly RegExp[] = [
+  TOKEN_SHAPE,
+  SECRET_ASSIGNMENT,
+  CAMEL_SECRET_ASSIGNMENT,
+  SECRET_FLAG_VALUE,
+];
 
 export function containsSecretLiteral(text: string): boolean {
-  return maskSecretsInText(text) !== text || API_KEY_TOKEN.test(text);
+  return maskSecretsInText(text) !== text || SECRET_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 function plainText(input: { value: unknown; field: string; min: number; max: number }): string {
@@ -68,16 +92,22 @@ function plainText(input: { value: unknown; field: string; min: number; max: num
   return value;
 }
 
-function referenceRecord(value: unknown, field: string): Record<string, string> {
+function referenceRecord(input: {
+  value: unknown;
+  field: string;
+  keyPattern: RegExp;
+}): Record<string, string> {
+  const { value, field, keyPattern } = input;
   const entries = Object.entries(requireRecord(value, field));
   if (entries.length > MAX_RECORD_ENTRIES) {
     throw invalid(`${field} must have at most ${MAX_RECORD_ENTRIES} entries`);
   }
   const result: Record<string, string> = {};
   for (const [key, entry] of entries) {
-    if (key === '' || key.length > MAX_RECORD_KEY_LENGTH || FORBIDDEN_KEYS.has(key)) {
+    if (key.length > MAX_RECORD_KEY_LENGTH || FORBIDDEN_KEYS.has(key) || !keyPattern.test(key)) {
       throw invalid(`${field} has an invalid key`);
     }
+    if (containsSecretLiteral(key)) throw invalid(`${field} keys must not contain secrets`);
     if (typeof entry !== 'string' || !VARIABLE_REFERENCE.test(entry)) {
       throw invalid(`${field}.${key} must be a \${VAR} reference`);
     }
@@ -90,9 +120,20 @@ function stringArray(value: unknown, field: string): string[] {
   if (!Array.isArray(value) || value.length > MAX_ARGS) {
     throw invalid(`${field} must be an array of at most ${MAX_ARGS} strings`);
   }
-  return value.map((entry: unknown, index) =>
+  const args = value.map((entry: unknown, index) =>
     plainText({ value: entry, field: `${field}[${index}]`, min: 0, max: MAX_ARG_LENGTH }),
   );
+  args.forEach((arg, index) => {
+    const next = args[index + 1];
+    if (SECRET_FLAG_NAME.test(arg) && next !== undefined && !isReferenceOrFlag(next)) {
+      throw invalid(`${field}[${index + 1}] must be a \${VAR} reference after ${arg}`);
+    }
+  });
+  return args;
+}
+
+function isReferenceOrFlag(arg: string): boolean {
+  return arg === '' || arg.startsWith('-') || VARIABLE_REFERENCE.test(arg);
 }
 
 function remoteUrl(value: unknown): string {
@@ -124,7 +165,13 @@ function remoteDefinition(value: unknown): McpHttpServer {
   const url = remoteUrl(record['url']);
   const rawHeaders = record['headers'];
   const headers =
-    rawHeaders === undefined ? undefined : referenceRecord(rawHeaders, 'definition.headers');
+    rawHeaders === undefined
+      ? undefined
+      : referenceRecord({
+          value: rawHeaders,
+          field: 'definition.headers',
+          keyPattern: HEADER_KEY,
+        });
   return { type, url, ...(headers ? { headers } : {}) };
 }
 
@@ -138,7 +185,10 @@ function stdioDefinition(record: Record<string, unknown>): McpStdioServer {
   const rawArgs = record['args'];
   const rawEnv = record['env'];
   const args = rawArgs === undefined ? undefined : stringArray(rawArgs, 'definition.args');
-  const env = rawEnv === undefined ? undefined : referenceRecord(rawEnv, 'definition.env');
+  const env =
+    rawEnv === undefined
+      ? undefined
+      : referenceRecord({ value: rawEnv, field: 'definition.env', keyPattern: ENV_KEY });
   return {
     ...(record['type'] === 'stdio' ? { type: 'stdio' as const } : {}),
     command,
@@ -167,6 +217,7 @@ function referenceName(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length > MAX_NAME_LENGTH || !REFERENCE_NAME.test(value)) {
     throw invalid(`${field} must be a plain name of at most ${MAX_NAME_LENGTH} characters`);
   }
+  if (containsSecretLiteral(value)) throw invalid(`${field} must not contain secrets`);
   return value;
 }
 
