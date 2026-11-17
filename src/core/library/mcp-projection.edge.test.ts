@@ -179,7 +179,7 @@ describe('library MCP projection edges', () => {
     expect(toml).toContain('[mcp_servers.plain]');
     expect(toml).not.toContain('secret-server');
     expect(await readFile(join(claudeHome, '.claude.json'), 'utf8')).toContain('${API_TOKEN}');
-    expect((await loadManaged(root)).mcp['acc-codex']).toEqual(['plain']);
+    expect((await loadManaged(root)).mcp[join(codexHome, 'config.toml')]).toEqual(['plain']);
   });
 
   it('does not apply the ${VAR} rule to servers from the project .mcp.json', async () => {
@@ -222,7 +222,7 @@ describe('library MCP projection edges', () => {
       approvedIds: ['mcp:acc-codex'],
     });
 
-    expect((await loadManaged(root)).mcp['acc-codex']).toEqual(['plain']);
+    expect((await loadManaged(root)).mcp[join(home, 'config.toml')]).toEqual(['plain']);
     const preview = await previewProfileSync({ root, projectPath: project, accounts, library });
     expect(preview.items.find((item) => item.id === 'mcp:acc-codex')?.status).toBe('unchanged');
   });
@@ -312,7 +312,7 @@ describe('library MCP projection edges', () => {
     const project = await tmp();
     const home = await tmp();
     const accounts = [account('claude', home)];
-    await saveManaged({ root, accountId: 'acc-claude', names: ['older'] });
+    await saveManaged({ root, targetKey: join(home, '.claude.json'), names: ['older'] });
     await writeFile(
       join(home, '.claude.json'),
       JSON.stringify({ mcpServers: { docs: { command: 'user-own' } } }),
@@ -328,17 +328,17 @@ describe('library MCP projection edges', () => {
     });
 
     expect(applied.appliedIds).toEqual(['mcp:acc-claude']);
-    expect((await loadManaged(root)).mcp['acc-claude']).toEqual(['docs', 'older']);
+    expect((await loadManaged(root)).mcp[join(home, '.claude.json')]).toEqual(['docs', 'older']);
     expect(await readdir(home)).toEqual(['.claude.json']);
     expect(await readdir(join(root, 'library'))).toEqual(['managed.json']);
   });
 
   it('backs up the previous managed.json before writing', async () => {
     const root = await tmp();
-    await saveManaged({ root, accountId: 'a', names: ['one'] });
+    await saveManaged({ root, targetKey: 'a', names: ['one'] });
     const first = await readFile(managedFile(root), 'utf8');
 
-    await saveManaged({ root, accountId: 'a', names: ['one', 'two'] });
+    await saveManaged({ root, targetKey: 'a', names: ['one', 'two'] });
 
     const backups = await readdir(join(root, 'backups', 'library'));
     expect(backups).toHaveLength(1);
@@ -348,8 +348,8 @@ describe('library MCP projection edges', () => {
 
   it('does not rewrite managed.json when the names did not change', async () => {
     const root = await tmp();
-    await saveManaged({ root, accountId: 'a', names: ['one'] });
-    await saveManaged({ root, accountId: 'a', names: ['one'] });
+    await saveManaged({ root, targetKey: 'a', names: ['one'] });
+    await saveManaged({ root, targetKey: 'a', names: ['one'] });
     await expect(readdir(join(root, 'backups', 'library'))).rejects.toMatchObject({
       code: 'ENOENT',
     });
@@ -382,6 +382,6 @@ describe('library MCP projection edges', () => {
     expect(applied.skippedIds).toContain('mcp:acc-gemini');
     expect(calls.some((call) => call.startsWith('mcp remove docs'))).toBe(false);
     expect(calls.some((call) => call.startsWith('mcp add') && call.includes(' fresh '))).toBe(true);
-    expect((await loadManaged(root)).mcp['acc-gemini']).toEqual(['fresh']);
+    expect((await loadManaged(root)).mcp['agy:acc-gemini']).toEqual(['fresh']);
   });
 });

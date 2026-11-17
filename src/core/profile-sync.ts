@@ -20,7 +20,7 @@ import {
 } from './capabilities/file-edit.js';
 import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
-import { loadManaged, managedNamesFor, saveManaged } from './library/managed.js';
+import { loadManaged, managedNamesFor, managedTargetKey, saveManaged } from './library/managed.js';
 import type { ManagedRegistry } from './library/managed.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
@@ -528,6 +528,7 @@ interface PlannedTarget {
   rawPath: string;
   rawAfter?: string;
   unwrittenNames?: string[];
+  managedKey?: string;
 }
 
 async function planAccountMcpTarget(input: {
@@ -832,12 +833,17 @@ async function planAccountTarget(input: {
     ...projected,
     libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
   };
+  const managedKey = managedTargetKey({
+    provider: account.provider,
+    accountId: account.id,
+    targetPath: planned.item.targetPath,
+  });
   const annotated = await annotateLibraryTarget({
-    planned,
+    planned: { ...planned, managedKey },
     account,
     projectPath,
     projection,
-    managedNames: managedNamesFor(managed, account.id),
+    managedNames: managedNamesFor(managed, managedKey),
   });
   return { planned: annotated, projection };
 }
@@ -1009,12 +1015,15 @@ export async function applyProfileSync(input: {
     ...(input.library ? { library: input.library } : {}),
     ...(input.scopes ? { scopes: input.scopes } : {}),
   });
-  const recordManaged = async (accountId: string, names: readonly string[]): Promise<void> => {
-    if (!input.library || names.length === 0) return;
+  const recordManaged = async (
+    targetKey: string | undefined,
+    names: readonly string[],
+  ): Promise<void> => {
+    if (!input.library || targetKey === undefined || names.length === 0) return;
     await saveManaged({
       root: input.root,
-      accountId,
-      names: [...managedNamesFor(managed, accountId), ...names],
+      targetKey,
+      names: [...managedNamesFor(managed, targetKey), ...names],
       ...(input.now ? { now: input.now } : {}),
     });
   };
@@ -1057,7 +1066,8 @@ export async function applyProfileSync(input: {
       const listedNames = new Set(listedItems.map((mcp) => mcp.id));
       const projection = projections.get(account.id);
       const libraryNames = new Set(projection?.libraryNames ?? []);
-      const managedNames = managedNamesFor(managed, account.id);
+      const managedNames =
+        planned.managedKey === undefined ? [] : managedNamesFor(managed, planned.managedKey);
       const writtenLibraryNames: string[] = [];
       for (const [name, server] of Object.entries(projection?.servers ?? {})) {
         const built = buildAgyMcpAddArgs(name, server);
@@ -1083,7 +1093,7 @@ export async function applyProfileSync(input: {
           if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
-      await recordManaged(account.id, writtenLibraryNames);
+      await recordManaged(planned.managedKey, writtenLibraryNames);
       if (okAll) appliedIds.push(item.id);
       else skippedIds.push(item.id);
       continue;
@@ -1113,7 +1123,7 @@ export async function applyProfileSync(input: {
 
     await writeSerialized(planned.rawPath, planned.rawAfter);
     if (item.scope === 'mcp' && item.accountId) {
-      await recordManaged(item.accountId, projections.get(item.accountId)?.libraryNames ?? []);
+      await recordManaged(planned.managedKey, projections.get(item.accountId)?.libraryNames ?? []);
     }
     appliedIds.push(item.id);
   }

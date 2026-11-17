@@ -190,7 +190,7 @@ describe('library MCP projection contract', () => {
     const servers = await readClaudeServers(home);
     expect(servers['docs']).toMatchObject({ command: 'from-library' });
     expect(servers['mine']).toEqual({ command: 'mine' });
-    expect((await loadManaged(root)).mcp['acc-a']).toEqual(['docs']);
+    expect((await loadManaged(root)).mcp[join(home, '.claude.json')]).toEqual(['docs']);
   });
 
   it('rule 4: a server marked as managed is updated without conflict', async () => {

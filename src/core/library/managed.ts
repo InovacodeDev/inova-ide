@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { isMissingFile, serialize, writeAtomic } from '../capabilities/file-edit.js';
+import type { ProviderId } from '../types.js';
 import { createBackupDir, LibraryCorruptError, libraryDir } from './store.js';
 
 export interface ManagedRegistry {
@@ -25,13 +26,21 @@ function parseManaged(file: string, parsed: unknown): ManagedRegistry {
     throw new LibraryCorruptError(file, 'invalid shape');
   }
   const mcp: Record<string, string[]> = {};
-  for (const [accountId, names] of Object.entries(parsed['mcp'])) {
-    if (accountId === '__proto__' || !isStringArray(names)) {
-      throw new LibraryCorruptError(file, `invalid entry: ${accountId}`);
+  for (const [targetKey, names] of Object.entries(parsed['mcp'])) {
+    if (targetKey === '__proto__' || !isStringArray(names)) {
+      throw new LibraryCorruptError(file, 'invalid entry');
     }
-    mcp[accountId] = names;
+    mcp[targetKey] = names;
   }
   return { version: 1, mcp };
+}
+
+export function managedTargetKey(input: {
+  provider: ProviderId;
+  accountId: string;
+  targetPath: string;
+}): string {
+  return input.provider === 'gemini' ? `agy:${input.accountId}` : resolve(input.targetPath);
 }
 
 export async function loadManaged(root: string): Promise<ManagedRegistry> {
@@ -52,8 +61,8 @@ export async function loadManaged(root: string): Promise<ManagedRegistry> {
   return parseManaged(file, parsed);
 }
 
-export function managedNamesFor(registry: ManagedRegistry, accountId: string): string[] {
-  return Object.hasOwn(registry.mcp, accountId) ? (registry.mcp[accountId] ?? []) : [];
+export function managedNamesFor(registry: ManagedRegistry, targetKey: string): string[] {
+  return Object.hasOwn(registry.mcp, targetKey) ? (registry.mcp[targetKey] ?? []) : [];
 }
 
 async function backupManagedFile(input: { root: string; at: Date }): Promise<void> {
@@ -69,18 +78,18 @@ async function backupManagedFile(input: { root: string; at: Date }): Promise<voi
 
 export function saveManaged(input: {
   root: string;
-  accountId: string;
+  targetKey: string;
   names: readonly string[];
   now?: () => Date;
 }): Promise<void> {
-  const { root, accountId } = input;
+  const { root, targetKey } = input;
   const at = (input.now ?? (() => new Date()))();
   const file = managedFile(root);
   const names = [...new Set(input.names)].sort();
   return serialize(resolve(file), async () => {
     const current = await loadManaged(root);
-    if (managedNamesFor(current, accountId).join('\n') === names.join('\n')) return;
-    const next: ManagedRegistry = { version: 1, mcp: { ...current.mcp, [accountId]: names } };
+    if (managedNamesFor(current, targetKey).join('\n') === names.join('\n')) return;
+    const next: ManagedRegistry = { version: 1, mcp: { ...current.mcp, [targetKey]: names } };
     await backupManagedFile({ root, at });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });
     try {
