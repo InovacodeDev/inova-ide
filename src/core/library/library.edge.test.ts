@@ -1,17 +1,18 @@
 import {
-  chmod,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PathNotFoundError, setProjectLibraryOverride } from '../projects.js';
 import { loadStore, saveStore, StoreCorruptError } from '../store.js';
 import {
@@ -28,6 +29,11 @@ import {
   type LibraryItem,
 } from './index.js';
 
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  return { ...actual, rename: vi.fn(actual.rename) };
+});
+
 let root: string;
 
 beforeEach(async () => {
@@ -35,7 +41,6 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await chmod(join(root, 'library'), 0o700).catch(() => undefined);
   await rm(root, { recursive: true, force: true });
 });
 
@@ -287,6 +292,7 @@ describe('library store', () => {
   it('writes the file with mode 0600 and directories with mode 0700', async () => {
     await saveLibraryItem({ root, item: skill('a') });
     await saveLibraryItem({ root, item: skill('b') });
+    if (process.platform === 'win32') return;
     expect((await stat(libraryFile(root))).mode & 0o777).toBe(0o600);
     expect((await stat(join(root, 'library'))).mode & 0o777).toBe(0o700);
     expect((await stat(join(root, 'backups', 'library'))).mode & 0o777).toBe(0o700);
@@ -301,14 +307,15 @@ describe('library store', () => {
     expect((await libraryDirEntries()).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
-  it('leaves the previous file intact and no temp file when the write fails', async () => {
+  it('leaves the previous file intact and no temp file when the final rename fails', async () => {
     await saveLibraryItem({ root, item: skill('a') });
     const before = await readFile(libraryFile(root), 'utf8');
-    await chmod(join(root, 'library'), 0o500);
-    await expect(saveLibraryItem({ root, item: skill('b') })).rejects.toThrow();
-    await chmod(join(root, 'library'), 0o700);
+    vi.mocked(rename).mockRejectedValueOnce(new Error('rename failed'));
+    await expect(saveLibraryItem({ root, item: skill('b') })).rejects.toThrow('rename failed');
     expect(await readFile(libraryFile(root), 'utf8')).toBe(before);
     expect((await libraryDirEntries()).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    await saveLibraryItem({ root, item: skill('c') });
+    expect((await loadLibrary(root)).items.map((item) => item.id)).toEqual(['a', 'c']);
   });
 
   it('keeps working for later saves after a failed save', async () => {
@@ -353,7 +360,7 @@ describe('removeLibraryItem and setLibraryItemEnabled', () => {
     await writeFile(join(outside, 'precious.txt'), 'data');
     await saveLibraryItem({ root, item: skill('drop') });
     await mkdir(skillDir(root, 'drop'), { recursive: true });
-    await symlink(outside, join(skillDir(root, 'drop'), 'link'));
+    await symlink(outside, join(skillDir(root, 'drop'), 'link'), 'junction');
 
     await removeLibraryItem({ root, id: 'drop' });
 

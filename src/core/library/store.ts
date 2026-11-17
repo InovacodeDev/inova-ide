@@ -135,7 +135,13 @@ function mutateLibrary<T>(input: {
     if (next === null) return result;
     await backupLibraryFile({ root, at });
     await mkdir(libraryDir(root), { recursive: true, mode: 0o700 });
-    await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+    try {
+      await writeAtomic(file, `${JSON.stringify(next, null, 2)}\n`);
+    } catch (error: unknown) {
+      // NOTE: writeAtomic leaves "<file>.inova.tmp" behind when the final rename fails
+      await rm(`${file}.inova.tmp`, { force: true });
+      throw error;
+    }
     return result;
   });
 }
