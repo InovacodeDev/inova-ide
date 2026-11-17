@@ -4,13 +4,27 @@ import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/cha
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ComparisonDiffView } from '@inova/core/git-compare';
 import type { CommandEvent } from './command-types.js';
+import type { LibraryItem, PluginDefinition, PluginInstallRecipe } from '@inova/core/library/index';
 import type { ProviderModels } from '@inova/core/models';
 import type {
+  McpHttpServer,
+  McpServerConfig,
   ProfileSyncApplyResult,
   ProfileSyncPreview,
   RulesFile,
   RulesStrategy,
 } from '@inova/core/profile-sync';
+
+export type {
+  ConnectorLibraryItem,
+  LibraryItem,
+  LibraryItemKind,
+  McpLibraryItem,
+  PluginDefinition,
+  PluginInstallRecipe,
+  PluginLibraryItem,
+  SkillLibraryItem,
+} from '@inova/core/library/index';
 
 export type {
   CapabilityApplyMode,
@@ -106,6 +120,45 @@ export interface RunCommandInput {
 export type RunCommandOutcome =
   | { status: 'started'; runId: string }
   | { status: 'needs-confirmation'; confirmationId: string; argv: string[]; cwd: string };
+
+export interface LibraryListing {
+  items: LibraryItem[];
+  pluginRecipes: Record<string, PluginInstallRecipe>;
+}
+
+interface SaveLibraryItemBase {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+}
+
+export type SaveLibraryItemInput = SaveLibraryItemBase &
+  (
+    | { kind: 'skill'; content?: string }
+    | { kind: 'mcp'; definition: McpServerConfig }
+    | { kind: 'connector'; definition: McpHttpServer; label: string }
+    | { kind: 'plugin'; definition: PluginDefinition }
+  );
+
+export interface RemoveLibraryItemInput {
+  id: string;
+}
+
+export interface SetProjectOverrideInput {
+  projectId: string;
+  itemId: string;
+  disabled: boolean;
+}
+
+export interface PreviewLibrarySyncInput {
+  projectId: string;
+  accountIds?: string[];
+}
+
+export interface ApplyLibrarySyncInput extends PreviewLibrarySyncInput {
+  approvedIds: string[];
+}
 
 export type AccountStatus = AuthStatus | 'expired';
 
@@ -419,6 +472,12 @@ export interface InovaApi {
     approvedIds: string[];
     rulesStrategy?: RulesStrategy;
   }): Promise<Result<ProfileSyncApplyResult>>;
+  listLibrary(): Promise<Result<LibraryListing>>;
+  saveLibraryItem(input: SaveLibraryItemInput): Promise<Result<LibraryItem>>;
+  removeLibraryItem(input: RemoveLibraryItemInput): Promise<Result<{ removed: boolean }>>;
+  setProjectOverride(input: SetProjectOverrideInput): Promise<Result<{ disabled: string[] }>>;
+  previewLibrarySync(input: PreviewLibrarySyncInput): Promise<Result<ProfileSyncPreview>>;
+  applyLibrarySync(input: ApplyLibrarySyncInput): Promise<Result<ProfileSyncApplyResult>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
   onInboxEvent(cb: (items: InboxItem[]) => void): () => void;
   onQueueEvent(cb: (queue: QueuedTurn[]) => void): () => void;
@@ -501,6 +560,12 @@ export const CHANNELS = {
   resolveComparison: 'inova:resolveComparison',
   previewProfileSync: 'inova:previewProfileSync',
   applyProfileSync: 'inova:applyProfileSync',
+  listLibrary: 'inova:listLibrary',
+  saveLibraryItem: 'inova:saveLibraryItem',
+  removeLibraryItem: 'inova:removeLibraryItem',
+  setProjectOverride: 'inova:setProjectOverride',
+  previewLibrarySync: 'inova:previewLibrarySync',
+  applyLibrarySync: 'inova:applyLibrarySync',
   chatEvent: 'inova:chat:event',
   inboxEvent: 'inova:inbox:event',
   queueEvent: 'inova:queue:event',

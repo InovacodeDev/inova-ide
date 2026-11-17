@@ -101,6 +101,37 @@ test('command calls use their channels and the event delivers only the payload',
   expect(electron.removeListener).toHaveBeenCalledWith(channel, listener);
 });
 
+test('library calls use their channels', async () => {
+  const api = await loadApi();
+  void api.listLibrary();
+  expect(electron.invoke).toHaveBeenCalledWith('inova:listLibrary');
+  const calls = [
+    [
+      'inova:saveLibraryItem',
+      () =>
+        api.saveLibraryItem({
+          id: 'a',
+          name: 'A',
+          description: null,
+          enabled: true,
+          kind: 'skill',
+        }),
+    ],
+    ['inova:removeLibraryItem', () => api.removeLibraryItem({ id: 'a' })],
+    [
+      'inova:setProjectOverride',
+      () => api.setProjectOverride({ projectId: 'p', itemId: 'a', disabled: true }),
+    ],
+    ['inova:previewLibrarySync', () => api.previewLibrarySync({ projectId: 'p' })],
+    ['inova:applyLibrarySync', () => api.applyLibrarySync({ projectId: 'p', approvedIds: [] })],
+  ] as const;
+  for (const [channel, call] of calls) {
+    electron.invoke.mockClear();
+    void call();
+    expect(electron.invoke).toHaveBeenCalledWith(channel, expect.any(Object));
+  }
+});
+
 test('session update and workspace calls use their channels', async () => {
   const api = await loadApi();
   void api.updateSession({ sessionId: 's', archived: true });

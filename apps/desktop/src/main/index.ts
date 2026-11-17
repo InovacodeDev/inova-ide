@@ -22,6 +22,7 @@ import { createCommandHandlers } from './command-handlers.js';
 import { createCommandService } from './command-service.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
+import { createLibraryHandlers } from './library-handlers.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { createPreviewRegistry } from './preview-protocol.js';
 import { killProcessGroup } from './process-group.js';
@@ -569,10 +570,16 @@ void app.whenReady().then(async () => {
       }),
       executor: commandExecutor,
     });
+    const library = createLibraryHandlers({
+      root: dataRoot(process.env),
+      baseEnv,
+      runner: nodeRunner,
+    });
     registerIpc({
       handlers: created,
       voice: createVoiceHandlers(voice),
       commands,
+      library,
       allowedOrigin: appUrl,
     });
     createWindow();
