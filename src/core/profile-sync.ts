@@ -269,17 +269,18 @@ function extractOpencodeServers(root: Record<string, unknown>): CanonicalMcpMap 
 interface TargetMcpEntries {
   names: ReadonlySet<string>;
   servers: CanonicalMcpMap;
+  raw: Record<string, unknown>;
 }
 
 function targetMcpEntries(input: { provider: ProviderId; raw: string }): TargetMcpEntries {
   const { provider, raw } = input;
-  if (raw.trim() === '') return { names: new Set(), servers: {} };
-  if (provider === 'codex') return { names: codexServerNames(raw), servers: {} };
+  if (raw.trim() === '') return { names: new Set(), servers: {}, raw: {} };
+  if (provider === 'codex') return { names: codexServerNames(raw), servers: {}, raw: {} };
   const root = parseJsonRecord(raw, provider === 'opencode' ? 'opencode.json' : 'config.json');
-  const key = provider === 'opencode' ? 'mcp' : 'mcpServers';
+  const entries = objectEntry(root, provider === 'opencode' ? 'mcp' : 'mcpServers');
   const servers =
     provider === 'opencode' ? extractOpencodeServers(root) : extractMcpServersMap(root);
-  return { names: new Set(Object.keys(objectEntry(root, key))), servers };
+  return { names: new Set(Object.keys(entries)), servers, raw: entries };
 }
 
 function maskRecordValues(record: Record<string, string>): Record<string, string> {
@@ -859,20 +860,30 @@ async function planAccountMcpTarget(input: {
   };
 }
 
-function findUnmanagedConflicts(input: {
-  provider: ProviderId;
-  entries: TargetMcpEntries;
+function unmanagedEntryStates(input: { planned: PlannedTarget; names: readonly string[] }): {
+  identical: string[];
+  changed: string[];
+} {
+  const { planned } = input;
+  const { provider } = planned.item;
+  const before = targetMcpEntries({ provider, raw: planned.rawBefore ?? '' });
+  const present = input.names.filter((name) => before.names.has(name));
+  if (provider === 'codex' || planned.rawAfter === undefined) {
+    return { identical: [], changed: present };
+  }
+  const after = targetMcpEntries({ provider, raw: planned.rawAfter }).raw;
+  const same = (name: string): boolean => isDeepStrictEqual(before.raw[name], after[name]);
+  return {
+    identical: present.filter(same),
+    changed: present.filter((name) => !same(name)),
+  };
+}
+
+function unmanagedLibraryNames(input: {
   projection: LibraryMcpProjection;
   managedNames: readonly string[];
 }): string[] {
-  const { provider, entries, projection, managedNames } = input;
-  return projection.libraryNames.filter(
-    (name) =>
-      !managedNames.includes(name) &&
-      entries.names.has(name) &&
-      (provider === 'codex' ||
-        !isDeepStrictEqual(entries.servers[name], parseServerConfig(projection.servers[name]))),
-  );
+  return input.projection.libraryNames.filter((name) => !input.managedNames.includes(name));
 }
 
 function libraryExclusionReason(unverifiedNames: readonly string[]): string {
@@ -896,13 +907,11 @@ function annotateLibraryTarget(input: {
   const writable = (status === 'create' || status === 'update') && item.provider !== 'gemini';
   const entries = writable
     ? targetMcpEntries({ provider: item.provider, raw: planned.rawBefore ?? '' })
-    : { names: new Set<string>(), servers: {} };
-  const conflicts = findUnmanagedConflicts({
-    provider: item.provider,
-    entries,
-    projection,
-    managedNames,
-  });
+    : { names: new Set<string>(), servers: {}, raw: {} };
+  const conflicts = writable
+    ? unmanagedEntryStates({ planned, names: unmanagedLibraryNames({ projection, managedNames }) })
+        .changed
+    : [];
   if (conflicts.length > 0) {
     status = 'conflict';
     notes.push(
@@ -1038,12 +1047,15 @@ async function planLibraryAccountTarget(input: {
           stored: managedHashesFor(managed, managedKey),
           current: (name) => mcpEntryHash({ provider: account.provider, raw: before, name }),
         });
-  const planned = await planAccountMcpTarget({
-    account,
-    projectPath,
-    servers: projected.servers,
-    strippedNames: split.removed,
-    ...(before === undefined ? {} : { before }),
+  const planned = await planLibraryMerge({
+    target: {
+      account,
+      projectPath,
+      servers: projected.servers,
+      strippedNames: split.removed,
+      ...(before === undefined ? {} : { before }),
+    },
+    unmanagedNames: unmanagedLibraryNames({ projection: projected, managedNames }),
   });
   const unwritten = planned.unwrittenNames ?? [];
   const projection = {
@@ -1059,6 +1071,18 @@ async function planLibraryAccountTarget(input: {
 }
 
 const FILE_MCP_PROVIDERS: readonly ProviderId[] = ['claude', 'codex', 'opencode', 'qwen'];
+
+async function planLibraryMerge(input: {
+  target: Parameters<typeof planAccountMcpTarget>[0];
+  unmanagedNames: readonly string[];
+}): Promise<PlannedTarget> {
+  const { target, unmanagedNames } = input;
+  const first = await planAccountMcpTarget(target);
+  const { identical } = unmanagedEntryStates({ planned: first, names: unmanagedNames });
+  if (identical.length === 0) return first;
+  const servers = Object.entries(target.servers).filter(([name]) => !identical.includes(name));
+  return planAccountMcpTarget({ ...target, servers: Object.fromEntries(servers) });
+}
 
 function withMcpRemoval(input: {
   planned: PlannedTarget;
