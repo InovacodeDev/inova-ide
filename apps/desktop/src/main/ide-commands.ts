@@ -7,7 +7,7 @@ export interface CommandSpec {
   binary: string;
   parseArgs: (params: unknown) => string[] | undefined;
   cwd: CommandCwd;
-  mode: 'exec';
+  mode: 'exec' | 'pty';
   mutating: boolean;
   timeoutMs: number;
   maxOutputBytes: number;

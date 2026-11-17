@@ -5,6 +5,7 @@ import { TRUNCATION_MARKER } from '../shared/command-types.js';
 import type { CommandErrorCode, CommandEvent, CommandStream } from '../shared/command-types.js';
 import type { ChildProcessLike, SpawnChild } from './chat.js';
 import { stripAnsi } from './login-flow.js';
+import type { PtyProcess, SpawnPty } from './sessions.js';
 
 export interface ExecRequest {
   commandId: string;
@@ -15,6 +16,7 @@ export interface ExecRequest {
   queueKey: string;
   timeoutMs: number;
   maxOutputBytes: number;
+  mode?: 'exec' | 'pty';
   signal?: AbortSignal;
 }
 
@@ -27,11 +29,14 @@ export interface CommandExecutor {
 
 export interface CommandExecutorDeps {
   spawnChild: SpawnChild;
+  spawnPty?: SpawnPty;
   killTree: (pid: number, signal: NodeJS.Signals) => void;
   env: () => Promise<NodeJS.ProcessEnv>;
   findBinary: (name: string, env: NodeJS.ProcessEnv) => Promise<string | undefined>;
 }
 
+const PTY_COLS = 100;
+const PTY_ROWS = 30;
 const KILL_AFTER_MS = 2000;
 const EXIT_GRACE_MS = 2000;
 const MAX_PENDING_CHARS = 4096;
@@ -235,24 +240,11 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
       complete(run, null);
       destroyStreams(run);
     }, KILL_AFTER_MS);
-    signal(run, 'SIGTERM');
+    signal(run, run.request.mode === 'pty' ? 'SIGHUP' : 'SIGTERM');
   }
 
-  function spawnRun(run: Run, file: string, env: NodeJS.ProcessEnv): void {
-    let child: ChildProcessLike;
-    try {
-      child = deps.spawnChild({
-        file,
-        args: run.request.args,
-        cwd: run.request.cwd,
-        env: { ...env, ...EXEC_ENV },
-      });
-    } catch (error: unknown) {
-      fail(run, 'spawn-failed', errorMessage(error));
-      return;
-    }
-    run.child = child;
-    run.pid = child.pid;
+  function begin(run: Run, pid: number | undefined): void {
+    run.pid = pid;
     run.state = 'running';
     run.startedAt = Date.now();
     emit({
@@ -267,6 +259,51 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
       run.timedOut = true;
       terminate(run);
     }, run.request.timeoutMs);
+  }
+
+  function spawnTty(run: Run, file: string, env: NodeJS.ProcessEnv): void {
+    if (deps.spawnPty === undefined) {
+      fail(run, 'pty-unavailable', 'Terminal pseudo-interativo indisponível.');
+      return;
+    }
+    let tty: PtyProcess;
+    try {
+      tty = deps.spawnPty({
+        file,
+        args: run.request.args,
+        cwd: run.request.cwd,
+        env: { ...env, ...EXEC_ENV },
+        cols: PTY_COLS,
+        rows: PTY_ROWS,
+      });
+    } catch (error: unknown) {
+      fail(run, 'spawn-failed', errorMessage(error));
+      return;
+    }
+    begin(run, tty.pid);
+    tty.onData((data) => consume(run, 'stdout', data));
+    tty.onExit(({ exitCode }) => complete(run, exitCode));
+  }
+
+  function spawnRun(run: Run, file: string, env: NodeJS.ProcessEnv): void {
+    if (run.request.mode === 'pty') {
+      spawnTty(run, file, env);
+      return;
+    }
+    let child: ChildProcessLike;
+    try {
+      child = deps.spawnChild({
+        file,
+        args: run.request.args,
+        cwd: run.request.cwd,
+        env: { ...env, ...EXEC_ENV },
+      });
+    } catch (error: unknown) {
+      fail(run, 'spawn-failed', errorMessage(error));
+      return;
+    }
+    run.child = child;
+    begin(run, child.pid);
     child.stdout.on('data', (chunk: Buffer | string) => consume(run, 'stdout', chunk));
     child.stderr.on('data', (chunk: Buffer | string) => consume(run, 'stderr', chunk));
     child.on('error', (error: Error) => {

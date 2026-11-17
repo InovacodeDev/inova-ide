@@ -58,6 +58,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
       cwd: cwd.value,
       mutating: spec.mutating,
       queueKey,
+      mode: spec.mode,
       timeoutMs: spec.timeoutMs,
       maxOutputBytes: spec.maxOutputBytes,
     });

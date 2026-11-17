@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { vi } from 'vitest';
 import type { CommandEvent } from '../src/shared/command-types.js';
 import type { ChildProcessLike, SpawnChild } from '../src/main/chat.js';
+import type { PtyProcess, SpawnPty } from '../src/main/sessions.js';
 import { createCommandExecutor } from '../src/main/command-executor.js';
 import type { CommandExecutorDeps, ExecRequest } from '../src/main/command-executor.js';
 
@@ -10,6 +11,26 @@ export class FakeChild extends EventEmitter {
   pid: number | undefined = 4242;
   stdout = new PassThrough();
   stderr = new PassThrough();
+}
+
+export class FakePty {
+  pid = 7000;
+  private dataListeners: ((data: string) => void)[] = [];
+  private exitListeners: ((event: { exitCode: number }) => void)[] = [];
+  readonly write = vi.fn<(data: string) => void>();
+  readonly resize = vi.fn<(cols: number, rows: number) => void>();
+  onData(cb: (data: string) => void): void {
+    this.dataListeners.push(cb);
+  }
+  onExit(cb: (event: { exitCode: number }) => void): void {
+    this.exitListeners.push(cb);
+  }
+  emitData(data: string): void {
+    this.dataListeners.forEach((cb) => cb(data));
+  }
+  emitExit(exitCode: number): void {
+    this.exitListeners.forEach((cb) => cb({ exitCode }));
+  }
 }
 
 export function request(overrides: Partial<ExecRequest> = {}): ExecRequest {
@@ -49,6 +70,16 @@ export function setup(overrides: Partial<CommandExecutorDeps> = {}) {
   });
   executor.onEvent((event) => events.push(event));
   return { children, spawnChild, killTree, events, executor };
+}
+
+export function setupPty(overrides: Partial<CommandExecutorDeps> = {}) {
+  const ptys: FakePty[] = [];
+  const spawnPty = vi.fn<SpawnPty>(() => {
+    const tty = new FakePty();
+    ptys.push(tty);
+    return tty as unknown as PtyProcess;
+  });
+  return { ptys, spawnPty, ...setup({ spawnPty, ...overrides }) };
 }
 
 export function outputOf(events: readonly CommandEvent[]): string {
