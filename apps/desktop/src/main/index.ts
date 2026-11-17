@@ -133,6 +133,11 @@ const commandExecutor = createCommandExecutor({
   killTree: killProcessGroup,
   env: baseEnv,
   findBinary: (name, env) => findBinary(name, readEnvPath(env)),
+  cwdExists: (cwd) =>
+    stat(cwd).then(
+      (info) => info.isDirectory(),
+      () => false,
+    ),
 });
 commandExecutor.onEvent((event) => sendToWindow(CHANNELS.commandEvent, event));
 

@@ -30,11 +30,13 @@ export interface CommandExecutor {
 export interface CommandExecutorDeps {
   spawnChild: SpawnChild;
   spawnPty?: SpawnPty;
+  cwdExists?: (cwd: string) => Promise<boolean>;
   killTree: (pid: number, signal: NodeJS.Signals) => void;
   env: () => Promise<NodeJS.ProcessEnv>;
   findBinary: (name: string, env: NodeJS.ProcessEnv) => Promise<string | undefined>;
 }
 
+const MAX_ACTIVE_RUNS = 16;
 const PTY_COLS = 100;
 const PTY_ROWS = 30;
 const KILL_AFTER_MS = 2000;
@@ -47,18 +49,28 @@ const EXEC_ENV: NodeJS.ProcessEnv = {
 };
 // REGEX: well-known token shapes (GitHub, OpenAI-style, Slack, AWS access key id)
 const TOKEN_SHAPE =
-  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g;
-// REGEX: unquoted secret assignment such as GH_TOKEN=value or api_key: value
+  /(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b/g;
+// REGEX: secret assignment such as GH_TOKEN=value, api_key: value or "password": "value" (optional quotes around key and value)
 const SECRET_ASSIGNMENT =
-  /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY)\s*[=:]\s*)\S+/gi;
+  /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY)"?\s*[=:]\s*"?)[^\s",}]+/gi;
 // REGEX: Authorization header with a non-Bearer scheme
 const AUTH_HEADER = /(Authorization:\s*(?:token|basic)\s+)\S+/gi;
+// REGEX: credentials embedded in a URL, scheme://user:password@host
+const URL_CREDENTIALS = /(\b[a-z][a-z0-9+.-]*:\/\/[^:/\s@]+:)[^@\s/]+@/gi;
 
 export function sanitizeOutput(text: string): string {
   return maskSecretsInText(stripAnsi(text))
     .replace(AUTH_HEADER, '$1***')
+    .replace(URL_CREDENTIALS, '$1***@')
     .replace(SECRET_ASSIGNMENT, '$1***')
     .replace(TOKEN_SHAPE, '***');
+}
+
+export class CommandLimitError extends Error {
+  constructor() {
+    super('Too many commands in progress.');
+    this.name = 'CommandLimitError';
+  }
 }
 
 interface LineSink {
@@ -185,21 +197,24 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
     if (run.finished) return;
     const sink = run.sinks[stream];
     const decoded = typeof chunk === 'string' ? chunk : sink.decoder.write(chunk);
-    sink.pending += decoded.replace(/\r\n?/g, '\n');
-    const lines = sink.pending.split('\n');
+    const text = (sink.pending + decoded).replace(/\r\n/g, '\n').replace(/\r(?!$)/g, '\n');
+    const lines = text.split('\n');
     sink.pending = lines.pop() ?? '';
     for (const line of lines) emitLine(run, stream, line);
-    // NOTE: a line longer than MAX_PENDING_CHARS is flushed in pieces; a secret split exactly on a piece boundary is not masked
+    // NOTE: an overlong line is cut after the last whitespace of the first MAX_PENDING_CHARS; only a line with no whitespace at all can split a secret
     while (sink.pending.length > MAX_PENDING_CHARS) {
-      emitLine(run, stream, sink.pending.slice(0, MAX_PENDING_CHARS));
-      sink.pending = sink.pending.slice(MAX_PENDING_CHARS);
+      const window = sink.pending.slice(0, MAX_PENDING_CHARS);
+      const cut =
+        Math.max(window.lastIndexOf(' '), window.lastIndexOf('\t')) + 1 || MAX_PENDING_CHARS;
+      emitLine(run, stream, sink.pending.slice(0, cut));
+      sink.pending = sink.pending.slice(cut);
     }
   }
 
   function flush(run: Run): void {
     for (const stream of ['stdout', 'stderr'] as const) {
       const sink = run.sinks[stream];
-      const rest = sink.pending + sink.decoder.end();
+      const rest = (sink.pending + sink.decoder.end()).replace(/\r$/, '');
       sink.pending = '';
       if (rest !== '') emitLine(run, stream, rest);
     }
@@ -230,7 +245,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
       argv: run.argv,
       code,
       binary: run.request.binary,
-      message,
+      message: sanitizeOutput(message),
     });
     settleRun(run);
   }
@@ -325,6 +340,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
       if (run.finished) return;
       run.exitTimer = setTimeout(() => {
         run.exitTimer = undefined;
+        signal(run, 'SIGKILL');
         complete(run, code);
         destroyStreams(run);
       }, EXIT_GRACE_MS);
@@ -337,6 +353,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
     try {
       const env = await deps.env();
       const file = await deps.findBinary(run.request.binary, env);
+      const cwdOk = deps.cwdExists === undefined || (await deps.cwdExists(run.request.cwd));
       if (run.finished) return;
       if (run.cancelled) {
         complete(run, null);
@@ -344,6 +361,10 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
       }
       if (file === undefined) {
         fail(run, 'binary-not-found', `Binário não encontrado: ${run.request.binary}.`);
+        return;
+      }
+      if (!cwdOk) {
+        fail(run, 'spawn-failed', 'Pasta de trabalho não encontrada.');
         return;
       }
       spawnRun(run, file, env);
@@ -390,6 +411,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 
   return {
     async run(request) {
+      if (runs.size >= MAX_ACTIVE_RUNS) throw new CommandLimitError();
       const id = randomUUID();
       let settle: () => void = () => undefined;
       const exited = new Promise<void>((resolve) => {

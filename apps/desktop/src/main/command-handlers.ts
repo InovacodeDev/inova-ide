@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Result, RunCommandInput, RunCommandOutcome } from '../shared/api.js';
+import { CommandLimitError } from './command-executor.js';
 import type { CommandExecutor, ExecRequest } from './command-executor.js';
 import type { CommandService } from './command-service.js';
 import {
@@ -43,8 +44,15 @@ export function createCommandHandlers(deps: {
   }
 
   async function start(request: ExecRequest): Promise<Result<{ runId: string }>> {
-    const { runId } = await deps.executor.run(request);
-    return ok({ runId });
+    try {
+      const { runId } = await deps.executor.run(request);
+      return ok({ runId });
+    } catch (error: unknown) {
+      if (error instanceof CommandLimitError) {
+        return fail('Muitos comandos em andamento. Aguarde ou cancele algum.');
+      }
+      throw error;
+    }
   }
 
   return {
