@@ -9,6 +9,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   CapabilityFileError,
   listTomlTables,
@@ -18,6 +19,12 @@ import {
   writeAtomic,
 } from './capabilities/file-edit.js';
 import { parseMcpItems } from './capabilities/gemini.js';
+import type { CapabilityRef } from './capabilities/types.js';
+import { loadManaged, managedNamesFor, saveManaged } from './library/managed.js';
+import type { ManagedRegistry } from './library/managed.js';
+import { projectLibraryMcp } from './library/mcp.js';
+import type { LibraryMcpProjection } from './library/mcp.js';
+import type { LibraryItem } from './library/types.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
 
@@ -49,6 +56,12 @@ export interface ProfileSyncAccountInput {
   provider: ProviderId;
   label: string;
   homeDir: string;
+  disabledCapabilities?: CapabilityRef[];
+}
+
+export interface ProfileSyncLibraryInput {
+  items: readonly LibraryItem[];
+  projectDisabled: readonly string[];
 }
 
 export interface ProfileSyncItem {
@@ -77,6 +90,9 @@ export interface ProfileSyncApplyResult {
   appliedIds: string[];
   skippedIds: string[];
 }
+
+// REGEX: header of the mcp_servers table or of one of its subtables
+const MCP_TABLES_PATTERN = /^\s*\[mcp_servers[.\]]/m;
 
 const RULES_FILES: readonly RulesFile[] = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md'];
 
@@ -314,8 +330,7 @@ export function formatCodexMcpToml(
   servers: CanonicalMcpMap,
 ): { content: string; incompatible: { name: string; reason: string }[] } {
   const base = stripTomlMcpSections(existingToml);
-  // REGEX: header of the mcp_servers table or of one of its subtables
-  const hasMcpTables = /^\s*\[mcp_servers[.\]]/m.test(existingToml);
+  const hasMcpTables = MCP_TABLES_PATTERN.test(existingToml);
   const disabledNames = new Set(
     hasMcpTables
       ? listTomlTables(existingToml)
@@ -701,11 +716,114 @@ async function planAccountMcpTarget(input: {
       accountLabel: account.label,
       targetPath: account.homeDir,
       status: 'incompatible',
-      reason: `O provedor ${account.provider} não possui formato padronizado de MCP para sincronização.`,
+      reason: `O provedor ${account.provider} não possui formato padronizado de MCP para sincronização (suporte não verificado).`,
       maskedBefore: '',
       maskedAfter: '',
     },
   };
+}
+
+async function codexTableNames(account: ProfileSyncAccountInput): Promise<Set<string>> {
+  const toml = (await readOptionalFile(join(account.homeDir, 'config.toml'))) ?? '';
+  if (!MCP_TABLES_PATTERN.test(toml)) return new Set();
+  return new Set(
+    listTomlTables(toml)
+      .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
+      .map((segments) => segments[1] ?? ''),
+  );
+}
+
+async function findUnmanagedConflicts(input: {
+  account: ProfileSyncAccountInput;
+  projectPath: string;
+  projection: LibraryMcpProjection;
+  managedNames: readonly string[];
+}): Promise<string[]> {
+  const { account, projectPath, projection, managedNames } = input;
+  const candidates = projection.libraryNames.filter((name) => !managedNames.includes(name));
+  if (candidates.length === 0) return [];
+  if (account.provider === 'codex') {
+    const existingNames = await codexTableNames(account);
+    return candidates.filter((name) => existingNames.has(name));
+  }
+  const existing = await readAccountMcpConfig({ account, projectPath });
+  return candidates.filter(
+    (name) =>
+      Object.hasOwn(existing, name) &&
+      !isDeepStrictEqual(existing[name], parseServerConfig(projection.servers[name])),
+  );
+}
+
+function libraryExclusionReason(unverifiedNames: readonly string[]): string {
+  return `Itens da biblioteca ignorados (${unverifiedNames.join(', ')}): variável \${VAR} não verificada neste provider.`;
+}
+
+async function annotateLibraryTarget(input: {
+  planned: PlannedTarget;
+  account: ProfileSyncAccountInput;
+  projectPath: string;
+  projection: LibraryMcpProjection;
+  managedNames: readonly string[];
+}): Promise<PlannedTarget> {
+  const { planned, projection } = input;
+  const { item } = planned;
+  const notes = item.reason ? [item.reason] : [];
+  let status = item.status;
+  if (projection.unverifiedNames.length > 0) {
+    notes.push(libraryExclusionReason(projection.unverifiedNames));
+    if (Object.keys(projection.servers).length === 0) status = 'incompatible';
+  }
+  const writable = status === 'create' || status === 'update';
+  const conflicts =
+    writable && item.provider !== 'gemini' ? await findUnmanagedConflicts(input) : [];
+  if (conflicts.length > 0) {
+    status = 'conflict';
+    notes.push(
+      `MCP existente sem marcador da IDE e com definição diferente: ${conflicts.join(', ')}.`,
+    );
+  }
+  const reason = notes.length > 0 ? { reason: notes.join(' ') } : {};
+  return { ...planned, item: { ...item, status, ...reason } };
+}
+
+interface ProfileSyncPlan {
+  preview: ProfileSyncPreview;
+  targets: PlannedTarget[];
+  projections: Map<string, LibraryMcpProjection>;
+  managed: ManagedRegistry;
+}
+
+async function planAccountTarget(input: {
+  account: ProfileSyncAccountInput;
+  projectPath: string;
+  projectServers: CanonicalMcpMap;
+  library: ProfileSyncLibraryInput | undefined;
+  managed: ManagedRegistry;
+}): Promise<{ planned: PlannedTarget; projection: LibraryMcpProjection }> {
+  const { account, projectPath, projectServers, library, managed } = input;
+  if (!library) {
+    const projection = { servers: projectServers, libraryNames: [], unverifiedNames: [] };
+    return {
+      planned: await planAccountMcpTarget({ account, projectPath, servers: projectServers }),
+      projection,
+    };
+  }
+  const projection = projectLibraryMcp({
+    projectServers,
+    items: library.items,
+    projectDisabled: library.projectDisabled,
+    accountDisabled: account.disabledCapabilities ?? [],
+    provider: account.provider,
+  });
+  const planned = await planAccountMcpTarget({ account, projectPath, servers: projection.servers });
+  const annotated = await annotateLibraryTarget({
+    planned,
+    account,
+    projectPath,
+    projection,
+    managedNames: managedNamesFor(managed, account.id),
+  });
+  return { planned: annotated, projection };
 }
 
 async function planProfileTargets(input: {
@@ -713,7 +831,9 @@ async function planProfileTargets(input: {
   accounts: readonly ProfileSyncAccountInput[];
   rulesSource?: RulesFile | null;
   sourceAccountId?: string | null;
-}): Promise<{ preview: ProfileSyncPreview; targets: PlannedTarget[]; servers: CanonicalMcpMap }> {
+  root?: string;
+  library?: ProfileSyncLibraryInput;
+}): Promise<ProfileSyncPlan> {
   const mcp = await readCanonicalMcpConfig({ projectPath: input.projectPath });
   let servers = mcp.servers;
   if (!mcp.exists && input.sourceAccountId) {
@@ -731,15 +851,20 @@ async function planProfileTargets(input: {
       ? input.rulesSource
       : (availableRulesFiles[0] ?? null);
 
+  const managed: ManagedRegistry =
+    input.library && input.root ? await loadManaged(input.root) : { version: 1, mcp: {} };
   const targets: PlannedTarget[] = [];
+  const projections = new Map<string, LibraryMcpProjection>();
   for (const account of input.accounts) {
-    targets.push(
-      await planAccountMcpTarget({
-        account,
-        projectPath: input.projectPath,
-        servers,
-      }),
-    );
+    const { planned, projection } = await planAccountTarget({
+      account,
+      projectPath: input.projectPath,
+      projectServers: servers,
+      library: input.library,
+      managed,
+    });
+    targets.push(planned);
+    projections.set(account.id, projection);
   }
 
   if (resolvedSource) {
@@ -782,7 +907,8 @@ async function planProfileTargets(input: {
       items: targets.map((entry) => entry.item),
     },
     targets,
-    servers,
+    projections,
+    managed,
   };
 }
 
@@ -791,6 +917,8 @@ export async function previewProfileSync(input: {
   accounts: readonly ProfileSyncAccountInput[];
   rulesSource?: RulesFile | null;
   sourceAccountId?: string | null;
+  root?: string;
+  library?: ProfileSyncLibraryInput;
 }): Promise<ProfileSyncPreview> {
   const { preview } = await planProfileTargets(input);
   return preview;
@@ -836,17 +964,29 @@ export async function applyProfileSync(input: {
   runner?: CommandRunner;
   baseEnv?: NodeJS.ProcessEnv;
   now?: () => Date;
+  library?: ProfileSyncLibraryInput;
 }): Promise<ProfileSyncApplyResult> {
   const timestamp = (input.now?.() ?? new Date()).toISOString().replace(/[:.]/g, '-');
   const backupDir = join(input.root, 'backups', 'profile-sync', timestamp);
   const approved = new Set(input.approvedIds);
   const strategy = input.rulesStrategy ?? 'copy';
-  const { targets, servers, preview } = await planProfileTargets({
+  const { targets, projections, managed, preview } = await planProfileTargets({
+    root: input.root,
     projectPath: input.projectPath,
     accounts: input.accounts,
     ...(input.rulesSource !== undefined ? { rulesSource: input.rulesSource } : {}),
     ...(input.sourceAccountId !== undefined ? { sourceAccountId: input.sourceAccountId } : {}),
+    ...(input.library ? { library: input.library } : {}),
   });
+  const recordManaged = async (accountId: string, names: readonly string[]): Promise<void> => {
+    if (!input.library || names.length === 0) return;
+    await saveManaged({
+      root: input.root,
+      accountId,
+      names: [...managedNamesFor(managed, accountId), ...names],
+      ...(input.now ? { now: input.now } : {}),
+    });
+  };
 
   const appliedIds: string[] = [];
   const skippedIds: string[] = [];
@@ -883,15 +1023,26 @@ export async function applyProfileSync(input: {
       const disabledBefore = new Set(
         listedItems.filter((mcp) => !mcp.enabled).map((mcp) => mcp.id),
       );
-      for (const [name, server] of Object.entries(servers)) {
+      const listedNames = new Set(listedItems.map((mcp) => mcp.id));
+      const projection = projections.get(account.id);
+      const libraryNames = new Set(projection?.libraryNames ?? []);
+      const managedNames = managedNamesFor(managed, account.id);
+      const writtenLibraryNames: string[] = [];
+      for (const [name, server] of Object.entries(projection?.servers ?? {})) {
         const built = buildAgyMcpAddArgs(name, server);
         if ('incompatibleReason' in built) continue;
+        const isLibrary = libraryNames.has(name);
+        if (isLibrary && listedNames.has(name) && !managedNames.includes(name)) {
+          okAll = false;
+          continue;
+        }
         await input.runner.run({ command: 'agy', args: buildAgyMcpRemoveArgs(name), env });
         const result = await input.runner.run({ command: 'agy', args: built.args, env });
         if ('notFound' in result || result.exitCode !== 0) {
           okAll = false;
           continue;
         }
+        if (isLibrary) writtenLibraryNames.push(name);
         if (disabledBefore.has(name)) {
           const disabled = await input.runner.run({
             command: 'agy',
@@ -901,6 +1052,7 @@ export async function applyProfileSync(input: {
           if ('notFound' in disabled || disabled.exitCode !== 0) okAll = false;
         }
       }
+      await recordManaged(account.id, writtenLibraryNames);
       if (okAll) appliedIds.push(item.id);
       else skippedIds.push(item.id);
       continue;
@@ -929,6 +1081,9 @@ export async function applyProfileSync(input: {
     }
 
     await writeSerialized(planned.rawPath, planned.rawAfter);
+    if (item.scope === 'mcp' && item.accountId) {
+      await recordManaged(item.accountId, projections.get(item.accountId)?.libraryNames ?? []);
+    }
     appliedIds.push(item.id);
   }
 

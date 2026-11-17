@@ -92,7 +92,7 @@ export async function loadLibrary(root: string): Promise<Library> {
   return parseLibrary(file, parsed);
 }
 
-async function createBackupDir(input: { root: string; at: Date }): Promise<string> {
+export async function createBackupDir(input: { root: string; at: Date }): Promise<string> {
   const parent = join(input.root, 'backups', 'library');
   await mkdir(parent, { recursive: true, mode: 0o700 });
   const stamp = input.at.toISOString().replace(/[:.]/g, '-');
