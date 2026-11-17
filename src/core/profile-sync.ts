@@ -22,6 +22,7 @@ import { parseMcpItems } from './capabilities/gemini.js';
 import type { CapabilityRef } from './capabilities/types.js';
 import { loadManaged, managedNamesFor, managedTargetKey, saveManaged } from './library/managed.js';
 import type { ManagedRegistry } from './library/managed.js';
+import { stripCodexServerTables } from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
@@ -203,34 +204,58 @@ async function readAccountMcpConfig(input: {
   if (account.provider === 'opencode') {
     const raw = await readOptionalFile(join(projectPath, 'opencode.json'));
     if (!raw) return {};
-    const parsed = parseJsonRecord(raw, 'opencode.json');
-    const mcp = parsed['mcp'];
-    if (typeof mcp !== 'object' || mcp === null || Array.isArray(mcp)) return {};
-    const result: CanonicalMcpMap = {};
-    for (const [name, entry] of Object.entries(mcp as Record<string, unknown>)) {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
-      const item = entry as Record<string, unknown>;
-      if (item['type'] === 'remote' && typeof item['url'] === 'string') {
-        const headers = isStringRecord(item['headers']) ? item['headers'] : undefined;
-        result[name] = { type: 'http', url: item['url'], ...(headers ? { headers } : {}) };
-      } else if (
-        item['type'] === 'local' &&
-        Array.isArray(item['command']) &&
-        item['command'].length > 0 &&
-        item['command'].every((part) => typeof part === 'string')
-      ) {
-        const [command, ...args] = item['command'] as string[];
-        const env = isStringRecord(item['environment']) ? item['environment'] : undefined;
-        result[name] = {
-          command: command!,
-          ...(args.length > 0 ? { args } : {}),
-          ...(env ? { env } : {}),
-        };
-      }
-    }
-    return result;
+    return extractOpencodeServers(parseJsonRecord(raw, 'opencode.json'));
   }
   return {};
+}
+
+function objectEntry(root: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = root[key];
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function extractOpencodeServers(root: Record<string, unknown>): CanonicalMcpMap {
+  const result: CanonicalMcpMap = {};
+  for (const [name, entry] of Object.entries(objectEntry(root, 'mcp'))) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) continue;
+    const item = entry as Record<string, unknown>;
+    if (item['type'] === 'remote' && typeof item['url'] === 'string') {
+      const headers = isStringRecord(item['headers']) ? item['headers'] : undefined;
+      result[name] = { type: 'http', url: item['url'], ...(headers ? { headers } : {}) };
+    } else if (
+      item['type'] === 'local' &&
+      Array.isArray(item['command']) &&
+      item['command'].length > 0 &&
+      item['command'].every((part) => typeof part === 'string')
+    ) {
+      const [command, ...args] = item['command'] as string[];
+      const env = isStringRecord(item['environment']) ? item['environment'] : undefined;
+      result[name] = {
+        command: command!,
+        ...(args.length > 0 ? { args } : {}),
+        ...(env ? { env } : {}),
+      };
+    }
+  }
+  return result;
+}
+
+interface TargetMcpEntries {
+  names: ReadonlySet<string>;
+  servers: CanonicalMcpMap;
+}
+
+function targetMcpEntries(input: { provider: ProviderId; raw: string }): TargetMcpEntries {
+  const { provider, raw } = input;
+  if (raw.trim() === '') return { names: new Set(), servers: {} };
+  if (provider === 'codex') return { names: codexServerNames(raw), servers: {} };
+  const root = parseJsonRecord(raw, provider === 'opencode' ? 'opencode.json' : 'config.json');
+  const key = provider === 'opencode' ? 'mcp' : 'mcpServers';
+  const servers =
+    provider === 'opencode' ? extractOpencodeServers(root) : extractMcpServersMap(root);
+  return { names: new Set(Object.keys(objectEntry(root, key))), servers };
 }
 
 function maskRecordValues(record: Record<string, string>): Record<string, string> {
@@ -332,21 +357,56 @@ function formatTomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
 }
 
+function codexServerNames(toml: string): Set<string> {
+  if (!MCP_TABLES_PATTERN.test(toml)) return new Set();
+  return new Set(
+    listTomlTables(toml)
+      .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
+      .map((segments) => segments[1] ?? ''),
+  );
+}
+
+interface CodexFormatResult {
+  content: string;
+  incompatible: { name: string; reason: string }[];
+}
+
+interface CodexServerBlocks {
+  blocks: { name: string; text: string }[];
+  incompatible: { name: string; reason: string }[];
+}
+
+function joinCodexSections(base: string, blocks: CodexServerBlocks['blocks']): string {
+  const sections = [base, ...blocks.map((block) => block.text)].filter((part) => part !== '');
+  return sections.length === 0 ? '' : `${sections.join('\n\n')}\n`;
+}
+
 export function formatCodexMcpToml(
   existingToml: string,
   servers: CanonicalMcpMap,
-): { content: string; incompatible: { name: string; reason: string }[] } {
+): CodexFormatResult {
   const base = stripTomlMcpSections(existingToml);
-  const hasMcpTables = MCP_TABLES_PATTERN.test(existingToml);
+  const { blocks, incompatible } = codexServerBlocks(existingToml, servers);
+  return { content: joinCodexSections(base, blocks), incompatible };
+}
+
+function formatCodexLibraryToml(input: {
+  existingToml: string;
+  servers: CanonicalMcpMap;
+  managedNames: readonly string[];
+}): CodexFormatResult {
+  const { existingToml, servers, managedNames } = input;
+  const { blocks, incompatible } = codexServerBlocks(existingToml, servers);
+  const replaced = new Set([...blocks.map((block) => block.name), ...managedNames]);
+  const base = stripCodexServerTables({ toml: existingToml, names: replaced });
+  return { content: joinCodexSections(base, blocks), incompatible };
+}
+
+function codexServerBlocks(existingToml: string, servers: CanonicalMcpMap): CodexServerBlocks {
   const disabledNames = new Set(
-    hasMcpTables
-      ? listTomlTables(existingToml)
-          .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
-          .map((segments) => segments[1] ?? '')
-          .filter((name) => isTomlServerDisabled(existingToml, name))
-      : [],
+    [...codexServerNames(existingToml)].filter((name) => isTomlServerDisabled(existingToml, name)),
   );
-  const blocks: string[] = [];
+  const blocks: CodexServerBlocks['blocks'] = [];
   const incompatible: { name: string; reason: string }[] = [];
 
   for (const [name, server] of Object.entries(servers)) {
@@ -368,7 +428,7 @@ export function formatCodexMcpToml(
         lines.push(`http_headers = { ${pairs} }`);
       }
       if (disabledNames.has(name)) lines.push('enabled = false');
-      blocks.push(lines.join('\n'));
+      blocks.push({ name, text: lines.join('\n') });
       continue;
     }
 
@@ -383,14 +443,9 @@ export function formatCodexMcpToml(
         lines.push(`${formatTomlKey(ek)} = ${JSON.stringify(ev)}`);
       }
     }
-    blocks.push(lines.join('\n'));
+    blocks.push({ name, text: lines.join('\n') });
   }
-
-  const sections = [base, ...blocks].filter((part) => part !== '');
-  return {
-    content: sections.length === 0 ? '' : `${sections.join('\n\n')}\n`,
-    incompatible,
-  };
+  return { blocks, incompatible };
 }
 
 function parseJsonRecord(raw: string, label: string): Record<string, unknown> {
@@ -526,21 +581,43 @@ async function detectAvailableRules(projectPath: string): Promise<RulesFile[]> {
 interface PlannedTarget {
   item: ProfileSyncItem;
   rawPath: string;
+  rawBefore?: string;
   rawAfter?: string;
   unwrittenNames?: string[];
   managedKey?: string;
+  adoptedNames?: string[];
+}
+
+function mcpTargetPath(account: ProfileSyncAccountInput, projectPath: string): string {
+  switch (account.provider) {
+    case 'claude':
+      return join(account.homeDir, '.claude.json');
+    case 'codex':
+      return join(account.homeDir, 'config.toml');
+    case 'gemini':
+      return join(account.homeDir, '.gemini', 'settings.json');
+    case 'opencode':
+      return join(projectPath, 'opencode.json');
+    case 'qwen':
+      return join(account.homeDir, '.qwen', 'settings.json');
+    case 'deepseek':
+    case 'grok':
+    case 'kimi':
+      return account.homeDir;
+  }
 }
 
 async function planAccountMcpTarget(input: {
   account: ProfileSyncAccountInput;
   projectPath: string;
   servers: CanonicalMcpMap;
+  managedNames?: readonly string[];
 }): Promise<PlannedTarget> {
-  const { account, projectPath, servers } = input;
+  const { account, projectPath, servers, managedNames } = input;
   const maskedPreview = JSON.stringify({ mcpServers: maskMcpConfig(servers) }, null, 2);
+  const targetPath = mcpTargetPath(account, projectPath);
 
   if (account.provider === 'claude') {
-    const targetPath = join(account.homeDir, '.claude.json');
     const before = (await readOptionalFile(targetPath)) ?? '';
     const after = mergeMcpServersJson(before, servers, '.claude.json');
     const status: ProfileSyncStatus =
@@ -553,6 +630,7 @@ async function planAccountMcpTarget(input: {
             : 'update';
     return {
       rawPath: targetPath,
+      rawBefore: before,
       rawAfter: after,
       item: {
         id: `mcp:${account.id}`,
@@ -569,15 +647,17 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'codex') {
-    const targetPath = join(account.homeDir, 'config.toml');
     const before = (await readOptionalFile(targetPath)) ?? '';
-    let formatted: ReturnType<typeof formatCodexMcpToml>;
+    let formatted: CodexFormatResult;
     try {
-      formatted = formatCodexMcpToml(before, servers);
+      formatted = managedNames
+        ? formatCodexLibraryToml({ existingToml: before, servers, managedNames })
+        : formatCodexMcpToml(before, servers);
     } catch (error: unknown) {
       if (!(error instanceof CapabilityFileError)) throw error;
       return {
         rawPath: targetPath,
+        rawBefore: before,
         item: {
           id: `mcp:${account.id}`,
           scope: 'mcp',
@@ -606,6 +686,7 @@ async function planAccountMcpTarget(input: {
               : 'update';
     return {
       rawPath: targetPath,
+      rawBefore: before,
       rawAfter: formatted.content,
       unwrittenNames: formatted.incompatible.map((entry) => entry.name),
       item: {
@@ -624,7 +705,6 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'gemini') {
-    const targetPath = join(account.homeDir, '.gemini', 'settings.json');
     const cliCompatible = Object.entries(servers).filter(
       ([name, server]) => !('incompatibleReason' in buildAgyMcpAddArgs(name, server)),
     );
@@ -655,7 +735,6 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'opencode') {
-    const targetPath = join(projectPath, 'opencode.json');
     const before = (await readOptionalFile(targetPath)) ?? '';
     const merged = mergeOpencodeMcpJson(before, servers);
     const firstBad = merged.incompatible[0];
@@ -671,6 +750,7 @@ async function planAccountMcpTarget(input: {
               : 'update';
     return {
       rawPath: targetPath,
+      rawBefore: before,
       rawAfter: merged.content,
       unwrittenNames: merged.incompatible.map((entry) => entry.name),
       item: {
@@ -689,7 +769,6 @@ async function planAccountMcpTarget(input: {
   }
 
   if (account.provider === 'qwen') {
-    const targetPath = join(account.homeDir, '.qwen', 'settings.json');
     const before = (await readOptionalFile(targetPath)) ?? '';
     const after = mergeMcpServersJson(before, servers, '.qwen/settings.json');
     const status: ProfileSyncStatus =
@@ -702,6 +781,7 @@ async function planAccountMcpTarget(input: {
             : 'update';
     return {
       rawPath: targetPath,
+      rawBefore: before,
       rawAfter: after,
       item: {
         id: `mcp:${account.id}`,
@@ -734,34 +814,19 @@ async function planAccountMcpTarget(input: {
   };
 }
 
-async function codexTableNames(account: ProfileSyncAccountInput): Promise<Set<string>> {
-  const toml = (await readOptionalFile(join(account.homeDir, 'config.toml'))) ?? '';
-  if (!MCP_TABLES_PATTERN.test(toml)) return new Set();
-  return new Set(
-    listTomlTables(toml)
-      .filter((segments) => segments.length === 2 && segments[0] === 'mcp_servers')
-      .map((segments) => segments[1] ?? ''),
-  );
-}
-
-async function findUnmanagedConflicts(input: {
-  account: ProfileSyncAccountInput;
-  projectPath: string;
+function findUnmanagedConflicts(input: {
+  provider: ProviderId;
+  entries: TargetMcpEntries;
   projection: LibraryMcpProjection;
   managedNames: readonly string[];
-}): Promise<string[]> {
-  const { account, projectPath, projection, managedNames } = input;
-  const candidates = projection.libraryNames.filter((name) => !managedNames.includes(name));
-  if (candidates.length === 0) return [];
-  if (account.provider === 'codex') {
-    const existingNames = await codexTableNames(account);
-    return candidates.filter((name) => existingNames.has(name));
-  }
-  const existing = await readAccountMcpConfig({ account, projectPath });
-  return candidates.filter(
+}): string[] {
+  const { provider, entries, projection, managedNames } = input;
+  return projection.libraryNames.filter(
     (name) =>
-      Object.hasOwn(existing, name) &&
-      !isDeepStrictEqual(existing[name], parseServerConfig(projection.servers[name])),
+      !managedNames.includes(name) &&
+      entries.names.has(name) &&
+      (provider === 'codex' ||
+        !isDeepStrictEqual(entries.servers[name], parseServerConfig(projection.servers[name]))),
   );
 }
 
@@ -769,14 +834,12 @@ function libraryExclusionReason(unverifiedNames: readonly string[]): string {
   return `Itens da biblioteca ignorados (${unverifiedNames.join(', ')}): variável \${VAR} não verificada neste provider.`;
 }
 
-async function annotateLibraryTarget(input: {
+function annotateLibraryTarget(input: {
   planned: PlannedTarget;
-  account: ProfileSyncAccountInput;
-  projectPath: string;
   projection: LibraryMcpProjection;
   managedNames: readonly string[];
-}): Promise<PlannedTarget> {
-  const { planned, projection } = input;
+}): PlannedTarget {
+  const { planned, projection, managedNames } = input;
   const { item } = planned;
   const notes = item.reason ? [item.reason] : [];
   let status = item.status;
@@ -784,17 +847,27 @@ async function annotateLibraryTarget(input: {
     notes.push(libraryExclusionReason(projection.unverifiedNames));
     if (Object.keys(projection.servers).length === 0) status = 'incompatible';
   }
-  const writable = status === 'create' || status === 'update';
-  const conflicts =
-    writable && item.provider !== 'gemini' ? await findUnmanagedConflicts(input) : [];
+  const writable = (status === 'create' || status === 'update') && item.provider !== 'gemini';
+  const entries = writable
+    ? targetMcpEntries({ provider: item.provider, raw: planned.rawBefore ?? '' })
+    : { names: new Set<string>(), servers: {} };
+  const conflicts = findUnmanagedConflicts({
+    provider: item.provider,
+    entries,
+    projection,
+    managedNames,
+  });
   if (conflicts.length > 0) {
     status = 'conflict';
     notes.push(
       `MCP existente sem marcador da IDE e com definição diferente: ${conflicts.join(', ')}.`,
     );
   }
+  const adoptedNames = projection.libraryNames.filter(
+    (name) => !entries.names.has(name) || conflicts.includes(name),
+  );
   const reason = notes.length > 0 ? { reason: notes.join(' ') } : {};
-  return { ...planned, item: { ...item, status, ...reason } };
+  return { ...planned, adoptedNames, item: { ...item, status, ...reason } };
 }
 
 interface ProfileSyncPlan {
@@ -827,23 +900,27 @@ async function planAccountTarget(input: {
     accountDisabled: account.disabledCapabilities ?? [],
     provider: account.provider,
   });
-  const planned = await planAccountMcpTarget({ account, projectPath, servers: projected.servers });
+  const managedKey = managedTargetKey({
+    provider: account.provider,
+    accountId: account.id,
+    targetPath: mcpTargetPath(account, projectPath),
+  });
+  const managedNames = managedNamesFor(managed, managedKey);
+  const planned = await planAccountMcpTarget({
+    account,
+    projectPath,
+    servers: projected.servers,
+    managedNames,
+  });
   const unwritten = planned.unwrittenNames ?? [];
   const projection = {
     ...projected,
     libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
   };
-  const managedKey = managedTargetKey({
-    provider: account.provider,
-    accountId: account.id,
-    targetPath: planned.item.targetPath,
-  });
-  const annotated = await annotateLibraryTarget({
+  const annotated = annotateLibraryTarget({
     planned: { ...planned, managedKey },
-    account,
-    projectPath,
     projection,
-    managedNames: managedNamesFor(managed, managedKey),
+    managedNames,
   });
   return { planned: annotated, projection };
 }
@@ -1122,9 +1199,7 @@ export async function applyProfileSync(input: {
     }
 
     await writeSerialized(planned.rawPath, planned.rawAfter);
-    if (item.scope === 'mcp' && item.accountId) {
-      await recordManaged(planned.managedKey, projections.get(item.accountId)?.libraryNames ?? []);
-    }
+    if (item.scope === 'mcp') await recordManaged(planned.managedKey, planned.adoptedNames ?? []);
     appliedIds.push(item.id);
   }
 
