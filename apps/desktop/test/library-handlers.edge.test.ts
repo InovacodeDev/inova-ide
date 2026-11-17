@@ -231,6 +231,24 @@ describe('projeto e conta inexistentes', () => {
     expect(await exists(join(account.homeDir, 'skills'))).toBe(false);
   });
 
+  test('item desligado na conta (disabledCapabilities) não é planejado nem gravado', async () => {
+    const { root, handlers, account } = await setup();
+    const store = await loadStore(root);
+    await saveStore(root, {
+      ...store,
+      accounts: [{ ...account, disabledCapabilities: [{ kind: 'skill', id: 'demo-skill' }] }],
+    });
+    unwrap(await handlers.saveLibraryItem(skillInput('demo-skill')));
+    unwrap(await handlers.saveLibraryItem(skillInput('other-skill')));
+    const preview = unwrap(await handlers.previewLibrarySync({ projectId: 'proj-1' }));
+    const ids = preview.items.map((item) => item.id);
+    expect(ids).toContain('skill:acc-claude:other-skill');
+    expect(ids).not.toContain('skill:acc-claude:demo-skill');
+    unwrap(await handlers.applyLibrarySync({ projectId: 'proj-1', approvedIds: [] }));
+    expect(await exists(join(account.homeDir, 'skills', 'demo-skill'))).toBe(false);
+    expect(await exists(join(account.homeDir, 'skills', 'other-skill'))).toBe(true);
+  });
+
   test('accountIds vazio não sincroniza nenhuma conta', async () => {
     const { handlers, account } = await setup();
     unwrap(await handlers.saveLibraryItem(skillInput('demo-skill')));
