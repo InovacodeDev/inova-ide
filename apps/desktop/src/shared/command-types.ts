@@ -15,6 +15,14 @@ export type CommandEvent =
       timedOut: boolean;
       cancelled: boolean;
     }
-  | { kind: 'error'; runId: string; code: CommandErrorCode; binary: string; message: string };
+  | {
+      kind: 'error';
+      runId: string;
+      commandId: string;
+      argv: string[];
+      code: CommandErrorCode;
+      binary: string;
+      message: string;
+    };
 
 export const TRUNCATION_MARKER = '[saída cortada]';

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { ProviderId, SupportedLocale } from '@inova/core/types';
 import type { UsageWindow } from '@inova/core/chat-types';
 import type { AccountView } from '../shared/api';
@@ -36,6 +37,7 @@ export interface FooterProps {
   version?: string | null;
   updateAvailable?: boolean;
   onOpenChangelog?: () => void;
+  commandsSlot?: ReactNode;
 }
 
 const POPOVER_WIDTH_PX = 360;
@@ -155,7 +157,7 @@ function PopoverAccountCard(props: {
 export function Footer(props: FooterProps) {
   const { accounts, focusedAccountLabel, usage, onLoadUsage, onManageAccounts } = props;
   const { warningHistory = [], onClearWarningHistory } = props;
-  const { version = null, updateAvailable = false, onOpenChangelog } = props;
+  const { version = null, updateAvailable = false, onOpenChangelog, commandsSlot } = props;
   const { locale, t } = useI18n();
   const windowLabels: Record<UsageWindow['kind'], string> = {
     session: t('footer.window.session'),
@@ -364,6 +366,7 @@ export function Footer(props: FooterProps) {
       >
         {t('footer.manageAccounts')}
       </button>
+      {commandsSlot}
       {warningHistory.length > 0 ? (
         <div
           className="footer-alerts-wrap"

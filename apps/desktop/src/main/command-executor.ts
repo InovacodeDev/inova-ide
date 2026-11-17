@@ -223,7 +223,15 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
 
   function fail(run: Run, code: CommandErrorCode, message: string): void {
     if (run.finished) return;
-    emit({ kind: 'error', runId: run.id, code, binary: run.request.binary, message });
+    emit({
+      kind: 'error',
+      runId: run.id,
+      commandId: run.request.commandId,
+      argv: run.argv,
+      code,
+      binary: run.request.binary,
+      message,
+    });
     settleRun(run);
   }
 
