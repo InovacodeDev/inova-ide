@@ -203,6 +203,30 @@ describe('library MCP projection edges', () => {
     expect(item?.reason).toBeUndefined();
   });
 
+  it('does not mark a library server that the provider adapter could not write', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const home = await tmp();
+    const accounts = [account('codex', home)];
+    const sseConnector: LibraryItem = {
+      ...connectorItem('legacy'),
+      definition: { type: 'sse', url: 'https://legacy.example.com/sse' },
+    } as LibraryItem;
+    const library = libraryOf(sseConnector, mcpItem('plain'));
+
+    await applyProfileSync({
+      root,
+      projectPath: project,
+      accounts,
+      library,
+      approvedIds: ['mcp:acc-codex'],
+    });
+
+    expect((await loadManaged(root)).mcp['acc-codex']).toEqual(['plain']);
+    const preview = await previewProfileSync({ root, projectPath: project, accounts, library });
+    expect(preview.items.find((item) => item.id === 'mcp:acc-codex')?.status).toBe('unchanged');
+  });
+
   it('throws LibraryCorruptError when managed.json is corrupt', async () => {
     const root = await tmp();
     const project = await tmp();

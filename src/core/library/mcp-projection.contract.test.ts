@@ -50,10 +50,18 @@ describe('library MCP projection contract', () => {
     const project = await tmp();
     const homeA = await tmp();
     const homeB = await tmp();
+    const codexHome = await tmp();
     const accounts: ProfileSyncAccountInput[] = [
       claudeAccount('acc-a', homeA),
       {
         ...claudeAccount('acc-b', homeB),
+        disabledCapabilities: [{ kind: 'mcp', id: 'by-account' }],
+      },
+      {
+        id: 'acc-codex',
+        provider: 'codex',
+        label: 'codex',
+        homeDir: codexHome,
         disabledCapabilities: [{ kind: 'mcp', id: 'by-account' }],
       },
     ];
@@ -81,6 +89,11 @@ describe('library MCP projection contract', () => {
       'on-everywhere',
     ]);
     expect(Object.keys(await readClaudeServers(homeB))).toEqual(['on-everywhere']);
+    const toml = await readFile(join(codexHome, 'config.toml'), 'utf8');
+    expect(toml).toContain('[mcp_servers.on-everywhere]');
+    for (const absent of ['off-in-library', 'off-in-project', 'by-account']) {
+      expect(toml).not.toContain(absent);
+    }
   });
 
   it('rule 3: a project .mcp.json server wins over a library item with the same name', async () => {

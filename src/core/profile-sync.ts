@@ -520,6 +520,7 @@ interface PlannedTarget {
   item: ProfileSyncItem;
   rawPath: string;
   rawAfter?: string;
+  unwrittenNames?: string[];
 }
 
 async function planAccountMcpTarget(input: {
@@ -598,6 +599,7 @@ async function planAccountMcpTarget(input: {
     return {
       rawPath: targetPath,
       rawAfter: formatted.content,
+      unwrittenNames: formatted.incompatible.map((entry) => entry.name),
       item: {
         id: `mcp:${account.id}`,
         scope: 'mcp',
@@ -662,6 +664,7 @@ async function planAccountMcpTarget(input: {
     return {
       rawPath: targetPath,
       rawAfter: merged.content,
+      unwrittenNames: merged.incompatible.map((entry) => entry.name),
       item: {
         id: `mcp:${account.id}`,
         scope: 'mcp',
@@ -808,14 +811,19 @@ async function planAccountTarget(input: {
       projection,
     };
   }
-  const projection = projectLibraryMcp({
+  const projected = projectLibraryMcp({
     projectServers,
     items: library.items,
     projectDisabled: library.projectDisabled,
     accountDisabled: account.disabledCapabilities ?? [],
     provider: account.provider,
   });
-  const planned = await planAccountMcpTarget({ account, projectPath, servers: projection.servers });
+  const planned = await planAccountMcpTarget({ account, projectPath, servers: projected.servers });
+  const unwritten = planned.unwrittenNames ?? [];
+  const projection = {
+    ...projected,
+    libraryNames: projected.libraryNames.filter((name) => !unwritten.includes(name)),
+  };
   const annotated = await annotateLibraryTarget({
     planned,
     account,
