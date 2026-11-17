@@ -22,6 +22,7 @@ import {
   temporaryEntryName,
 } from './skills.js';
 import { skillDir } from './store.js';
+import { isFileSystemError } from './sync-errors.js';
 
 const MANAGED_BY = 'inova-ide';
 const MAX_MARKER_BYTES = 4096;
@@ -32,6 +33,8 @@ const UNSUPPORTED_REASONS: Partial<Record<ProviderId, string>> = {
   deepseek: 'DeepSeek sem suporte a skills.',
 };
 const UNVERIFIED_REASON = 'Pasta de skills deste provider não verificada.';
+const UNREADABLE_REASON =
+  'Não foi possível ler as skills desta conta. Corrija as permissões e tente de novo.';
 
 export interface SkillPlanEntry {
   item: ProfileSyncItem;
@@ -234,6 +237,21 @@ async function planAccountSkills(input: {
   return [...planned, ...(await planRemovals({ account, retainedIds }))];
 }
 
+async function planAccountSkillsOrReport(input: {
+  root: string;
+  account: ProfileSyncAccountInput;
+  library: ProfileSyncLibraryInput;
+  hashes: Map<string, LibraryHash>;
+}): Promise<SkillPlanEntry[]> {
+  try {
+    return await planAccountSkills(input);
+  } catch (error: unknown) {
+    if (!isFileSystemError(error)) throw error;
+    const facts: ItemFacts = { status: 'incompatible', reason: UNREADABLE_REASON };
+    return [buildEntry({ account: input.account, skillId: '', libraryHash: null, facts })];
+  }
+}
+
 export async function planSkillTargets(input: {
   root: string;
   accounts: readonly ProfileSyncAccountInput[];
@@ -242,7 +260,7 @@ export async function planSkillTargets(input: {
   const hashes = new Map<string, LibraryHash>();
   const entries: SkillPlanEntry[] = [];
   for (const account of input.accounts) {
-    entries.push(...(await planAccountSkills({ ...input, account, hashes })));
+    entries.push(...(await planAccountSkillsOrReport({ ...input, account, hashes })));
   }
   return entries;
 }

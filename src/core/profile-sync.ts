@@ -8,7 +8,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   CapabilityFileError,
@@ -27,6 +27,7 @@ import { projectLibraryMcp } from './library/mcp.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
 import type { SkillPlanEntry } from './library/skills-projection.js';
+import { ConfigParseError, isUnreadableConfigError } from './library/sync-errors.js';
 import type { LibraryItem } from './library/types.js';
 import type { CommandRunner } from './providers.js';
 import type { ProviderId } from './types.js';
@@ -455,10 +456,10 @@ function parseJsonRecord(raw: string, label: string): Record<string, unknown> {
     parsed = JSON.parse(raw);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`JSON inválido em ${label}: ${detail}`);
+    throw new ConfigParseError(`JSON inválido em ${label}: ${detail}`);
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`Objeto JSON esperado na raiz de ${label}.`);
+    throw new ConfigParseError(`Objeto JSON esperado na raiz de ${label}.`);
   }
   return { ...(parsed as Record<string, unknown>) };
 }
@@ -893,6 +894,50 @@ async function planAccountTarget(input: {
       projection,
     };
   }
+  try {
+    return await planLibraryAccountTarget({
+      account,
+      projectPath,
+      projectServers,
+      library,
+      managed,
+    });
+  } catch (error: unknown) {
+    if (!isUnreadableConfigError(error)) throw error;
+    return {
+      planned: unreadableMcpTarget(account, projectPath),
+      projection: { servers: {}, libraryNames: [], unverifiedNames: [] },
+    };
+  }
+}
+
+function unreadableMcpTarget(account: ProfileSyncAccountInput, projectPath: string): PlannedTarget {
+  const targetPath = mcpTargetPath(account, projectPath);
+  return {
+    rawPath: targetPath,
+    item: {
+      id: `mcp:${account.id}`,
+      scope: 'mcp',
+      provider: account.provider,
+      accountId: account.id,
+      accountLabel: account.label,
+      targetPath,
+      status: 'conflict',
+      reason: `Arquivo de configuração ilegível: ${basename(targetPath)}. Corrija ou restaure o arquivo.`,
+      maskedBefore: '',
+      maskedAfter: '',
+    },
+  };
+}
+
+async function planLibraryAccountTarget(input: {
+  account: ProfileSyncAccountInput;
+  projectPath: string;
+  projectServers: CanonicalMcpMap;
+  library: ProfileSyncLibraryInput;
+  managed: ManagedRegistry;
+}): Promise<{ planned: PlannedTarget; projection: LibraryMcpProjection }> {
+  const { account, projectPath, projectServers, library, managed } = input;
   const projected = projectLibraryMcp({
     projectServers,
     items: library.items,
