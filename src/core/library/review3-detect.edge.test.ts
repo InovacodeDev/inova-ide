@@ -89,6 +89,8 @@ describe('containsSecretLiteral negatives that must stay valid', () => {
     'monkey=1',
     '--password-file /etc/x',
     'x-api-key: ${API_KEY}',
+    'Authorization: Bearer ${GITHUB_TOKEN}',
+    'Sends a Bearer token to the API',
     'Set the Authorization header in your client',
   ])('accepts %s', (text) => {
     expect(containsSecretLiteral(text)).toBe(false);
@@ -142,6 +144,7 @@ describe('validateLibraryItem against the second review forms', () => {
     ['--token then reference', ['--token', '${GITHUB_TOKEN}']],
     ['--key then reference', ['--key', '${API_KEY}']],
     ['header with reference', ['--header', 'X-Api-Key: ${API_KEY}']],
+    ['bearer header with reference', ['-H', 'Authorization: Bearer ${GITHUB_TOKEN}']],
   ])('accepts args: %s', (_name, args) => {
     expect(withArgs(args)).toBe(true);
   });

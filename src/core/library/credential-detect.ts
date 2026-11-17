@@ -1,5 +1,3 @@
-import { maskSecretsInText } from '../profile-sync.js';
-
 // REGEX: zero-width characters (U+200B to U+200D, U+2060, U+FEFF)
 const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 // REGEX: run of percent-encoded bytes such as %67%68
@@ -20,6 +18,8 @@ const FLAG_WITH_VALUE =
 // REGEX: header name (authorization, x-api-key, api-key, x-auth-token, token), colon, optional scheme, then the value
 const HEADER_LITERAL =
   /(?<![A-Za-z0-9_-])(?:authorization|x-api-key|api-key|x-auth-token|token)\s*:\s*(?:(?:Basic|Bearer|Token)\s+)?("[^"]*"?|'[^']*'?|[^\s"']+)/gi;
+// REGEX: Bearer scheme word followed by the credential (double quoted, single quoted or bare)
+const BEARER_LITERAL = /(?<![A-Za-z0-9_-])Bearer\s+("[^"]*"?|'[^']*'?|[^\s"']+)/gi;
 // REGEX: whole argument is a dash-prefixed flag name, optionally ending in an equals sign
 const FLAG_ONLY = /^--?([A-Za-z][A-Za-z0-9_-]*)=?$/;
 // REGEX: lowercase-to-uppercase boundary inside a camelCase name
@@ -102,7 +102,7 @@ function hasSecretFlagValue(text: string): boolean {
 }
 
 function hasSecretHeader(text: string): boolean {
-  return [...text.matchAll(HEADER_LITERAL)].some((match) =>
+  return [...text.matchAll(HEADER_LITERAL), ...text.matchAll(BEARER_LITERAL)].some((match) =>
     looksLikeSecretValue(unquote(match[1] ?? '')),
   );
 }
@@ -114,7 +114,6 @@ function hasSecretShape(text: string): boolean {
 function hasSecretLiteral(text: string): boolean {
   return (
     hasSecretShape(text) ||
-    maskSecretsInText(text) !== text ||
     hasSecretAssignment(text) ||
     hasSecretFlagValue(text) ||
     hasSecretHeader(text)

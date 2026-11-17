@@ -68,7 +68,7 @@ async function setup(items: unknown[]) {
   );
   const run = vi.fn<CommandRunner['run']>(async () => ({ notFound: true }));
   const handlers = createLibraryHandlers({ root, baseEnv: async () => ({}), runner: { run } });
-  return { root, handlers };
+  return { root, handlers, homeDir: account.homeDir };
 }
 
 describe('biblioteca com item inválido', () => {
@@ -96,13 +96,21 @@ describe('biblioteca com item inválido', () => {
   });
 
   test('applyLibrarySync não projeta o item inválido', async () => {
-    const { root, handlers } = await setup([rawItem(), badItem()]);
+    const { homeDir, handlers } = await setup([rawItem(), badItem()]);
     const preview = unwrap(await handlers.previewLibrarySync({ projectId: 'proj-1' }));
     const approvedIds = preview.items.map((item) => item.approvalKey);
     unwrap(await handlers.applyLibrarySync({ projectId: 'proj-1', approvedIds }));
-    const managed = await readFile(join(root, 'library', 'managed.json'), 'utf8').catch(() => '');
-    expect(managed).not.toContain('bad-one');
-    expect(managed).not.toContain(SECRET);
+    const target = await readFile(join(homeDir, '.claude.json'), 'utf8');
+    expect(target).toContain('good-server');
+    expect(target).not.toContain('bad-server');
+    expect(target).not.toContain(SECRET);
+  });
+
+  test('um id fora do formato de slug aparece como inválido', async () => {
+    const { handlers } = await setup([rawItem({ id: 'Bad Id' })]);
+    const listing = unwrap(await handlers.listLibrary());
+    expect(listing.items).toEqual([]);
+    expect(listing.invalidItems.map((item) => item.id)).toEqual(['Bad Id']);
   });
 
   test('removeLibraryItem remove o item inválido e mantém o válido', async () => {
