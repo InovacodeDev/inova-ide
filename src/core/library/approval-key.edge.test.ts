@@ -73,10 +73,10 @@ async function mcpSetup() {
 }
 
 describe('approval by key is bound to the previewed state', () => {
-  it('gives every item a 32 hex approval key that changes with the target content', async () => {
+  it('gives every item a 32 hex approval key that changes with the target MCP content', async () => {
     const { common, target, key } = await mcpSetup();
     expect(key).toMatch(/^[0-9a-f]{32}$/);
-    await writeFile(target, JSON.stringify({ mcpServers: {}, other: 1 }));
+    await writeFile(target, JSON.stringify({ mcpServers: { other: { command: 'other' } } }));
     const again = await previewProfileSync(common);
     expect(again.items[0]?.approvalKey).not.toBe(key);
   });

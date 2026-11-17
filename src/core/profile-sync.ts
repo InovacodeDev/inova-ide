@@ -614,6 +614,8 @@ interface PlannedTarget {
   removedNames?: string[];
   prunedNames?: string[];
   projectNames?: string[];
+  keyBefore?: string;
+  keyAfter?: string;
 }
 
 interface KeyedTarget extends Omit<PlannedTarget, 'item'> {
@@ -626,8 +628,8 @@ function withApprovalKey(input: { planned: PlannedTarget; fallbackAfter: string 
   const key = approvalKey({
     id,
     status,
-    before: planned.rawBefore ?? '',
-    after: planned.rawAfter ?? fallbackAfter,
+    before: planned.keyBefore ?? planned.rawBefore ?? '',
+    after: planned.keyAfter ?? planned.rawAfter ?? fallbackAfter,
   });
   return { ...planned, item: { ...planned.item, approvalKey: key } };
 }
@@ -1075,7 +1077,21 @@ async function planLibraryAccountTarget(input: {
     projection,
     managedNames,
   });
-  return { planned: withLibraryView(annotated), projection };
+  return { planned: withMcpSubsetKey(withLibraryView(annotated)), projection };
+}
+
+function mcpSubsetText(input: { provider: ProviderId; raw: string }): string {
+  if (input.provider === 'codex') return codexMcpTablesText(input.raw);
+  return stableHash(targetMcpEntries(input).raw);
+}
+
+function withMcpSubsetKey(planned: PlannedTarget): PlannedTarget {
+  const { item, rawBefore, rawAfter } = planned;
+  if (rawBefore === undefined) return planned;
+  const keyBefore = mcpSubsetText({ provider: item.provider, raw: rawBefore });
+  if (rawAfter === undefined) return { ...planned, keyBefore };
+  const after = mcpSubsetText({ provider: item.provider, raw: rawAfter });
+  return { ...planned, keyBefore, keyAfter: JSON.stringify([after, planned.removedNames ?? []]) };
 }
 
 const FILE_MCP_PROVIDERS: readonly ProviderId[] = ['claude', 'codex', 'opencode', 'qwen'];
