@@ -4,6 +4,7 @@ dist
 .harness.json
 .claude-flow/
 .superpowers/
+.worktrees/
 .vitest/
 .codex/
 .cursor/

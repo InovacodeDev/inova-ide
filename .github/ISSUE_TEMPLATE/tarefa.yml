@@ -1,0 +1,36 @@
+name: Tarefa
+description: Tarefa específica de uma demanda. Deve ser sub-issue da demanda.
+title: 'Tarefa: '
+labels: [tarefa]
+body:
+  - type: input
+    id: demanda
+    attributes:
+      label: Demanda
+      description: Número da issue da demanda. Adicione esta tarefa como sub-issue dela.
+      placeholder: '#123'
+    validations:
+      required: true
+  - type: textarea
+    id: escopo
+    attributes:
+      label: Escopo
+      description: O que esta tarefa altera? Liste arquivos ou módulos, se souber.
+    validations:
+      required: true
+  - type: textarea
+    id: regras
+    attributes:
+      label: Regras de negócio cobertas
+      description: Regras que esta tarefa implementa. Cada uma vira um teste de contrato.
+  - type: textarea
+    id: bugs
+    attributes:
+      label: Cenários de bug a testar
+      description: Entradas inválidas, limites, concorrência, falhas. Viram testes *.edge.test.*.
+  - type: textarea
+    id: pronto
+    attributes:
+      label: Critério de pronto
+    validations:
+      required: true

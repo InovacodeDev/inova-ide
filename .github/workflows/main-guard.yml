@@ -1,0 +1,30 @@
+name: Main guard
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: Main guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check that every pushed commit came from a merged pull request
+        run: node scripts/dev-flow/check-main-push.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: main
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}

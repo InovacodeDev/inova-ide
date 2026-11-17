@@ -1,0 +1,51 @@
+name: Demanda
+description: Planejamento de uma demanda. As tarefas entram como sub-issues.
+title: 'Demanda: '
+labels: [demanda]
+body:
+  - type: textarea
+    id: contexto
+    attributes:
+      label: Contexto
+      description: Qual problema ou necessidade origina a demanda?
+    validations:
+      required: true
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      description: Qual resultado a demanda entrega?
+    validations:
+      required: true
+  - type: textarea
+    id: planejamento
+    attributes:
+      label: Planejamento
+      description: Abordagem, trade-offs e decisões. Link para spec ou plano, se existir.
+    validations:
+      required: true
+  - type: textarea
+    id: regras
+    attributes:
+      label: Regras de negócio
+      description: Cada regra vira um teste de contrato (*.contract.test.*).
+    validations:
+      required: true
+  - type: textarea
+    id: aceite
+    attributes:
+      label: Critérios de aceite
+      description: Como verificar que a demanda está pronta?
+    validations:
+      required: true
+  - type: textarea
+    id: tarefas
+    attributes:
+      label: Tarefas previstas
+      description: Uma linha por tarefa. Crie cada tarefa como sub-issue desta demanda.
+    validations:
+      required: true
+  - type: textarea
+    id: fora-de-escopo
+    attributes:
+      label: Fora de escopo
