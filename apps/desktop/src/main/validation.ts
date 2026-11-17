@@ -837,7 +837,7 @@ export function parseSaveLibraryItem(input: unknown): ParsedSaveLibraryItem | un
 }
 
 export function parseRemoveLibraryItem(input: unknown): { id: string } | undefined {
-  if (!isRecord(input) || !hasOnlyKeys(input, ['id']) || !isLibraryId(input['id'])) {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['id']) || !isSafeId(input['id'])) {
     return undefined;
   }
   return { id: input['id'] };
