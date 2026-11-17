@@ -71,6 +71,9 @@ export function ProjectLibraryPanel({ project, onDisabledChange }: ProjectLibrar
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
+                  {item.kind === 'skill' ? (
+                    <span className="library-row-desc">{t('library.project.skillNote')}</span>
+                  ) : null}
                 </div>
                 <div className="library-row-actions">
                   <span className={`library-row-state library-row-state-${status}`}>

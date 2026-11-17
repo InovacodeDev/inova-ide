@@ -60,8 +60,11 @@ export function LibraryItemRow(props: LibraryItemRowProps) {
           </button>
         </div>
       </div>
-      {item.kind === 'plugin' ? (
+      {item.kind === 'plugin' && item.enabled ? (
         <LibraryPluginInstall item={item} recipe={recipe} accounts={accounts} onRun={onRun} />
+      ) : null}
+      {item.kind === 'plugin' && !item.enabled ? (
+        <p className="library-hint">{t('library.plugin.disabled')}</p>
       ) : null}
     </li>
   );

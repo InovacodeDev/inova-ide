@@ -73,6 +73,7 @@ export const LIBRARY_PT_BR = {
     'Já existe um item com este ID. Edite o item existente ou use outro ID.',
 
   'library.plugin.install': 'Instalar na conta…',
+  'library.plugin.disabled': 'Ligue o item para instalar.',
   'library.plugin.account': 'Conta de destino',
   'library.plugin.run': 'Instalar',
   'library.plugin.unsupported': 'Não suportado: {reason}',
@@ -113,6 +114,8 @@ export const LIBRARY_PT_BR = {
   'library.project.libraryOff': 'Desligado na biblioteca',
   'library.project.projectOff': 'Desligado neste projeto',
   'library.project.effective': 'Ativo neste projeto',
+  'library.project.skillNote':
+    'Vale para novas sincronizações. Uma cópia já aplicada na conta continua lá até a skill ser desligada ou removida na biblioteca.',
 } as const;
 
 export type LibraryKey = keyof typeof LIBRARY_PT_BR;
@@ -191,6 +194,7 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.error.idExists': 'An item with this ID already exists. Edit it or use another ID.',
 
   'library.plugin.install': 'Install on account…',
+  'library.plugin.disabled': 'Turn the item on to install it.',
   'library.plugin.account': 'Target account',
   'library.plugin.run': 'Install',
   'library.plugin.unsupported': 'Not supported: {reason}',
@@ -230,4 +234,6 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.project.libraryOff': 'Off in the library',
   'library.project.projectOff': 'Off in this project',
   'library.project.effective': 'Active in this project',
+  'library.project.skillNote':
+    'Applies to new syncs. A copy already applied to the account stays there until the skill is turned off or removed in the library.',
 };
