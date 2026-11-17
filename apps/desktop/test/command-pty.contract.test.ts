@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import type { CommandExecutor } from '../src/main/command-executor.js';
 import { createCommandService } from '../src/main/command-service.js';
 import { COMMANDS } from '../src/main/ide-commands.js';
 import type { CommandSpec } from '../src/main/ide-commands.js';
@@ -47,7 +46,6 @@ describe('regra 9: pty só abre quando o registro marca TTY', () => {
   });
 
   test('o registro decide o modo: o serviço repassa spec.mode', async () => {
-    const run = vi.fn<CommandExecutor['run']>(async () => ({ runId: 'r' }));
     const ttySpec: CommandSpec = {
       id: 'test.tty',
       binary: 'tool',
@@ -59,29 +57,27 @@ describe('regra 9: pty só abre quando o registro marca TTY', () => {
       maxOutputBytes: 100,
     };
     const service = createCommandService({
-      executor: { run },
       projectPath: async () => undefined,
       ideRoot: '/i',
       neutralCwd: '/n',
       registry: { ...COMMANDS, 'test.tty': ttySpec },
     });
-    await service.run({ commandId: 'test.tty' });
-    await service.run({ commandId: 'gh.version' });
-    expect(run.mock.calls[0]?.[0]).toMatchObject({ mode: 'pty' });
-    expect(run.mock.calls[1]?.[0]).toMatchObject({ mode: 'exec' });
+    expect(await service.resolve({ commandId: 'test.tty' })).toMatchObject({
+      value: { mode: 'pty' },
+    });
+    expect(await service.resolve({ commandId: 'gh.version' })).toMatchObject({
+      value: { mode: 'exec' },
+    });
   });
 
   test('params do renderer não conseguem trocar o modo', async () => {
-    const run = vi.fn(async () => ({ runId: 'r' }));
     const service = createCommandService({
-      executor: { run },
       projectPath: async () => undefined,
       ideRoot: '/i',
       neutralCwd: '/n',
     });
-    const refused = await service.run({ commandId: 'gh.version', params: { mode: 'pty' } });
+    const refused = await service.resolve({ commandId: 'gh.version', params: { mode: 'pty' } });
     expect(refused.ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
   });
 });
 

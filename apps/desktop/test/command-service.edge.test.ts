@@ -15,34 +15,30 @@ const ideRootSpec: CommandSpec = {
 };
 
 function setup() {
-  const run = vi.fn(async () => ({ runId: 'r' }));
   const projectPath = vi.fn(async () => '/repos/app');
   const service = createCommandService({
-    executor: { run },
     projectPath,
     ideRoot: '/data/inova',
     neutralCwd: '/home/user',
     registry: { ...COMMANDS, 'test.ide': ideRootSpec },
   });
-  return { run, projectPath, service };
+  return { projectPath, service };
 }
 
 describe('commandId hostil', () => {
   test.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'])(
     'chaves do protótipo (%s) não são comandos',
     async (commandId) => {
-      const { service, run } = setup();
-      expect((await service.run({ commandId })).ok).toBe(false);
-      expect(run).not.toHaveBeenCalled();
+      const { service } = setup();
+      expect((await service.resolve({ commandId })).ok).toBe(false);
     },
   );
 
   test.each([undefined, null, 42, {}, [], '', 'x'.repeat(300)])(
     'commandId %j é recusado',
     async (commandId) => {
-      const { service, run } = setup();
-      expect((await service.run({ commandId })).ok).toBe(false);
-      expect(run).not.toHaveBeenCalled();
+      const { service } = setup();
+      expect((await service.resolve({ commandId })).ok).toBe(false);
     },
   );
 
@@ -103,7 +99,6 @@ describe('cwd e fila', () => {
     };
     const projectPath = vi.fn(async () => '/x');
     const service = createCommandService({
-      executor: { run: vi.fn() },
       projectPath,
       ideRoot: '/i',
       neutralCwd: '/n',
@@ -113,12 +108,5 @@ describe('cwd e fila', () => {
       expect((await service.resolve({ commandId: 'p', projectId })).ok).toBe(false);
     }
     expect(projectPath).not.toHaveBeenCalled();
-  });
-
-  test('o AbortSignal chega ao executor', async () => {
-    const { service, run } = setup();
-    const controller = new AbortController();
-    await service.run({ commandId: 'gh.version', signal: controller.signal });
-    expect(run).toHaveBeenCalledWith(expect.objectContaining({ signal: controller.signal }));
   });
 });

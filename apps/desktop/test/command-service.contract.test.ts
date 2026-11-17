@@ -17,31 +17,28 @@ const projectSpec: CommandSpec = {
 function setup(
   registry: Record<string, CommandSpec> = { ...COMMANDS, 'test.project': projectSpec },
 ) {
-  const run = vi.fn(async () => ({ runId: 'run-1' }));
   const projectPath = vi.fn(async (id: string) => (id === 'p1' ? '/repos/app' : undefined));
   const service = createCommandService({
-    executor: { run },
     projectPath,
     ideRoot: '/data/inova',
     neutralCwd: '/home/user',
     registry,
   });
-  return { run, projectPath, service };
+  return { projectPath, service };
 }
 
 describe('regra 1: commandId fora do registro é recusado', () => {
-  test('nenhum processo nasce para um id desconhecido', async () => {
-    const { service, run } = setup();
-    const result = await service.run({ commandId: 'rm.everything' });
-    expect(result.ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
+  test('um id desconhecido não resolve para nenhum processo', async () => {
+    const { service } = setup();
+    expect((await service.resolve({ commandId: 'rm.everything' })).ok).toBe(false);
   });
 
-  test('comandos do registro são aceitos', async () => {
-    const { service, run } = setup();
-    const result = await service.run({ commandId: 'gh.version' });
-    expect(result).toEqual({ ok: true, value: { runId: 'run-1' } });
-    expect(run).toHaveBeenCalledTimes(1);
+  test('comandos do registro resolvem', async () => {
+    const { service } = setup();
+    expect(await service.resolve({ commandId: 'gh.version' })).toMatchObject({
+      ok: true,
+      value: { binary: 'gh', args: ['--version'], mutating: false },
+    });
   });
 });
 
@@ -54,17 +51,15 @@ describe('regra 2: params inválidos são recusados antes de criar processo', ()
     ['tipo errado', { name: 42 }],
     ['sem params', undefined],
   ])('gh.extension.upgrade recusa %s', async (_label, params) => {
-    const { service, run } = setup();
-    const result = await service.run({ commandId: 'gh.extension.upgrade', params });
-    expect(result.ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
+    const { service } = setup();
+    expect((await service.resolve({ commandId: 'gh.extension.upgrade', params })).ok).toBe(false);
   });
 
   test('gh.version recusa params não vazios', async () => {
-    const { service, run } = setup();
-    const result = await service.run({ commandId: 'gh.version', params: { extra: 'x' } });
-    expect(result.ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
+    const { service } = setup();
+    expect((await service.resolve({ commandId: 'gh.version', params: { extra: 'x' } })).ok).toBe(
+      false,
+    );
   });
 });
 
@@ -113,17 +108,16 @@ describe('regra 3: texto livre do renderer nunca chega a um shell', () => {
 });
 
 describe('regra 8: cwd project com projeto desconhecido é recusado', () => {
-  test('projeto desconhecido recusa e não cria processo', async () => {
-    const { service, run } = setup();
-    const result = await service.run({ commandId: 'test.project', projectId: 'ghost' });
-    expect(result.ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
+  test('projeto desconhecido é recusado', async () => {
+    const { service } = setup();
+    expect((await service.resolve({ commandId: 'test.project', projectId: 'ghost' })).ok).toBe(
+      false,
+    );
   });
 
-  test('sem projectId recusa', async () => {
-    const { service, run } = setup();
-    expect((await service.run({ commandId: 'test.project' })).ok).toBe(false);
-    expect(run).not.toHaveBeenCalled();
+  test('sem projectId é recusado', async () => {
+    const { service } = setup();
+    expect((await service.resolve({ commandId: 'test.project' })).ok).toBe(false);
   });
 
   test('o cwd vem do store, nunca do renderer', async () => {

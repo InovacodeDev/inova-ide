@@ -3,6 +3,7 @@ import type { CapabilityKind, CapabilityListing } from '@inova/core/capabilities
 import type { ChatEvent, ContextBreakdown, UsageSnapshot } from '@inova/core/chat-types';
 import type { ProjectCommand } from '@inova/core/commands';
 import type { ComparisonDiffView } from '@inova/core/git-compare';
+import type { CommandEvent } from './command-types.js';
 import type { ProviderModels } from '@inova/core/models';
 import type {
   ProfileSyncApplyResult,
@@ -94,6 +95,16 @@ export type UpdateInstallStage =
   'preparing' | 'fetching' | 'downloading' | 'finalizing' | 'restarting';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+export interface RunCommandInput {
+  commandId: string;
+  params?: unknown;
+  projectId?: string;
+}
+
+export type RunCommandOutcome =
+  | { status: 'started'; runId: string }
+  | { status: 'needs-confirmation'; confirmationId: string; argv: string[]; cwd: string };
 
 export type AccountStatus = AuthStatus | 'expired';
 
@@ -416,6 +427,10 @@ export interface InovaApi {
   submitLoginCode(input: { sessionId: string; code: string }): Promise<Result<null>>;
   cancelLogin(sessionId: string): void;
   onLoginEvent(cb: (e: LoginEvent) => void): () => void;
+  runCommand(input: RunCommandInput): Promise<Result<RunCommandOutcome>>;
+  confirmCommand(input: { confirmationId: string }): Promise<Result<{ runId: string }>>;
+  cancelCommand(runId: string): void;
+  onCommandEvent(cb: (e: CommandEvent) => void): () => void;
 }
 
 export const CHANNELS = {
@@ -505,6 +520,10 @@ export const CHANNELS = {
   readFilePreview: 'inova:readFilePreview',
   pickViewerFiles: 'inova:pickViewerFiles',
   openFilePath: 'inova:openFilePath',
+  runCommand: 'inova:runCommand',
+  confirmCommand: 'inova:confirmCommand',
+  cancelCommand: 'inova:cancelCommand',
+  commandEvent: 'inova:command:event',
 } as const;
 
 declare global {

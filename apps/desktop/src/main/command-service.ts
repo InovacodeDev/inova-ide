@@ -1,5 +1,5 @@
 import type { Result } from '../shared/api.js';
-import type { CommandExecutor, ExecRequest } from './command-executor.js';
+import type { ExecRequest } from './command-executor.js';
 import { COMMANDS } from './ide-commands.js';
 import type { CommandSpec } from './ide-commands.js';
 import { fail, isRecord, ok } from './validation.js';
@@ -13,7 +13,6 @@ export interface CommandInput {
 }
 
 export interface CommandServiceDeps {
-  executor: Pick<CommandExecutor, 'run'>;
   projectPath: (projectId: string) => Promise<string | undefined>;
   ideRoot: string;
   neutralCwd: string;
@@ -22,7 +21,6 @@ export interface CommandServiceDeps {
 
 export interface CommandService {
   resolve(input: CommandInput): Promise<Result<ExecRequest>>;
-  run(input: CommandInput & { signal?: AbortSignal }): Promise<Result<{ runId: string }>>;
 }
 
 function isBoundedId(value: unknown): value is string {
@@ -64,15 +62,5 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
     });
   }
 
-  return {
-    resolve,
-    async run(input) {
-      const resolved = await resolve(input);
-      if (!resolved.ok) return resolved;
-      const request: ExecRequest =
-        input.signal === undefined ? resolved.value : { ...resolved.value, signal: input.signal };
-      const { runId } = await deps.executor.run(request);
-      return ok({ runId });
-    },
-  };
+  return { resolve };
 }

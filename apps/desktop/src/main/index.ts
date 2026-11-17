@@ -1,11 +1,12 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { getSettings } from '@inova/core/settings';
-import { dataRoot } from '@inova/core/store';
+import { dataRoot, loadStore } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
 import { nodeRunner } from '@inova/node-io';
 import { Notification, app, BrowserWindow, dialog, protocol, shell } from 'electron';
@@ -14,6 +15,9 @@ import { CHANNELS } from '../shared/api.js';
 import type { AttachmentKind, PickedAttachment } from '../shared/api.js';
 import { createChatRunner } from './chat.js';
 import type { SpawnChild } from './chat.js';
+import { createCommandExecutor } from './command-executor.js';
+import { createCommandHandlers } from './command-handlers.js';
+import { createCommandService } from './command-service.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
@@ -123,6 +127,15 @@ const chat = createChatRunner({
   emit: (sessionId, event) => handlers?.handleChatEvent(sessionId, event),
 });
 
+const commandExecutor = createCommandExecutor({
+  spawnChild,
+  spawnPty,
+  killTree: killProcessGroup,
+  env: baseEnv,
+  findBinary: (name, env) => findBinary(name, readEnvPath(env)),
+});
+commandExecutor.onEvent((event) => sendToWindow(CHANNELS.commandEvent, event));
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1200,
@@ -162,6 +175,7 @@ function closeAllSessions(): Promise<void> {
   return Promise.all([
     sessions.closeAll().catch(report),
     chat.closeAll().catch(report),
+    commandExecutor.closeAll().catch(report),
     disposeVoice ? disposeVoice().catch(report) : Promise.resolve(),
   ]).then(() => undefined);
 }
@@ -524,9 +538,20 @@ void app.whenReady().then(async () => {
       onProgress: (progress) => sendToWindow(CHANNELS.voiceModelProgress, progress),
     });
     disposeVoice = voice.dispose;
+    const commands = createCommandHandlers({
+      service: createCommandService({
+        projectPath: async (projectId) =>
+          (await loadStore(dataRoot(process.env))).projects.find((item) => item.id === projectId)
+            ?.path,
+        ideRoot: dataRoot(process.env),
+        neutralCwd: homedir(),
+      }),
+      executor: commandExecutor,
+    });
     registerIpc({
       handlers: created,
       voice: createVoiceHandlers(voice),
+      commands,
       allowedOrigin: appUrl,
     });
     createWindow();

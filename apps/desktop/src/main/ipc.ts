@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
+import type { CommandHandlers } from './command-handlers.js';
 import type { createHandlers } from './handlers.js';
 import type { VoiceHandlers } from './voice.js';
 
@@ -14,9 +15,10 @@ export function isAppUrl(url: string | undefined, appUrl: string): boolean {
 export function registerIpc(deps: {
   handlers: Handlers;
   voice: VoiceHandlers;
+  commands: CommandHandlers;
   allowedOrigin: string;
 }): void {
-  const { handlers, voice, allowedOrigin } = deps;
+  const { handlers, voice, commands, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -105,6 +107,8 @@ export function registerIpc(deps: {
   handle(CHANNELS.readFilePreview, (input) => handlers.readFilePreview(input));
   handle(CHANNELS.pickViewerFiles, () => handlers.pickViewerFiles());
   handle(CHANNELS.openFilePath, (input) => handlers.openFilePath(input));
+  handle(CHANNELS.runCommand, (input) => commands.runCommand(input));
+  handle(CHANNELS.confirmCommand, (input) => commands.confirmCommand(input));
 
   listen(CHANNELS.cancelTurn, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelTurn(sessionId);
@@ -112,6 +116,7 @@ export function registerIpc(deps: {
   listen(CHANNELS.reportUiFocus, (payload) => {
     handlers.reportUiFocus(payload);
   });
+  listen(CHANNELS.cancelCommand, (runId) => commands.cancelCommand(runId));
   listen(CHANNELS.cancelLogin, (sessionId) => {
     if (typeof sessionId === 'string') handlers.cancelLogin(sessionId);
   });
