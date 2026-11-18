@@ -47,6 +47,7 @@ import {
   withoutJsonServers,
 } from './library/mcp-removal.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
+import { maskUrlSecrets } from './library/mcp-view.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
 import type { SkillPlanEntry } from './library/skills-projection.js';
 import { ConfigParseError, isUnreadableConfigError } from './library/sync-errors.js';
@@ -1077,7 +1078,10 @@ async function planLibraryAccountTarget(input: {
     projection,
     managedNames,
   });
-  return { planned: withMcpSubsetKey(withLibraryView(annotated)), projection };
+  return {
+    planned: withMcpSubsetKey(withLibraryView({ planned: annotated, servers: projected.servers })),
+    projection,
+  };
 }
 
 function mcpSubsetText(input: { provider: ProviderId; raw: string }): string {
@@ -1140,12 +1144,30 @@ function libraryMcpView(input: { provider: ProviderId; raw: string }): string {
   const { provider, raw } = input;
   if (raw.trim() === '') return '';
   if (provider === 'codex') return maskSecretsInText(codexMcpTablesText(raw));
-  const servers = maskMcpConfig(targetMcpEntries({ provider, raw }).servers);
+  const servers = maskViewServers(targetMcpEntries({ provider, raw }).servers);
   return JSON.stringify({ [provider === 'opencode' ? 'mcp' : 'mcpServers']: servers }, null, 2);
 }
 
-function withLibraryView(planned: PlannedTarget): PlannedTarget {
+function maskViewServer(server: McpServerConfig): McpServerConfig {
+  if ('url' in server) return { ...server, url: maskUrlSecrets(maskSecretsInText(server.url)) };
+  return server.args ? { ...server, args: server.args.map(maskSecretsInText) } : server;
+}
+
+function maskViewServers(servers: CanonicalMcpMap): CanonicalMcpMap {
+  const masked = Object.entries(maskMcpConfig(servers));
+  return Object.fromEntries(masked.map(([name, server]) => [name, maskViewServer(server)]));
+}
+
+function withLibraryView(input: {
+  planned: PlannedTarget;
+  servers: CanonicalMcpMap;
+}): PlannedTarget {
+  const { planned } = input;
   const { item, rawBefore, rawAfter } = planned;
+  if (item.provider === 'gemini') {
+    const maskedAfter = JSON.stringify({ mcpServers: maskViewServers(input.servers) }, null, 2);
+    return { ...planned, item: { ...item, maskedAfter } };
+  }
   if (rawBefore === undefined) return planned;
   const maskedBefore = libraryMcpView({ provider: item.provider, raw: rawBefore });
   const maskedAfter = libraryMcpView({ provider: item.provider, raw: rawAfter ?? rawBefore });
