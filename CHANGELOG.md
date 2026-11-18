@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.10.1] - 2026-11-18
+
 ### Adicionado
 
 - Botão `Buscar atualização` na aba `Geral` das configurações: verifica na hora se existe uma versão nova e mostra se o app está atualizado, se há versão disponível, se nenhuma versão foi publicada ou se a busca falhou (`pt-BR` e `en-US`).
