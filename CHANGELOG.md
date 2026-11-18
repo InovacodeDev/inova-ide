@@ -6,7 +6,38 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Botão `Buscar atualização` na aba `Geral` das configurações: verifica na hora se existe uma versão nova e mostra se o app está atualizado, se há versão disponível, se nenhuma versão foi publicada ou se a busca falhou (`pt-BR` e `en-US`).
+
 ## [0.10.0] - 2026-11-18
+
+### Adicionado
+
+- Biblioteca de capacidades da IDE: skills, servidores MCP, conectores e plugins pertencem à IDE (`<root>/library/`) e valem para todo projeto e todo provider, sem reinstalar item por conta.
+- Seção `Biblioteca` nas configurações e painel de override por projeto para ligar ou desligar itens. O item efetivo exige estar ligado na biblioteca e no projeto e não desligado na conta; o item do projeto vence o da biblioteca com o mesmo nome.
+- Projeção da biblioteca nas contas dos providers pelo `profile-sync`: skills por cópia com marcador, MCP e conectores com marcador gerenciado (incluindo `codex`), prévia com aprovação antes de gravar e remoção aprovada dos itens que a biblioteca deixou de reter.
+- Instalação de plugins pelo CLI oficial do provider, executada sob o ambiente da conta, com matriz de suporte por provider.
+- Executor de comandos da IDE: o renderer envia só `{ commandId, params }` e o `main` monta o `argv` a partir de um registro validado, sem `sh -c`. Comandos que alteram estado pedem confirmação e rodam em fila; há modo `pty` para comandos que exigem TTY, timeout, limite de saída e limpeza do processo.
+- Indicador de comandos na interface, com saída somente leitura e diálogo de confirmação.
+- Composer com autoformatação estilo Slack: `` `código` ``, `*negrito*`, `_itálico_` e `~riscado~` viram formato ao digitar o delimitador de fechamento, e `- `, `1. `, `> ` e ` ``` ` viram lista, lista numerada, citação e bloco de código. `Backspace` logo após a conversão devolve o texto literal e `Ctrl+Z` desfaz.
+
+### Segurança
+
+- A biblioteca rejeita texto com formato de chave de API e detecta segredos literais (incluindo `Bearer`) nos campos dos itens. Segredos de MCP entram só como referência de variável (`${NOME}`); a IDE não guarda valor de token.
+- A prévia de sincronização mascara `args`, segredos em URL (inclusive entre aspas) e todo valor de MCP do `codex` fora de uma lista de chaves seguras.
+- A aprovação da sincronização fica presa a uma chave do estado previsto de cada alvo e ao subconjunto MCP dele; mudança no alvo exige nova aprovação.
+- O executor mascara segredos na saída e remove variáveis de ambiente de credencial do provider dos comandos de plugin.
+
+### Corrigido
+
+- A autoformatação do composer não converte `snake_case`, `__init__`, URLs, caminhos, tokens que começam com `@` ou `/` nem texto dentro de `code`, e não roda durante composição IME nem ao colar.
+- Item da biblioteca semanticamente inválido vai para quarentena e aparece na seção com ação de remover, em vez de travar a biblioteca inteira; itens com `id` fora do formato de slug podem ser removidos.
+- Entrada de MCP sem marcador que difere da projeção vira conflito; MCP gerenciado só é removido quando a entrada do alvo bate com o hash gravado, e o nome gerenciado é liberado quando um servidor do projeto o assume.
+- Tabelas MCP do `codex` que não são gerenciadas são preservadas, e servidores idênticos do usuário não são mais adotados como gerenciados. Entrada inline do `codex` informa o próprio motivo de conflito.
+- Config ilegível de uma conta vira conflito dessa conta, sem derrubar a sincronização das demais. A prévia volta ao estado inicial quando a biblioteca muda.
+- Skill removida da biblioteca ganha backup antes da remoção, e o conector desligado na conta é respeitado. O botão de instalar some para plugin desativado, e o painel explica o limite de skills por projeto.
+- Arquivo temporário da biblioteca é limpo quando o `rename` final falha.
 
 ## [0.9.3] - 2026-11-17
 

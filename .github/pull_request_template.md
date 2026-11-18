@@ -8,6 +8,10 @@ Closes #
 - [ ] Cenários de bug (`*.edge.test.*`): arquivo novo ou atualizado (obrigatório em `feat` e `fix`)
 - [ ] Nenhum teste de contrato existente foi alterado, removido ou renomeado
 
+## Changelog
+
+- [ ] `CHANGELOG.md` atualizado na seção `[Não lançado]` (exceto na branch `release/*`)
+
 ## Verificação
 
 Comandos executados e resultado:

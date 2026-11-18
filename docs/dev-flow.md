@@ -9,6 +9,7 @@ Este documento é a fonte única do fluxo. Ele vale para pessoas e para agentes.
 3. Cada tarefa tem uma branch vinculada à issue e um PR que fecha a issue.
 4. Toda mudança de código tem teste. Os testes seguem dois padrões (seção "Testes").
 5. Um teste de contrato que já está na `main` é imutável.
+6. Todo PR atualiza o `CHANGELOG.md` na seção `[Não lançado]` (seção "Changelog").
 
 ## Passo a passo
 
@@ -55,6 +56,8 @@ gh pr create --base main --title "<título>" --body "Closes #<numero-da-tarefa>"
 
 O PR deve conter `Closes #<numero-da-tarefa>`. O GitHub fecha a tarefa no merge.
 
+Antes de abrir o PR, registre a mudança no `CHANGELOG.md` (seção "Changelog").
+
 ### 6. Faça o merge
 
 O merge exige os checks `PR policy` e `verify` verdes. Depois do merge, feche a demanda quando
@@ -77,6 +80,17 @@ todas as tarefas estiverem fechadas.
 
 Locais: `src/**/*.test.ts` (CLI), `apps/desktop/test/**/*.test.ts` (desktop) e
 `scripts/**/*.test.mjs` (scripts, com `node --test`).
+
+## Changelog
+
+Todo PR registra o que fez no `CHANGELOG.md`, sob o título `## [Não lançado]`, no mesmo PR.
+
+- Use a subseção `### Adicionado`, `### Alterado`, `### Corrigido`, `### Removido` ou `### Segurança`.
+  Crie a subseção se ela não existir.
+- Escreva uma linha por mudança, em português, no passado, do ponto de vista de quem usa o app.
+- Não crie seção de versão. O script de release move o conteúdo de `[Não lançado]` para a versão.
+- A branch `release/vX.Y.Z` é a única exceção. O script de release já atualiza o arquivo.
+- Agentes seguem a mesma regra. Um PR sem entrada nova em `[Não lançado]` não está pronto.
 
 ## Release
 

@@ -10,6 +10,7 @@ Siga o fluxo de [docs/dev-flow.md](docs/dev-flow.md) em toda mudança. Resumo ob
 6. Toda `feat` cria um `*.contract.test.*` novo e um `*.edge.test.*`. Todo `fix` cria ou atualiza um `*.edge.test.*`.
 7. Nunca altere, remova nem renomeie um `*.contract.test.*` existente. Se ele falhar, corrija o código.
 8. Nunca aplique a label `contrato-alteracao-aprovada`. Se a regra de negócio mudou, pare e peça a aprovação do usuário.
+9. Todo PR atualiza o `CHANGELOG.md` na seção `[Não lançado]` com o que foi feito. Só a branch `release/*` fica isenta.
 
 Checks antes de abrir o PR: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm format:check`,
 `pnpm --filter @inova/desktop typecheck`, `pnpm --filter @inova/desktop test`.
