@@ -3,6 +3,7 @@ import type { UpdateInfo, UpdateInstallStage } from '../shared/api';
 import {
   LAST_SEEN_VERSION_KEY,
   UPDATE_DISMISSED_KEY,
+  manualCheckStatus,
   shouldShowUpdateToast,
   shouldShowWhatsNew,
 } from './update-state';
@@ -44,6 +45,12 @@ export function useUpdates(call: WarningCall) {
     setDismissed(info.latest);
   }, [info]);
 
+  const checkNow = useCallback(async () => {
+    const result = await window.inova.checkForUpdate();
+    if (result.ok) setInfo(result.value);
+    return manualCheckStatus(result);
+  }, []);
+
   const install = useCallback(async () => {
     setInstalling(true);
     setInstallStage(null);
@@ -60,6 +67,7 @@ export function useUpdates(call: WarningCall) {
     installing,
     installStage,
     install,
+    checkNow,
     updateAvailable: info?.available === true,
     toastVisible: shouldShowUpdateToast({ info, dismissed }),
     dismissToast,

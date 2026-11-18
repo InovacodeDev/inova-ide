@@ -2724,6 +2724,7 @@ export function App() {
             accounts={accounts}
             projects={projects}
             onRunCommand={commandRuns.requestRun}
+            onCheckUpdate={updates.checkNow}
             onUpdate={(patch) => void updateSettings(patch)}
             onSetDefaultMode={(provider, mode) => void setDefaultProviderMode(provider, mode)}
             onClose={() => setSettingsOpen(false)}

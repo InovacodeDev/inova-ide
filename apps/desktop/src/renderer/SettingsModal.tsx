@@ -20,6 +20,7 @@ import {
 } from './SettingsSections';
 import { ModelsSection } from './SettingsModels';
 import { VoiceSection } from './SettingsVoice';
+import type { ManualCheckStatus } from './update-state';
 import { useDialogFocus } from './useDialogFocus';
 import type { WarningCall } from './useWarning';
 import './modal.css';
@@ -33,6 +34,7 @@ interface SettingsModalProps {
   accounts: readonly AccountView[];
   projects: readonly ProjectView[];
   onRunCommand: RunCommand;
+  onCheckUpdate: () => Promise<ManualCheckStatus>;
   onUpdate: (patch: SettingsPatch) => void;
   onSetDefaultMode: (provider: ProviderId, mode: ExecutionMode) => void;
   onClose: () => void;
@@ -47,6 +49,7 @@ export function SettingsModal(props: SettingsModalProps) {
     accounts,
     projects,
     onRunCommand,
+    onCheckUpdate,
     onUpdate,
     onSetDefaultMode,
     onClose,
@@ -82,7 +85,14 @@ export function SettingsModal(props: SettingsModalProps) {
   };
 
   const panels: Record<SettingsSectionId, ReactNode> = {
-    general: <GeneralSection settings={settings} onUpdate={onUpdate} call={call} />,
+    general: (
+      <GeneralSection
+        settings={settings}
+        onUpdate={onUpdate}
+        call={call}
+        onCheckUpdate={onCheckUpdate}
+      />
+    ),
     models: (
       <ModelsSection
         settings={settings}

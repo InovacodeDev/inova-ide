@@ -10,6 +10,7 @@ import {
   shortcutGroupLabel,
   shortcutLabel,
 } from './shortcuts';
+import type { ManualCheckStatus } from './update-state';
 import type { WarningCall } from './useWarning';
 
 interface SettingsSectionProps {
@@ -21,8 +22,22 @@ export function GeneralSection({
   settings,
   onUpdate,
   call,
-}: SettingsSectionProps & { call: WarningCall }) {
+  onCheckUpdate,
+}: SettingsSectionProps & {
+  call: WarningCall;
+  onCheckUpdate: () => Promise<ManualCheckStatus>;
+}) {
   const { t } = useI18n();
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<ManualCheckStatus | null>(null);
+  const checkUpdate = async () => {
+    setChecking(true);
+    try {
+      setStatus(await onCheckUpdate());
+    } finally {
+      setChecking(false);
+    }
+  };
   const themeOptions: { value: Settings['appearance']['theme']; label: string }[] = [
     { value: 'system', label: t('settings.theme.system') },
     { value: 'dark', label: t('settings.theme.dark') },
@@ -69,8 +84,38 @@ export function GeneralSection({
           </button>
         </SettingRow>
       </SettingGroup>
+      <SettingGroup title={t('settings.updates.title')}>
+        <SettingRow
+          title={t('settings.updates.checkTitle')}
+          description={
+            status === null ? t('settings.updates.checkDesc') : manualStatusText(status, t)
+          }
+        >
+          <button
+            type="button"
+            className="btn"
+            disabled={checking}
+            onClick={() => void checkUpdate()}
+          >
+            {checking ? t('settings.updates.checking') : t('settings.updates.check')}
+          </button>
+        </SettingRow>
+      </SettingGroup>
     </>
   );
+}
+
+function manualStatusText(status: ManualCheckStatus, t: ReturnType<typeof useI18n>['t']): string {
+  switch (status.kind) {
+    case 'upToDate':
+      return t('settings.updates.upToDate', { version: status.current });
+    case 'available':
+      return t('settings.updates.available', { version: status.latest });
+    case 'unknown':
+      return t('settings.updates.unknown', { version: status.current });
+    case 'error':
+      return t('settings.updates.error', { message: status.message });
+  }
 }
 
 const ARCHIVE_OPTIONS: {
