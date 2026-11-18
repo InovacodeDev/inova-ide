@@ -103,9 +103,33 @@ describe('models', () => {
     ] as const) {
       expect(PROVIDER_MODELS[provider].models.length).toBeGreaterThan(0);
       expect(PROVIDER_MODELS[provider].efforts.length).toBeGreaterThan(0);
+      const ids = new Set<string>();
       for (const model of PROVIDER_MODELS[provider].models) {
         expect(model.label).toMatch(/\d/);
+        expect(ids.has(model.id)).toBe(false);
+        ids.add(model.id);
       }
     }
+  });
+
+  it('includes current flagship models across providers', () => {
+    const ids = (provider: keyof typeof PROVIDER_MODELS) =>
+      PROVIDER_MODELS[provider].models.map((m) => m.id);
+    expect(ids('claude')).toEqual(expect.arrayContaining(['sonnet', 'opus', 'fable', 'haiku']));
+    expect(ids('codex')).toEqual(expect.arrayContaining(['gpt-6.2-astra', 'gpt-6.2-sol']));
+    expect(ids('gemini')).toEqual(
+      expect.arrayContaining([
+        'gemini-4-neon-high',
+        'gemini-4-hydrogen-high',
+        'gemini-pro-orchestrator-neon',
+      ]),
+    );
+    expect(ids('deepseek')).toEqual(expect.arrayContaining(['deepseek-flash', 'deepseek-v4-pro']));
+    expect(ids('kimi')).toEqual(expect.arrayContaining(['kimi-k3.1-pro', 'kimi-k3']));
+    expect(ids('grok')).toEqual(expect.arrayContaining(['grok-4.7', 'grok-4.20-reasoning']));
+    expect(ids('qwen')).toEqual(expect.arrayContaining(['qwen4-max', 'qwen3.8-max']));
+    expect(ids('opencode')).toEqual(
+      expect.arrayContaining(['opencode/gpt-6.2-sol', 'opencode/deepseek-v4.1-flash-free']),
+    );
   });
 });
