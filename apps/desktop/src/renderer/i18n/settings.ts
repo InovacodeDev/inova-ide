@@ -7,6 +7,7 @@ export const SETTINGS_PT_BR = {
   'settings.section.sessions': 'Sessões',
   'settings.section.notifications': 'Notificações',
   'settings.section.voice': 'Voz',
+  'settings.section.library': 'Biblioteca',
   'settings.section.shortcuts': 'Atalhos',
 
   'settings.appearance.title': 'Aparência',
@@ -203,6 +204,7 @@ export const SETTINGS_EN_US: Record<SettingsKey, string> = {
   'settings.section.sessions': 'Sessions',
   'settings.section.notifications': 'Notifications',
   'settings.section.voice': 'Voice',
+  'settings.section.library': 'Library',
   'settings.section.shortcuts': 'Shortcuts',
 
   'settings.appearance.title': 'Appearance',

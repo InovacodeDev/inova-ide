@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
 import type { CommandHandlers } from '../src/main/command-handlers.js';
+import type { LibraryHandlers } from '../src/main/library-handlers.js';
 import type { VoiceHandlers } from '../src/main/voice.js';
 
 type Listener = (event: unknown, ...args: unknown[]) => unknown;
@@ -104,13 +105,22 @@ function setup() {
     confirmCommand: vi.fn(async () => ({ ok: true as const, value: 'confirmCommand' })),
     cancelCommand: vi.fn(),
   };
+  const library = {
+    listLibrary: vi.fn(async () => ({ ok: true as const, value: 'listLibrary' })),
+    saveLibraryItem: vi.fn(async () => ({ ok: true as const, value: 'saveLibraryItem' })),
+    removeLibraryItem: vi.fn(async () => ({ ok: true as const, value: 'removeLibraryItem' })),
+    setProjectOverride: vi.fn(async () => ({ ok: true as const, value: 'setProjectOverride' })),
+    previewLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'previewLibrarySync' })),
+    applyLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'applyLibrarySync' })),
+  };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
     voice: voice as unknown as VoiceHandlers,
     commands: commands as unknown as CommandHandlers,
+    library: library as unknown as LibraryHandlers,
     allowedOrigin: APP,
   });
-  return { handlers, voice, commands };
+  return { handlers, voice, commands, library };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -141,7 +151,7 @@ test('a trusted invoke reaches the handler with the payload only', async () => {
 });
 
 test('invokes from a foreign or unknown sender are rejected', async () => {
-  const { handlers, voice, commands } = setup();
+  const { handlers, voice, commands, library } = setup();
   for (const event of [foreign, { senderFrame: null }, {}]) {
     for (const channel of electron.invokes.keys()) {
       await expect(invoke(channel, event, {})).rejects.toThrow('Remetente não autorizado.');
@@ -151,6 +161,7 @@ test('invokes from a foreign or unknown sender are rejected', async () => {
     ...Object.values(handlers),
     ...Object.values(voice),
     ...Object.values(commands),
+    ...Object.values(library),
   ]) {
     expect(handler).not.toHaveBeenCalled();
   }
@@ -186,6 +197,23 @@ test('command invokes and cancelCommand enforce trusted sender', async () => {
   expect(commands.cancelCommand).not.toHaveBeenCalled();
   send('inova:cancelCommand', trusted, 'r');
   expect(commands.cancelCommand).toHaveBeenCalledWith('r');
+});
+
+test('library invokes reach the library handlers', async () => {
+  const { library } = setup();
+  const input = { projectId: 'p', approvedIds: [] };
+  await invoke('inova:listLibrary', trusted);
+  expect(library.listLibrary).toHaveBeenCalledWith();
+  for (const name of [
+    'saveLibraryItem',
+    'removeLibraryItem',
+    'setProjectOverride',
+    'previewLibrarySync',
+    'applyLibrarySync',
+  ] as const) {
+    await invoke(`inova:${name}`, trusted, input);
+    expect(library[name]).toHaveBeenCalledWith(input);
+  }
 });
 
 test('there is no channel that accepts a raw command line', () => {

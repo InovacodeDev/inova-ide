@@ -1,3 +1,4 @@
+import type { ProviderId } from '@inova/core/types';
 import type { Result } from '../shared/api.js';
 import type { ExecRequest } from './command-executor.js';
 import { COMMANDS } from './ide-commands.js';
@@ -10,10 +11,19 @@ export interface CommandInput {
   commandId: unknown;
   params?: unknown;
   projectId?: unknown;
+  accountId?: unknown;
 }
+
+export interface AccountCommandEnv {
+  env: Record<string, string>;
+  unsetEnv: readonly string[];
+}
+
+type ResolvedAccount = ({ id: string } & AccountCommandEnv) | undefined;
 
 export interface CommandServiceDeps {
   projectPath: (projectId: string) => Promise<string | undefined>;
+  accountEnv?: (accountId: string, provider: ProviderId) => Promise<AccountCommandEnv | undefined>;
   ideRoot: string;
   neutralCwd: string;
   registry?: Readonly<Record<string, CommandSpec>>;
@@ -38,6 +48,25 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
     return path === undefined ? fail('Projeto não encontrado.') : ok(path);
   }
 
+  async function accountOf(
+    spec: CommandSpec,
+    accountId: unknown,
+  ): Promise<Result<ResolvedAccount>> {
+    if (spec.account === undefined) return ok(undefined);
+    if (!isBoundedId(accountId) || deps.accountEnv === undefined) {
+      return fail('Conta não encontrada.');
+    }
+    const resolved = await deps.accountEnv(accountId, spec.account.provider);
+    return resolved === undefined
+      ? fail('Conta não encontrada.')
+      : ok({ id: accountId, ...resolved });
+  }
+
+  function queueKeyOf(spec: CommandSpec, projectId: unknown, account: ResolvedAccount): string {
+    if (account !== undefined) return `account:${account.id}`;
+    return spec.cwd === 'project' ? `project:${String(projectId)}` : 'global';
+  }
+
   async function resolve(input: CommandInput): Promise<Result<ExecRequest>> {
     if (!isRecord(input) || !isBoundedId(input.commandId)) return fail('Comando não permitido.');
     const { commandId } = input;
@@ -48,14 +77,18 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
     if (args === undefined) return fail('Parâmetros inválidos.');
     const cwd = await cwdOf(spec, input.projectId);
     if (!cwd.ok) return cwd;
-    const queueKey = spec.cwd === 'project' ? `project:${String(input.projectId)}` : 'global';
+    const account = await accountOf(spec, input.accountId);
+    if (!account.ok) return account;
     return ok({
+      ...(account.value === undefined
+        ? {}
+        : { env: account.value.env, unsetEnv: account.value.unsetEnv }),
       commandId: spec.id,
       binary: spec.binary,
       args,
       cwd: cwd.value,
       mutating: spec.mutating,
-      queueKey,
+      queueKey: queueKeyOf(spec, input.projectId, account.value),
       mode: spec.mode,
       timeoutMs: spec.timeoutMs,
       maxOutputBytes: spec.maxOutputBytes,

@@ -3,6 +3,8 @@ import { AccountError, findAccount } from '@inova/core/accounts';
 import { isCapabilityRef } from '@inova/core/capabilities/types';
 import type { CapabilityKind } from '@inova/core/capabilities/types';
 import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
+import { isLibraryId } from '@inova/core/library/index';
+import type { LibraryItemKind } from '@inova/core/library/index';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
 import { WorktreeError } from '@inova/core/git-worktree';
@@ -704,13 +706,15 @@ function isBoundedJson(value: unknown): boolean {
 
 export function parseRunCommand(input: unknown): RunCommandInput | undefined {
   if (!isRecord(input)) return undefined;
-  const { commandId, params, projectId } = input;
+  const { commandId, params, projectId, accountId } = input;
   if (!isText(commandId) || !isBoundedJson(params)) return undefined;
   if (projectId !== undefined && !isSafeId(projectId)) return undefined;
+  if (accountId !== undefined && !isSafeId(accountId)) return undefined;
   return {
     commandId,
     ...(params === undefined ? {} : { params }),
     ...(projectId === undefined ? {} : { projectId }),
+    ...(accountId === undefined ? {} : { accountId }),
   };
 }
 
@@ -722,6 +726,167 @@ export function parseConfirmCommand(input: unknown): { confirmationId: string } 
 
 export function parseCommandRunId(input: unknown): string | undefined {
   return isSafeId(input) ? input : undefined;
+}
+
+const MAX_LIBRARY_NAME = 100;
+const MAX_LIBRARY_DESCRIPTION = 500;
+const MAX_LIBRARY_SKILL_CONTENT = 262_144;
+const MAX_LIBRARY_DEFINITION_ENTRIES = 100;
+const MAX_LIBRARY_DEFINITION_DEPTH = 5;
+const MAX_LIBRARY_DEFINITION_NODES = 1000;
+const MAX_LIBRARY_DEFINITION_TEXT = 2048;
+const MAX_SYNC_ACCOUNTS = 50;
+const MAX_APPROVED_IDS = 200;
+const MAX_APPROVED_ID_LENGTH = 300;
+
+const LIBRARY_ITEM_COMMON_KEYS = ['id', 'name', 'description', 'enabled', 'kind'];
+const LIBRARY_ITEM_KIND_KEYS: Record<LibraryItemKind, string[]> = {
+  skill: ['content'],
+  mcp: ['definition'],
+  connector: ['definition', 'label'],
+  plugin: ['definition'],
+};
+
+export interface ParsedSaveLibraryItem {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  kind: LibraryItemKind;
+  content?: string;
+  definition?: unknown;
+  label?: string;
+}
+
+export interface ParsedLibrarySyncSelection {
+  projectId: string;
+  accountIds?: string[];
+}
+
+function hasOnlyKeys(input: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(input).every((key) => allowed.includes(key));
+}
+
+function isLibraryKind(value: unknown): value is LibraryItemKind {
+  return typeof value === 'string' && Object.hasOwn(LIBRARY_ITEM_KIND_KEYS, value);
+}
+
+function isBoundedDefinition(definition: unknown): boolean {
+  let nodes = 0;
+  const visit = (value: unknown, depth: number): boolean => {
+    nodes += 1;
+    if (nodes > MAX_LIBRARY_DEFINITION_NODES || depth > MAX_LIBRARY_DEFINITION_DEPTH) return false;
+    if (typeof value === 'string') return value.length <= MAX_LIBRARY_DEFINITION_TEXT;
+    if (Array.isArray(value)) {
+      return (
+        value.length <= MAX_LIBRARY_DEFINITION_ENTRIES &&
+        value.every((entry: unknown) => visit(entry, depth + 1))
+      );
+    }
+    if (!isRecord(value)) return true;
+    const keys = Object.keys(value);
+    return (
+      keys.length <= MAX_LIBRARY_DEFINITION_ENTRIES &&
+      keys.every((key) => key.length <= MAX_LIBRARY_DEFINITION_TEXT && visit(value[key], depth + 1))
+    );
+  };
+  return isRecord(definition) && visit(definition, 1);
+}
+
+function isLibraryLabel(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_LIBRARY_NAME;
+}
+
+function parseLibraryKindFields(input: {
+  kind: LibraryItemKind;
+  raw: Record<string, unknown>;
+}): Pick<ParsedSaveLibraryItem, 'content' | 'definition' | 'label'> | undefined {
+  const { kind, raw } = input;
+  switch (kind) {
+    case 'skill': {
+      const content = raw['content'];
+      if (content === undefined) return {};
+      const valid = typeof content === 'string' && content.length <= MAX_LIBRARY_SKILL_CONTENT;
+      return valid ? { content } : undefined;
+    }
+    case 'connector': {
+      const label = raw['label'];
+      const valid = isLibraryLabel(label) && isBoundedDefinition(raw['definition']);
+      return valid ? { definition: raw['definition'], label } : undefined;
+    }
+    case 'mcp':
+    case 'plugin':
+      return isBoundedDefinition(raw['definition']) ? { definition: raw['definition'] } : undefined;
+  }
+}
+
+export function parseSaveLibraryItem(input: unknown): ParsedSaveLibraryItem | undefined {
+  if (!isRecord(input)) return undefined;
+  const { id, name, description, enabled, kind } = input;
+  if (!isLibraryId(id) || !isLibraryKind(kind) || typeof enabled !== 'boolean') return undefined;
+  if (typeof name !== 'string' || name.length > MAX_LIBRARY_NAME) return undefined;
+  const validDescription =
+    description === null ||
+    (typeof description === 'string' && description.length <= MAX_LIBRARY_DESCRIPTION);
+  if (!validDescription) return undefined;
+  if (!hasOnlyKeys(input, [...LIBRARY_ITEM_COMMON_KEYS, ...LIBRARY_ITEM_KIND_KEYS[kind]])) {
+    return undefined;
+  }
+  const fields = parseLibraryKindFields({ kind, raw: input });
+  return fields === undefined ? undefined : { id, name, description, enabled, kind, ...fields };
+}
+
+export function parseRemoveLibraryItem(input: unknown): { id: string } | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['id']) || !isSafeId(input['id'])) {
+    return undefined;
+  }
+  return { id: input['id'] };
+}
+
+export function parseSetProjectOverride(
+  input: unknown,
+): { projectId: string; itemId: string; disabled: boolean } | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['projectId', 'itemId', 'disabled'])) {
+    return undefined;
+  }
+  const { projectId, itemId, disabled } = input;
+  if (!isSafeId(projectId) || !isLibraryId(itemId) || typeof disabled !== 'boolean') {
+    return undefined;
+  }
+  return { projectId, itemId, disabled };
+}
+
+function parseLibrarySyncSelection(
+  input: Record<string, unknown>,
+): ParsedLibrarySyncSelection | undefined {
+  const { projectId, accountIds } = input;
+  if (!isSafeId(projectId)) return undefined;
+  if (accountIds === undefined) return { projectId };
+  if (!Array.isArray(accountIds) || accountIds.length > MAX_SYNC_ACCOUNTS) return undefined;
+  return accountIds.every(isSafeId) ? { projectId, accountIds } : undefined;
+}
+
+export function parsePreviewLibrarySync(input: unknown): ParsedLibrarySyncSelection | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['projectId', 'accountIds'])) return undefined;
+  return parseLibrarySyncSelection(input);
+}
+
+export function parseApplyLibrarySync(
+  input: unknown,
+): (ParsedLibrarySyncSelection & { approvedIds: string[] }) | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['projectId', 'accountIds', 'approvedIds'])) {
+    return undefined;
+  }
+  const selection = parseLibrarySyncSelection(input);
+  const { approvedIds } = input;
+  if (!selection || !Array.isArray(approvedIds) || approvedIds.length > MAX_APPROVED_IDS) {
+    return undefined;
+  }
+  const valid = approvedIds.every(
+    (id: unknown): id is string =>
+      typeof id === 'string' && id !== '' && id.length <= MAX_APPROVED_ID_LENGTH,
+  );
+  return valid ? { ...selection, approvedIds } : undefined;
 }
 
 export function requireAccount(store: Store, label: string): Account {

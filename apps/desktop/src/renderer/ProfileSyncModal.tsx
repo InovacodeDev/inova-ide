@@ -57,6 +57,8 @@ function profileSyncStatusText(status: ProfileSyncStatus, t: TranslateFn): strin
       return t('profileSync.status.conflict');
     case 'incompatible':
       return t('profileSync.status.incompatible');
+    case 'remove':
+      return t('profileSync.status.remove');
   }
 }
 

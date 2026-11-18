@@ -5,9 +5,11 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { isolatedEnv } from '@inova/core/launch';
 import { getSettings } from '@inova/core/settings';
 import { dataRoot, loadStore } from '@inova/core/store';
 import { providers } from '@inova/core/providers';
+import type { ProviderId } from '@inova/core/types';
 import { nodeRunner } from '@inova/node-io';
 import { Notification, app, BrowserWindow, dialog, protocol, shell } from 'electron';
 import * as pty from 'node-pty';
@@ -18,8 +20,10 @@ import type { SpawnChild } from './chat.js';
 import { createCommandExecutor } from './command-executor.js';
 import { createCommandHandlers } from './command-handlers.js';
 import { createCommandService } from './command-service.js';
+import type { AccountCommandEnv } from './command-service.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
+import { createLibraryHandlers } from './library-handlers.js';
 import { NOTIFICATION_SETTINGS_URL, createNotifier } from './notifications.js';
 import { createPreviewRegistry } from './preview-protocol.js';
 import { killProcessGroup } from './process-group.js';
@@ -126,6 +130,22 @@ const chat = createChatRunner({
   killTree: killProcessGroup,
   emit: (sessionId, event) => handlers?.handleChatEvent(sessionId, event),
 });
+
+async function accountCommandEnv(
+  accountId: string,
+  provider: ProviderId,
+): Promise<AccountCommandEnv | undefined> {
+  const store = await loadStore(dataRoot(process.env));
+  const account = store.accounts.find((item) => item.id === accountId);
+  if (account === undefined || account.provider !== provider) return undefined;
+  const entries = Object.entries(isolatedEnv(account, {}));
+  return {
+    env: Object.fromEntries(
+      entries.flatMap(([name, value]) => (value === undefined ? [] : [[name, value]])),
+    ),
+    unsetEnv: providers[account.provider].strippedEnvVars,
+  };
+}
 
 const commandExecutor = createCommandExecutor({
   spawnChild,
@@ -548,15 +568,22 @@ void app.whenReady().then(async () => {
         projectPath: async (projectId) =>
           (await loadStore(dataRoot(process.env))).projects.find((item) => item.id === projectId)
             ?.path,
+        accountEnv: accountCommandEnv,
         ideRoot: dataRoot(process.env),
         neutralCwd: homedir(),
       }),
       executor: commandExecutor,
     });
+    const library = createLibraryHandlers({
+      root: dataRoot(process.env),
+      baseEnv,
+      runner: nodeRunner,
+    });
     registerIpc({
       handlers: created,
       voice: createVoiceHandlers(voice),
       commands,
+      library,
       allowedOrigin: appUrl,
     });
     createWindow();

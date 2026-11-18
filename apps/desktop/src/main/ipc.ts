@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { CommandHandlers } from './command-handlers.js';
 import type { createHandlers } from './handlers.js';
+import type { LibraryHandlers } from './library-handlers.js';
 import type { VoiceHandlers } from './voice.js';
 
 type Handlers = ReturnType<typeof createHandlers>;
@@ -16,9 +17,10 @@ export function registerIpc(deps: {
   handlers: Handlers;
   voice: VoiceHandlers;
   commands: CommandHandlers;
+  library: LibraryHandlers;
   allowedOrigin: string;
 }): void {
-  const { handlers, voice, commands, allowedOrigin } = deps;
+  const { handlers, voice, commands, library, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -96,6 +98,12 @@ export function registerIpc(deps: {
   handle(CHANNELS.resolveComparison, (input) => handlers.resolveComparison(input));
   handle(CHANNELS.previewProfileSync, (input) => handlers.previewProfileSync(input));
   handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
+  handle(CHANNELS.listLibrary, () => library.listLibrary());
+  handle(CHANNELS.saveLibraryItem, (input) => library.saveLibraryItem(input));
+  handle(CHANNELS.removeLibraryItem, (input) => library.removeLibraryItem(input));
+  handle(CHANNELS.setProjectOverride, (input) => library.setProjectOverride(input));
+  handle(CHANNELS.previewLibrarySync, (input) => library.previewLibrarySync(input));
+  handle(CHANNELS.applyLibrarySync, (input) => library.applyLibrarySync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));
   handle(CHANNELS.submitLoginCode, (input) => handlers.submitLoginCode(input));
   handle(CHANNELS.getVoiceStatus, () => voice.getVoiceStatus());

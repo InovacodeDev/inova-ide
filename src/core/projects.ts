@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { AccountError, findAccount } from './accounts.js';
 import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
+import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from './library/validate.js';
 import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore, withStoreLock } from './store.js';
 import type { Project, Store, VerificationCheck } from './types.js';
@@ -88,6 +89,37 @@ function normalizeProjectPinnedMemory(value: string | null): string | null {
     throw new Error(`Memória fixada deve ter até ${MAX_PINNED_MEMORY_CHARS} caracteres.`);
   }
   return trimmed;
+}
+
+export async function setProjectLibraryOverride(ctx: {
+  root: string;
+  projectId: string;
+  itemId: string;
+  disabled: boolean;
+}): Promise<Project> {
+  if (!isLibraryId(ctx.itemId)) {
+    throw new Error('O id do item da biblioteca é inválido.');
+  }
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const project = store.projects.find((item) => item.id === ctx.projectId);
+    if (!project) {
+      throw new PathNotFoundError(ctx.projectId);
+    }
+    const current = project.libraryOverrides?.disabled ?? [];
+    if (ctx.disabled && !current.includes(ctx.itemId)) {
+      if (current.length >= MAX_PROJECT_DISABLED_ITEMS) {
+        throw new Error(
+          `Um projeto aceita até ${MAX_PROJECT_DISABLED_ITEMS} itens da biblioteca desligados.`,
+        );
+      }
+      project.libraryOverrides = { disabled: [...current, ctx.itemId] };
+    } else if (!ctx.disabled && project.libraryOverrides) {
+      project.libraryOverrides = { disabled: current.filter((id) => id !== ctx.itemId) };
+    }
+    await saveStore(ctx.root, store);
+    return project;
+  });
 }
 
 export async function updateProjectConfig(ctx: {

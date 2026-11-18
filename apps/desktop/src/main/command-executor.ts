@@ -17,6 +17,8 @@ export interface ExecRequest {
   timeoutMs: number;
   maxOutputBytes: number;
   mode?: 'exec' | 'pty';
+  env?: Readonly<Record<string, string>>;
+  unsetEnv?: readonly string[];
   signal?: AbortSignal;
 }
 
@@ -284,6 +286,12 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
     }, run.request.timeoutMs);
   }
 
+  function spawnEnv(run: Run, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+    const kept = { ...base };
+    for (const name of run.request.unsetEnv ?? []) delete kept[name];
+    return { ...kept, ...run.request.env, ...EXEC_ENV };
+  }
+
   function spawnTty(run: Run, file: string, env: NodeJS.ProcessEnv): void {
     if (deps.spawnPty === undefined) {
       fail(run, 'pty-unavailable', 'Terminal pseudo-interativo indisponível.');
@@ -295,7 +303,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
         file,
         args: run.request.args,
         cwd: run.request.cwd,
-        env: { ...env, ...EXEC_ENV },
+        env: spawnEnv(run, env),
         cols: PTY_COLS,
         rows: PTY_ROWS,
       });
@@ -319,7 +327,7 @@ export function createCommandExecutor(deps: CommandExecutorDeps): CommandExecuto
         file,
         args: run.request.args,
         cwd: run.request.cwd,
-        env: { ...env, ...EXEC_ENV },
+        env: spawnEnv(run, env),
       });
     } catch (error: unknown) {
       fail(run, 'spawn-failed', errorMessage(error));

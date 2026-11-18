@@ -1,5 +1,6 @@
 import type { LocalePreference, SupportedLocale } from '@inova/core/types';
 import { CORE_EN_US, CORE_PT_BR } from './i18n/core';
+import { LIBRARY_EN_US, LIBRARY_PT_BR } from './i18n/library';
 import { MODALS_EN_US, MODALS_PT_BR } from './i18n/modals';
 import { SETTINGS_EN_US, SETTINGS_PT_BR } from './i18n/settings';
 import { WORKSPACE_EN_US, WORKSPACE_PT_BR } from './i18n/workspace';
@@ -18,6 +19,7 @@ export function resolveLocale(
 const PT_BR = {
   ...CORE_PT_BR,
   ...SETTINGS_PT_BR,
+  ...LIBRARY_PT_BR,
   ...MODALS_PT_BR,
   ...WORKSPACE_PT_BR,
 } as const;
@@ -27,6 +29,7 @@ export type TranslationKey = keyof typeof PT_BR;
 const EN_US: Record<TranslationKey, string> = {
   ...CORE_EN_US,
   ...SETTINGS_EN_US,
+  ...LIBRARY_EN_US,
   ...MODALS_EN_US,
   ...WORKSPACE_EN_US,
 };

@@ -31,6 +31,7 @@ export interface Project {
   autoVerify?: boolean;
   verificationChecks?: VerificationCheck[];
   pinnedMemory?: string | null;
+  libraryOverrides?: { disabled: string[] };
 }
 
 export interface SessionWorktree {

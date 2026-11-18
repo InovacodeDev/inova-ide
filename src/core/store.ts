@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { isCapabilityRef } from './capabilities/types.js';
 import { isSessionUsageTotals } from './cost-tracking.js';
+import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from './library/validate.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode } from './modes.js';
 import { isProviderId } from './providers.js';
@@ -63,10 +64,21 @@ function isWorktree(value: unknown): boolean {
   return isRecord(value) && hasStrings(value, ['path', 'branch', 'baseCommit', 'createdAt']);
 }
 
+function isLibraryOverrides(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const { disabled } = value;
+  return (
+    Array.isArray(disabled) &&
+    disabled.length <= MAX_PROJECT_DISABLED_ITEMS &&
+    disabled.every(isLibraryId)
+  );
+}
+
 function isProject(value: unknown): boolean {
   if (!isRecord(value) || !hasStrings(value, ['id', 'path', 'accountId'])) return false;
-  const { autoWorktree, autoVerify, verificationChecks, pinnedMemory } = value;
+  const { autoWorktree, autoVerify, verificationChecks, pinnedMemory, libraryOverrides } = value;
   return (
+    (libraryOverrides === undefined || isLibraryOverrides(libraryOverrides)) &&
     (autoWorktree === undefined || typeof autoWorktree === 'boolean') &&
     (autoVerify === undefined || typeof autoVerify === 'boolean') &&
     (verificationChecks === undefined ||
