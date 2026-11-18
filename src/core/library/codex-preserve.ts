@@ -2,6 +2,8 @@ import { CapabilityFileError, listTomlTables } from '../capabilities/file-edit.j
 
 type SectionPath = readonly string[] | null;
 
+export const INLINE_SERVER_REASON = 'mcp server defined inline; cannot edit safely';
+
 // REGEX: leading TOML key (double-quoted or bare) followed by "=" or a dotted continuation
 const LEADING_KEY = /^\s*("(?:[^"\\]|\\.)*"|[A-Za-z0-9_-]+)\s*([.=])/;
 // REGEX: root-level "mcp_servers = ..." or "mcp_servers.<key>..." assignment
@@ -107,7 +109,7 @@ export function stripCodexServerTables(input: {
       continue;
     }
     if (definesInline({ line, section, names })) {
-      throw new CapabilityFileError('config.toml', 'mcp server defined inline; cannot edit safely');
+      throw new CapabilityFileError('config.toml', INLINE_SERVER_REASON);
     }
     if (!stripping) kept.push(line);
     else if (isTrivia(line)) pending.push(line);

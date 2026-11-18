@@ -34,6 +34,7 @@ import type { ApprovalMode } from './library/approval.js';
 import {
   codexMcpTablesText,
   codexServerTableText,
+  INLINE_SERVER_REASON,
   stripCodexServerTables,
 } from './library/codex-preserve.js';
 import { projectLibraryMcp } from './library/mcp.js';
@@ -717,7 +718,9 @@ async function planAccountMcpTarget(input: {
           targetPath,
           status: 'conflict',
           reason:
-            'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
+            error.reason === INLINE_SERVER_REASON
+              ? 'Entrada [mcp_servers] inline: edite manualmente ou remova antes de sincronizar.'
+              : 'Não foi possível ler quais MCPs estão desligados no config.toml. Sincronize manualmente.',
           maskedBefore: maskSecretsInText(before),
           maskedAfter: maskSecretsInText(before),
         },
