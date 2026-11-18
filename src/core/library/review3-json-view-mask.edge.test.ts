@@ -71,6 +71,26 @@ describe('the JSON preview masks args and url without changing what is written',
     expect(written.mcpServers).toMatchObject(userServers);
   });
 
+  it('masks a whole query value and password that contain a single quote', async () => {
+    const root = await tmp();
+    const project = await tmp();
+    const home = await tmp();
+    const url = "https://me:PASS'WORD@x.example/mcp?api_key=ab'QUOTESECRET";
+    const userServers = { web: { type: 'http', url } };
+    await writeFile(join(home, '.claude.json'), JSON.stringify({ mcpServers: userServers }));
+
+    const preview = await previewProfileSync({
+      root,
+      projectPath: project,
+      accounts: [account('claude', home)],
+      library,
+    });
+
+    const text = viewText(preview.items[0]);
+    expect(text).not.toContain('QUOTESECRET');
+    expect(text).not.toContain('WORD');
+  });
+
   it('masks args of project servers in the agy preview', async () => {
     const root = await tmp();
     const project = await tmp();

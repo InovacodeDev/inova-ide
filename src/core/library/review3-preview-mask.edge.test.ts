@@ -121,6 +121,21 @@ describe('the codex preview masks every value outside an allowlist', () => {
     expect(item?.maskedBefore).toContain('startup_timeout_sec = 20');
   });
 
+  it('masks the rest of a table once a header is swallowed by a multi-line string', async () => {
+    const toml = [
+      '[mcp_servers.a]',
+      'note = """',
+      '[mcp_servers.a.env]',
+      '"""',
+      'url = "SWALLOWSEC1"',
+      '',
+    ].join('\n');
+
+    const item = await codexPreview({ toml });
+
+    expect(viewText(item)).not.toContain('SWALLOWSEC1');
+  });
+
   it('masks args, url query and headers of generated tables', async () => {
     const web = {
       type: 'http',

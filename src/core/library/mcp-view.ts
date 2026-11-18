@@ -1,9 +1,9 @@
 import { CapabilityFileError, listTomlTables } from '../capabilities/file-edit.js';
 
-// REGEX: value of a query parameter, up to the next "&", "#" or quote
-const QUERY_VALUE = /([?&][^=&#"']*=)[^&#"']*/g;
+// REGEX: value of a query parameter, up to the next "&", "#" or double quote
+const QUERY_VALUE = /([?&][^=&#"]*=)[^&#"]*/g;
 // REGEX: "user:password@" right after the "://" of a URL
-const USER_INFO = /(:\/\/)[^/@\s"']+@/g;
+const USER_INFO = /(:\/\/)[^/@\s"]+@/g;
 
 export function maskUrlSecrets(text: string): string {
   return text.replace(USER_INFO, '$1***@').replace(QUERY_VALUE, '$1***');
@@ -59,6 +59,7 @@ function maskAssignment(input: { match: RegExpExecArray; serverTable: boolean })
 function maskLine(line: string, state: ViewState): string | null {
   if (state.inMultiline) {
     if (togglesMultiline(line)) state.inMultiline = false;
+    if (line.trimStart().startsWith('[')) state.serverTable = false;
     return null;
   }
   if (line.trimStart().startsWith('[')) {
