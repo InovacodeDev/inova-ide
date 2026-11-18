@@ -15,6 +15,11 @@ export interface UsageDeps {
     init: { headers: Record<string, string>; signal: AbortSignal },
   ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
   now: () => Date;
+  baseEnv?: () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv;
+  resolveBinary?: (
+    name: string,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<string | undefined> | string | undefined;
 }
 
 export type UsageErrorCode = 'no-credentials' | 'http' | 'bad-response' | 'unauthorized';
@@ -476,6 +481,31 @@ function parseAgyUsageGroups(groups: unknown[]): UsageWindow[] {
   });
 }
 
+const GEMINI_USAGE_TIMEOUT_MS = 30_000;
+// REGEX: strip ANSI CSI/OSC sequences emitted by agy before JSON parsing
+const ANSI_ESCAPE = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]/g;
+// REGEX: detect expired or revoked Antigravity CLI session errors in /usage output
+const GEMINI_AUTH_ERROR =
+  /not logged into antigravity|oauth token (?:has been )?(?:revoked|expired)|401 unauthorized|unauthenticated/i;
+
+function parseAgyUsageBody(stdout: string): Record<string, unknown> | null {
+  const direct = parseJson(stdout);
+  if (isRecord(direct)) return direct;
+  const cleaned = stdout.replace(ANSI_ESCAPE, '');
+  const lines = cleaned.split(/[\r\n]+/).reverse();
+  for (const chunk of lines) {
+    const line = chunk.trim();
+    if (!line.startsWith('{')) continue;
+    const parsed = parseJson(line);
+    if (isRecord(parsed)) return parsed;
+  }
+  return null;
+}
+
+function isGeminiAuthFailure(raw: string): boolean {
+  return GEMINI_AUTH_ERROR.test(raw);
+}
+
 async function readGeminiUsage(
   ctx: UsageContext,
 ): Promise<{ windows: UsageWindow[]; source: UsageSnapshot['source'] }> {
@@ -483,20 +513,37 @@ async function readGeminiUsage(
   if (auth !== 'logged-in') {
     throw new UsageError('no-credentials', 'No Antigravity CLI login token found for this account');
   }
+  const baseEnv = ctx.deps.baseEnv ? await ctx.deps.baseEnv() : process.env;
+  const binary = ctx.deps.resolveBinary
+    ? await ctx.deps.resolveBinary(providers.gemini.binary, baseEnv)
+    : providers.gemini.binary;
+  if (binary === undefined) return { windows: [], source: 'unavailable' };
   const result = await ctx.deps.runner.run({
-    command: providers.gemini.binary,
+    command: binary,
     args: ['-p', '/usage', '--output-format', 'json'],
-    env: isolatedEnv(ctx.account, process.env),
+    env: isolatedEnv(ctx.account, baseEnv),
+    cwd: ctx.account.homeDir,
+    timeoutMs: GEMINI_USAGE_TIMEOUT_MS,
   });
   if ('notFound' in result) return { windows: [], source: 'unavailable' };
   if (result.exitCode !== 0) {
+    if (isGeminiAuthFailure(result.stdout)) {
+      throw new UsageError('unauthorized', 'Antigravity CLI session expired');
+    }
     throw new UsageError(
       'bad-response',
       `Gemini usage command failed with exit ${result.exitCode}`,
     );
   }
-  const body = parseJson(result.stdout);
-  if (!isRecord(body) || body['status'] !== 'SUCCESS') {
+  const body = parseAgyUsageBody(result.stdout);
+  if (body === null) {
+    throw new UsageError('bad-response', 'Gemini usage response is not valid');
+  }
+  if (body['status'] !== 'SUCCESS') {
+    const detail = JSON.stringify(body['error'] ?? body['response'] ?? body['message'] ?? '');
+    if (isGeminiAuthFailure(detail)) {
+      throw new UsageError('unauthorized', 'Antigravity CLI session expired');
+    }
     throw new UsageError('bad-response', 'Gemini usage response is not valid');
   }
   const command = body['command'];

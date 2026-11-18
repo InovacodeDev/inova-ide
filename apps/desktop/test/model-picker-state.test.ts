@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { PROVIDER_MODELS } from '@inova/core/models';
 import {
   formatPickerLabel,
+  localizeModelOption,
   normalizeCustomModelInput,
   resolveModelOptions,
 } from '../src/renderer/model-picker-state';
@@ -49,5 +50,38 @@ describe('model-picker-state', () => {
     expect(normalizeCustomModelInput('   ')).toBeNull();
     expect(normalizeCustomModelInput('  sonnet-4.5  ')).toBe('sonnet-4.5');
     expect(normalizeCustomModelInput('a'.repeat(201))).toBeNull();
+  });
+
+  test('localizes updated model descriptions in en-US and formats flagship labels', () => {
+    expect(
+      formatPickerLabel({
+        model: 'gpt-6.2-astra',
+        effort: 'xhigh',
+        catalog: PROVIDER_MODELS.codex,
+      }),
+    ).toBe('GPT 6.2 Astra (Extra alto)');
+    expect(
+      formatPickerLabel({
+        model: 'gemini-4-neon-high',
+        effort: 'medium',
+        catalog: PROVIDER_MODELS.gemini,
+      }),
+    ).toBe('Gemini 4 Neon (High) (Médio)');
+
+    const cases: [keyof typeof PROVIDER_MODELS, string][] = [
+      ['codex', 'gpt-6.2-astra'],
+      ['deepseek', 'deepseek-flash'],
+      ['kimi', 'kimi-k3.1-pro'],
+      ['grok', 'grok-4.7'],
+      ['qwen', 'qwen4-max'],
+      ['opencode', 'opencode/deepseek-v4.1-flash-free'],
+    ];
+    for (const [provider, id] of cases) {
+      const option = PROVIDER_MODELS[provider].models.find((item) => item.id === id);
+      if (!option) throw new Error(`Missing model ${id}`);
+      const localized = localizeModelOption(option, 'en-US');
+      expect(localized.description).toBeTruthy();
+      expect(localized.description).not.toBe(option.description);
+    }
   });
 });

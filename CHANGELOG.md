@@ -6,6 +6,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Alterado
+
+- Lista de modelos disponíveis atualizada para todos os providers (`Claude`, `Codex`, `Gemini`, `DeepSeek`, `Kimi`, `Grok`, `Qwen` e `OpenCode`), incluindo `GPT 6.2 Astra`, `GPT 6.2 Sol`, `Gemini 4 Neon`, `DeepSeek V4.1 Flash`, `Kimi K3.1 Pro`, `Grok 4.7` e `Qwen 4 Max`.
+
+### Corrigido
+
+- Consumo de contas Gemini (Antigravity) passou a resolver o binário `agy` pelo ambiente efetivo do usuário (`baseEnv`) com diretório da conta e timeout de 30s, corrigindo a exibição de consumo indisponível no app empacotado e detectando sessão expirada.
+
 ## [0.10.1] - 2026-11-18
 
 ### Adicionado

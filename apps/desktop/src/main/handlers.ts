@@ -221,6 +221,7 @@ const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
 const CONTEXT_BREAKDOWN_TIMEOUT_MS = 30_000;
+const MODELS_LIST_TIMEOUT_MS = 30_000;
 const CONTEXT_BREAKDOWN_CLAUDE_ONLY = 'Detalhamento do contexto disponível só para sessões Claude.';
 const CONTEXT_BREAKDOWN_EMPTY = 'Envie uma mensagem para ver o detalhamento do contexto.';
 const CONTEXT_BREAKDOWN_FAILED = 'Não foi possível ler o detalhamento do contexto.';
@@ -343,6 +344,12 @@ export function createHandlers(deps: HandlerDeps) {
   const modelsCache = new Map<string, ProviderModels>();
   const capabilityCache = new Map<string, CapabilityListing>();
   const pickerAllowlist = new Set<string>();
+  const usageDeps: UsageDeps = {
+    ...deps.usageDeps,
+    baseEnv: deps.usageDeps.baseEnv ?? deps.baseEnv,
+    resolveBinary:
+      deps.usageDeps.resolveBinary ?? ((name, env) => findBinary(name, readEnvPath(env))),
+  };
 
   async function authorizeFilePath(parsed: OpenFilePathInput): Promise<Result<string>> {
     let resolvedTarget: string;
@@ -673,7 +680,7 @@ export function createHandlers(deps: HandlerDeps) {
     const { account, resetsAt } = input;
     let fresh: UsageSnapshot | null = null;
     try {
-      fresh = await readUsage({ account, deps: deps.usageDeps });
+      fresh = await readUsage({ account, deps: usageDeps });
     } catch (error: unknown) {
       if (!(error instanceof Error)) throw error;
     }
@@ -3017,7 +3024,7 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
         try {
-          const snapshot = await readUsage({ account, deps: deps.usageDeps });
+          const snapshot = await readUsage({ account, deps: usageDeps });
           if (snapshot.source === 'api') {
             expiredAccounts.delete(account.id);
             streamUsage.set(account.id, snapshot);
@@ -3090,7 +3097,13 @@ export function createHandlers(deps: HandlerDeps) {
         await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
         const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
         try {
-          const result = await deps.runner.run({ command: file, args: ['models'], env });
+          const result = await deps.runner.run({
+            command: file,
+            args: ['models'],
+            env,
+            cwd: account.homeDir,
+            timeoutMs: MODELS_LIST_TIMEOUT_MS,
+          });
           if ('notFound' in result || result.exitCode !== 0) return ok(fallback);
           const parsed =
             account.provider === 'gemini'
