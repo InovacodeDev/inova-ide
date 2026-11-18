@@ -1,5 +1,5 @@
 import type { SupportedLocale } from '@inova/core/types';
-import type { UpdateInfo, UpdateInstallStage } from '../shared/api';
+import type { Result, UpdateInfo, UpdateInstallStage } from '../shared/api';
 import { translate } from './i18n';
 
 export const UPDATE_DISMISSED_KEY = 'inova.update.dismissed';
@@ -48,6 +48,19 @@ export function shouldShowUpdateToast(input: {
   const { info, dismissed } = input;
   if (!info || !info.available) return false;
   return !isUpdateDismissed({ dismissed, latest: info.latest });
+}
+
+export type ManualCheckStatus =
+  | { kind: 'upToDate'; current: string }
+  | { kind: 'available'; current: string; latest: string }
+  | { kind: 'unknown'; current: string }
+  | { kind: 'error'; message: string };
+
+export function manualCheckStatus(result: Result<UpdateInfo>): ManualCheckStatus {
+  if (!result.ok) return { kind: 'error', message: result.message };
+  const { current, latest, available } = result.value;
+  if (latest === null) return { kind: 'unknown', current };
+  return available ? { kind: 'available', current, latest } : { kind: 'upToDate', current };
 }
 
 export function shouldShowWhatsNew(input: { lastSeen: string | null; current: string }): boolean {
