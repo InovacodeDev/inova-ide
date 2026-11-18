@@ -47,7 +47,7 @@ import {
   withoutJsonServers,
 } from './library/mcp-removal.js';
 import type { LibraryMcpProjection } from './library/mcp.js';
-import { maskUrlSecrets } from './library/mcp-view.js';
+import { maskCodexMcpView, maskUrlSecrets } from './library/mcp-view.js';
 import { applySkillEntry, planSkillTargets } from './library/skills-projection.js';
 import type { SkillPlanEntry } from './library/skills-projection.js';
 import { ConfigParseError, isUnreadableConfigError } from './library/sync-errors.js';
@@ -1143,7 +1143,7 @@ function withMcpRemoval(input: {
 function libraryMcpView(input: { provider: ProviderId; raw: string }): string {
   const { provider, raw } = input;
   if (raw.trim() === '') return '';
-  if (provider === 'codex') return maskSecretsInText(codexMcpTablesText(raw));
+  if (provider === 'codex') return maskSecretsInText(maskCodexMcpView(codexMcpTablesText(raw)));
   const servers = maskViewServers(targetMcpEntries({ provider, raw }).servers);
   return JSON.stringify({ [provider === 'opencode' ? 'mcp' : 'mcpServers']: servers }, null, 2);
 }
