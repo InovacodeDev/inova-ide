@@ -1,7 +1,12 @@
-import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { UsageSnapshot, UsageWindow } from './chat-types.js';
+import {
+  isClaudeTokenExpired,
+  readClaudeCredentials,
+  refreshClaudeCredentials,
+} from './claude-oauth.js';
+import type { ClaudeOAuth } from './claude-oauth.js';
 import { isolatedEnv } from './launch.js';
 import { providers, readGeminiAuthState } from './providers.js';
 import type { CommandRunner } from './providers.js';
@@ -12,7 +17,12 @@ export interface UsageDeps {
   runner: CommandRunner;
   fetch: (
     url: string,
-    init: { headers: Record<string, string>; signal: AbortSignal },
+    init: {
+      headers: Record<string, string>;
+      signal: AbortSignal;
+      method?: 'GET' | 'POST';
+      body?: string;
+    },
   ) => Promise<{
     ok: boolean;
     status: number;
@@ -112,51 +122,40 @@ function parseJson(raw: string): unknown {
   }
 }
 
-interface ClaudeAccessToken {
-  token: string;
-  expiresAt: number | null;
-}
-
-function accessTokenFrom(raw: string): ClaudeAccessToken | null {
-  const parsed = parseJson(raw);
-  if (!isRecord(parsed)) return null;
-  const oauth = parsed['claudeAiOauth'];
-  if (!isRecord(oauth)) return null;
-  const token = oauth['accessToken'];
-  if (typeof token !== 'string' || token.length === 0) return null;
-  return { token, expiresAt: finiteNumber(oauth['expiresAt']) };
-}
-
-async function tokenFromFile(homeDir: string): Promise<ClaudeAccessToken | null> {
-  try {
-    return accessTokenFrom(await readFile(join(homeDir, '.credentials.json'), 'utf8'));
-  } catch (error: unknown) {
-    if (isMissingPath(error)) return null;
-    throw error;
+async function refreshedClaudeOAuth(ctx: UsageContext): Promise<ClaudeOAuth> {
+  const outcome = await refreshClaudeCredentials(ctx.deps, ctx.account.homeDir);
+  switch (outcome.kind) {
+    case 'refreshed':
+      return outcome.oauth;
+    case 'missing':
+      throw new UsageError('no-credentials', 'No Claude OAuth credentials found for this account');
+    case 'rejected':
+    case 'no-refresh-token':
+    case 'save-failed':
+      throw new UsageError(
+        'unauthorized',
+        'Claude rejected the OAuth refresh token',
+        HTTP_UNAUTHORIZED,
+      );
+    case 'rate-limited':
+      throw new UsageRateLimitError(
+        'Claude OAuth refresh was rate limited',
+        retryAfterMs(outcome.retryAfter, ctx.deps.now()),
+      );
+    case 'busy':
+      throw new UsageError('token-expired', 'Another process is refreshing the Claude OAuth token');
+    case 'failed':
+      throw new UsageError('token-expired', `Claude OAuth refresh failed: ${outcome.reason}`);
   }
 }
 
-function claudeKeychainService(homeDir: string): string {
-  const hash = createHash('sha256').update(homeDir).digest('hex').slice(0, 8);
-  return `Claude Code-credentials-${hash}`;
-}
-
-async function tokenFromKeychain(ctx: UsageContext): Promise<ClaudeAccessToken | null> {
-  const result = await ctx.deps.runner.run({
-    command: 'security',
-    args: ['find-generic-password', '-s', claudeKeychainService(ctx.account.homeDir), '-w'],
-    env: process.env,
-  });
-  if ('notFound' in result || result.exitCode !== 0) return null;
-  return accessTokenFrom(result.stdout.trim());
-}
-
-async function claudeAccessToken(ctx: UsageContext): Promise<ClaudeAccessToken> {
-  const fromFile = await tokenFromFile(ctx.account.homeDir);
-  if (fromFile !== null) return fromFile;
-  const fromKeychain = ctx.deps.platform === 'darwin' ? await tokenFromKeychain(ctx) : null;
-  if (fromKeychain !== null) return fromKeychain;
-  throw new UsageError('no-credentials', 'No Claude OAuth credentials found for this account');
+async function claudeOAuth(ctx: UsageContext): Promise<ClaudeOAuth> {
+  const credentials = await readClaudeCredentials(ctx.deps, ctx.account.homeDir);
+  if (credentials === null) {
+    throw new UsageError('no-credentials', 'No Claude OAuth credentials found for this account');
+  }
+  if (!isClaudeTokenExpired(credentials.oauth, ctx.deps.now())) return credentials.oauth;
+  return refreshedClaudeOAuth(ctx);
 }
 
 function claudeWindow(kind: UsageWindow['kind'], value: unknown): UsageWindow | null {
@@ -267,17 +266,11 @@ function claudeExtraMonthlyWindow(extra: unknown): UsageWindow | null {
 }
 
 async function fetchClaudeBodyDetectingRevocation(ctx: UsageContext): Promise<unknown> {
-  const access = await claudeAccessToken(ctx);
-  if (access.expiresAt !== null && access.expiresAt <= ctx.deps.now().getTime()) {
-    throw new UsageError(
-      'token-expired',
-      'Claude OAuth token expired; the CLI refreshes it on use',
-    );
-  }
+  const oauth = await claudeOAuth(ctx);
   try {
-    return await fetchClaudeBody(ctx, access.token);
+    return await fetchClaudeBody(ctx, oauth.accessToken);
   } catch (error: unknown) {
-    const stillValid = access.expiresAt !== null && access.expiresAt > ctx.deps.now().getTime();
+    const stillValid = oauth.expiresAt !== null && oauth.expiresAt > ctx.deps.now().getTime();
     if (error instanceof UsageError && error.status === HTTP_UNAUTHORIZED && stillValid) {
       throw new UsageError(
         'unauthorized',

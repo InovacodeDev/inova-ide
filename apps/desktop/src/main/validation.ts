@@ -944,7 +944,7 @@ function usageMessage(error: UsageError): string {
     case 'rate-limited':
       return 'Limite de consultas de consumo atingido. O app tenta de novo em alguns minutos.';
     case 'token-expired':
-      return 'Token da conta vencido. O consumo volta a atualizar no próximo uso da conta.';
+      return 'Não foi possível renovar o token da conta. O app tenta de novo na próxima atualização.';
   }
 }
 

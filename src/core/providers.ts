@@ -14,6 +14,7 @@ export interface CommandRunner {
     env: NodeJS.ProcessEnv;
     cwd?: string;
     timeoutMs?: number;
+    input?: string;
   }): Promise<{ exitCode: number; stdout: string } | { notFound: true }>;
 }
 

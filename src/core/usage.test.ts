@@ -223,12 +223,16 @@ describe('readUsage claude response', () => {
   it('does not report revocation when the access token already expired locally', async () => {
     await writeFile(
       join(homeDir, '.credentials.json'),
-      JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: NOW.getTime() - 1 } }),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: TOKEN, refreshToken: 'rt', expiresAt: NOW.getTime() - 1 },
+      }),
     );
     const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
     const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
     expect(error.code).toBe('token-expired');
-    expect(rec.requests).toEqual([]);
+    expect(rec.requests.map((request) => request.url)).toEqual([
+      'https://platform.claude.com/v1/oauth/token',
+    ]);
   });
 
   it('reports http errors with the status but never the token', async () => {

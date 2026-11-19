@@ -280,20 +280,12 @@ function retryAfterOf(error: UsageError): number | null {
 }
 
 describe('readUsage claude rate limit edge cases', () => {
-  it('skips the usage request when the OAuth token already expired', async () => {
-    await writeClaudeToken(NOW.getTime() - 1);
-    const { deps, urls } = claudeDeps({ status: 200 });
-    const error = await captureError(readUsage({ account: claudeAccount(), deps }));
-    expect(error.code).toBe('token-expired');
-    expect(error.message).not.toContain('secret-token');
-    expect(urls).toEqual([]);
-  });
-
-  it('treats a token expiring exactly now as expired', async () => {
+  it('requires a new login when an expired token has no refresh token', async () => {
     await writeClaudeToken(NOW.getTime());
     const { deps, urls } = claudeDeps({ status: 200 });
     const error = await captureError(readUsage({ account: claudeAccount(), deps }));
-    expect(error.code).toBe('token-expired');
+    expect(error.code).toBe('unauthorized');
+    expect(error.message).not.toContain('secret-token');
     expect(urls).toEqual([]);
   });
 
