@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Alterado
+
+- Fluxo de desenvolvimento passou a usar a issue do InovaFlow: a branch `<tipo>/IDE-<n>-<slug>` dispensa a issue no GitHub, e a PR policy exige `IDE-<n>` no título ou na descrição do PR.
+
 ## [0.10.3] - 2026-11-19
 
 ### Corrigido

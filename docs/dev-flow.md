@@ -5,41 +5,35 @@ Este documento é a fonte única do fluxo. Ele vale para pessoas e para agentes.
 ## Regras
 
 1. Nunca faça commit ou push na `main`. Toda mudança entra por PR.
-2. Toda mudança começa em uma demanda planejada e em uma tarefa (sub-issue).
-3. Cada tarefa tem uma branch vinculada à issue e um PR que fecha a issue.
+2. Toda mudança começa em uma issue do projeto `IDE` no InovaFlow.
+3. Cada issue tem uma branch com a chave da issue e um PR que cita a chave.
 4. Toda mudança de código tem teste. Os testes seguem dois padrões (seção "Testes").
 5. Um teste de contrato que já está na `main` é imutável.
 6. Todo PR atualiza o `CHANGELOG.md` na seção `[Não lançado]` (seção "Changelog").
 
 ## Passo a passo
 
-### 1. Planeje a demanda
+### 1. Crie a issue no InovaFlow
 
-Defina contexto, objetivo, abordagem, regras de negócio, critérios de aceite e tarefas.
+Crie a issue no projeto `IDE` do InovaFlow. A descrição tem objetivo, escopo e critérios de aceite.
 
-### 2. Crie a issue da demanda
+| Situação                          | Status da issue |
+| --------------------------------- | --------------- |
+| O desenvolvimento começa agora    | `in_progress`   |
+| A demanda só fica registrada      | `backlog`       |
 
-```bash
-gh issue create --label demanda --title "Demanda: <título>" --body-file <plano.md>
-```
+Se a issue já existe, não crie outra. Mova a issue para `in_progress`.
 
-O corpo segue os campos do template `Demanda`.
-
-### 3. Crie uma sub-issue por tarefa
-
-```bash
-gh issue create --label tarefa --parent <numero-da-demanda> \
-  --title "Tarefa: <título>" --body-file <tarefa.md>
-```
-
-### 4. Crie a branch vinculada à tarefa, com base na `main`
+### 2. Crie a branch com a chave da issue, com base na `main`
 
 ```bash
-gh issue develop <numero-da-tarefa> --base main \
-  --name <tipo>/<numero-da-tarefa>-<slug> --checkout
+git switch -c <tipo>/IDE-<n>-<slug> origin/main
 ```
 
-Formato do nome: `<tipo>/<numero>-<slug>`. O slug usa minúsculas, dígitos e hífen.
+Formato do nome: `<tipo>/<CHAVE>-<n>-<slug>`. O slug usa minúsculas, dígitos e hífen.
+
+O formato antigo `<tipo>/<numero>-<slug>`, com issue do GitHub, continua aceito. Nele, a PR policy
+exige a tarefa com label `tarefa`, a demanda pai, a branch vinculada e `Closes #<numero>`.
 
 | Tipo                                    | Uso                              | Testes exigidos no PR                                             |
 | --------------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
@@ -48,20 +42,20 @@ Formato do nome: `<tipo>/<numero>-<slug>`. O slug usa minúsculas, dígitos e h�
 | `refactor`, `perf`                      | Mudança sem alterar comportamento | Nenhum teste novo. Os testes existentes devem passar              |
 | `docs`, `test`, `chore`, `ci`, `build`  | Mudança sem código de produção   | Proibido alterar código de produção                               |
 
-### 5. Desenvolva e abra o PR
+### 3. Desenvolva e abra o PR
 
 ```bash
-gh pr create --base main --title "<título>" --body "Closes #<numero-da-tarefa>"
+gh pr create --base main --title "<tipo>: <título> (IDE-<n>)" --body "InovaFlow: IDE-<n>"
 ```
 
-O PR deve conter `Closes #<numero-da-tarefa>`. O GitHub fecha a tarefa no merge.
+O título ou a descrição do PR deve citar `IDE-<n>`. Depois de abrir o PR, mova a issue para
+`in_review` e vincule o PR à issue no InovaFlow.
 
 Antes de abrir o PR, registre a mudança no `CHANGELOG.md` (seção "Changelog").
 
-### 6. Faça o merge
+### 4. Faça o merge
 
-O merge exige os checks `PR policy` e `verify` verdes. Depois do merge, feche a demanda quando
-todas as tarefas estiverem fechadas.
+O merge exige os checks `PR policy` e `verify` verdes. Depois do merge, mova a issue para `done`.
 
 ## Testes
 
@@ -108,7 +102,7 @@ A branch de release não exige issue. Ela não pode alterar código de produçã
 
 | Mecanismo                               | O que valida                                                                 |
 | --------------------------------------- | ---------------------------------------------------------------------------- |
-| Workflow `PR policy`                    | Nome da branch, tarefa aberta, sub-issue de demanda, branch vinculada, `Closes #N`, testes exigidos, contratos imutáveis |
+| Workflow `PR policy`                    | Nome da branch, chave do InovaFlow citada no PR (ou, no formato antigo, issue do GitHub vinculada), testes exigidos, contratos imutáveis |
 | Workflow `CI` (`verify`)                | Typecheck, lint e testes nos três sistemas                                   |
 | Workflow `Main guard`                   | Falha se um commit chegar na `main` sem PR com merge                         |
 | Ruleset `main-dev-flow` (sem bypass)    | Bloqueia push direto e exige os checks acima                                 |

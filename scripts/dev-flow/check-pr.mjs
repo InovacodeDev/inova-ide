@@ -7,6 +7,8 @@ query($owner: String!, $repo: String!, $number: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       headRefName
+      title
+      body
       isCrossRepository
       labels(first: 100) { nodes { name } }
       closingIssuesReferences(first: 50) { nodes { number } }
@@ -45,6 +47,8 @@ function fetchPullRequest({ owner, repo, number }) {
   }
   return {
     headRef: pullRequest.headRefName,
+    title: pullRequest.title,
+    body: pullRequest.body ?? '',
     isCrossRepository: pullRequest.isCrossRepository,
     labels: labelNames(pullRequest.labels),
     closingIssues: pullRequest.closingIssuesReferences.nodes.map((issue) => issue.number),

@@ -3,10 +3,12 @@
 Siga o fluxo de [docs/dev-flow.md](docs/dev-flow.md) em toda mudança. Resumo obrigatório:
 
 1. Nunca faça commit ou push na `main`.
-2. Planeje a demanda. Crie a issue da demanda (label `demanda`).
-3. Crie uma sub-issue por tarefa (label `tarefa`, `--parent <demanda>`).
-4. Crie a branch com `gh issue develop <tarefa> --base main --name <tipo>/<tarefa>-<slug> --checkout`.
-5. Abra o PR para a `main` com `Closes #<tarefa>` na descrição.
+2. Crie a issue no projeto `IDE` do InovaFlow (`kanban_create_issue`). Use `status: in_progress` se o
+   desenvolvimento começa agora e `status: backlog` se a demanda é só registrada. Não crie issue no GitHub.
+3. Crie a branch com `git switch -c <tipo>/IDE-<n>-<slug> origin/main`.
+4. Abra o PR para a `main` com `IDE-<n>` no título. Mova a issue para `in_review` e vincule o PR
+   (`github_link_issue_or_pr` com `projectKey: IDE`).
+5. Depois do merge, mova a issue para `done`.
 6. Toda `feat` cria um `*.contract.test.*` novo e um `*.edge.test.*`. Todo `fix` cria ou atualiza um `*.edge.test.*`.
 7. Nunca altere, remova nem renomeie um `*.contract.test.*` existente. Se ele falhar, corrija o código.
 8. Nunca aplique a label `contrato-alteracao-aprovada`. Se a regra de negócio mudou, pare e peça a aprovação do usuário.
