@@ -59,7 +59,7 @@ export const nodeRunner: CommandRunner = {
         ...(prepared.verbatim ? { windowsVerbatimArguments: true } : {}),
         ...(cmd.cwd === undefined ? {} : { cwd: cmd.cwd }),
       } as const;
-      execFile(prepared.file, prepared.args, options, (error, stdout) => {
+      const child = execFile(prepared.file, prepared.args, options, (error, stdout) => {
         if (error === null) return resolve({ exitCode: 0, stdout });
         const code = errorCode(error);
         if (code === 'ENOENT') return resolve({ notFound: true });
@@ -68,6 +68,11 @@ export const nodeRunner: CommandRunner = {
         if (typeof code === 'number') return resolve({ exitCode: code, stdout });
         return reject(error);
       });
+      if (cmd.input !== undefined) {
+        // NOTE: EPIPE here only means the child exited early; the execFile callback reports that outcome.
+        child.stdin?.on('error', () => undefined);
+        child.stdin?.end(cmd.input);
+      }
     });
   },
 };

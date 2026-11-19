@@ -116,7 +116,14 @@ import type {
   VerificationCheck,
   Workspace,
 } from '@inova/core/types';
-import { UsageError, exhaustionResetAt, exhaustionVerdict, readUsage } from '@inova/core/usage';
+import {
+  UsageError,
+  UsageRateLimitError,
+  exhaustionResetAt,
+  exhaustionVerdict,
+  readUsage,
+  usageCooldownMs,
+} from '@inova/core/usage';
 import type { UsageDeps } from '@inova/core/usage';
 import { detectProjectChecks, runVerificationChecks } from '@inova/core/verification';
 import type {
@@ -350,6 +357,31 @@ export function createHandlers(deps: HandlerDeps) {
     resolveBinary:
       deps.usageDeps.resolveBinary ?? ((name, env) => findBinary(name, readEnvPath(env))),
   };
+  const claudeUsageCooldowns = new Map<string, { untilMs: number; failures: number }>();
+
+  async function readAccountUsage(account: Account): Promise<UsageSnapshot> {
+    if (account.provider !== 'claude') return readUsage({ account, deps: usageDeps });
+    const nowMs = usageDeps.now().getTime();
+    const cooldown = claudeUsageCooldowns.get(account.id);
+    if (cooldown && nowMs < cooldown.untilMs) {
+      throw new UsageRateLimitError('Claude usage polling paused', cooldown.untilMs - nowMs);
+    }
+    try {
+      const snapshot = await readUsage({ account, deps: usageDeps });
+      claudeUsageCooldowns.delete(account.id);
+      return snapshot;
+    } catch (error: unknown) {
+      if (error instanceof UsageRateLimitError) {
+        const failures = (cooldown?.failures ?? 0) + 1;
+        const waitMs = usageCooldownMs({
+          retryAfterMs: error.retryAfterMs,
+          consecutiveFailures: failures,
+        });
+        claudeUsageCooldowns.set(account.id, { untilMs: nowMs + waitMs, failures });
+      }
+      throw error;
+    }
+  }
 
   async function authorizeFilePath(parsed: OpenFilePathInput): Promise<Result<string>> {
     let resolvedTarget: string;
@@ -680,7 +712,7 @@ export function createHandlers(deps: HandlerDeps) {
     const { account, resetsAt } = input;
     let fresh: UsageSnapshot | null = null;
     try {
-      fresh = await readUsage({ account, deps: usageDeps });
+      fresh = await readAccountUsage(account);
     } catch (error: unknown) {
       if (!(error instanceof Error)) throw error;
     }
@@ -3024,7 +3056,7 @@ export function createHandlers(deps: HandlerDeps) {
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
         try {
-          const snapshot = await readUsage({ account, deps: usageDeps });
+          const snapshot = await readAccountUsage(account);
           if (snapshot.source === 'api') {
             expiredAccounts.delete(account.id);
             streamUsage.set(account.id, snapshot);

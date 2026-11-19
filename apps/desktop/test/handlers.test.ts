@@ -706,10 +706,10 @@ test('getUsage reports errors in Portuguese without leaking the token', async ()
     join(account.homeDir, '.credentials.json'),
     JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token' } }),
   );
-  fetch.mockResolvedValue({ ok: false, status: 429, json: async () => ({}) });
+  fetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
   expect(await handlers.getUsage({ accountLabel: 'pessoal' })).toEqual({
     ok: false,
-    message: 'Não foi possível ler o consumo (HTTP 429).',
+    message: 'Não foi possível ler o consumo (HTTP 500).',
   });
   fetch.mockRejectedValue(new Error('network secret-token'));
   const network = await handlers.getUsage({ accountLabel: 'pessoal' });
