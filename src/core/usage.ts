@@ -13,7 +13,12 @@ export interface UsageDeps {
   fetch: (
     url: string,
     init: { headers: Record<string, string>; signal: AbortSignal },
-  ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
+  ) => Promise<{
+    ok: boolean;
+    status: number;
+    headers?: { get(name: string): string | null };
+    json(): Promise<unknown>;
+  }>;
   now: () => Date;
   baseEnv?: () => Promise<NodeJS.ProcessEnv> | NodeJS.ProcessEnv;
   resolveBinary?: (
@@ -22,9 +27,13 @@ export interface UsageDeps {
   ) => Promise<string | undefined> | string | undefined;
 }
 
-export type UsageErrorCode = 'no-credentials' | 'http' | 'bad-response' | 'unauthorized';
+export type UsageErrorCode =
+  'no-credentials' | 'http' | 'bad-response' | 'unauthorized' | 'rate-limited' | 'token-expired';
 
 const HTTP_UNAUTHORIZED = 401;
+const HTTP_TOO_MANY_REQUESTS = 429;
+const USAGE_BACKOFF_BASE_MS = 120_000;
+const USAGE_BACKOFF_MAX_MS = 1_800_000;
 
 export class UsageError extends Error {
   readonly code: UsageErrorCode;
@@ -36,6 +45,33 @@ export class UsageError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+export class UsageRateLimitError extends UsageError {
+  readonly retryAfterMs: number | null;
+
+  constructor(message: string, retryAfterMs: number | null) {
+    super('rate-limited', message, HTTP_TOO_MANY_REQUESTS);
+    this.name = 'UsageRateLimitError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function usageCooldownMs(input: {
+  retryAfterMs: number | null;
+  consecutiveFailures: number;
+}): number {
+  if (input.retryAfterMs !== null) return input.retryAfterMs;
+  const exponent = Math.max(0, input.consecutiveFailures - 1);
+  return Math.min(USAGE_BACKOFF_MAX_MS, USAGE_BACKOFF_BASE_MS * 2 ** exponent);
+}
+
+function retryAfterMs(header: string | null, now: Date): number | null {
+  if (header === null) return null;
+  const value = header.trim();
+  if (/^\d+$/.test(value)) return Number(value) * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - now.getTime());
 }
 
 interface UsageContext {
@@ -146,6 +182,12 @@ async function fetchUsageJson(
       headers: request.headers,
       signal: controller.signal,
     });
+    if (response.status === HTTP_TOO_MANY_REQUESTS) {
+      throw new UsageRateLimitError(
+        `${request.provider} usage request was rate limited`,
+        retryAfterMs(response.headers?.get('retry-after') ?? null, ctx.deps.now()),
+      );
+    }
     if (!response.ok) {
       throw new UsageError(
         'http',
@@ -226,6 +268,12 @@ function claudeExtraMonthlyWindow(extra: unknown): UsageWindow | null {
 
 async function fetchClaudeBodyDetectingRevocation(ctx: UsageContext): Promise<unknown> {
   const access = await claudeAccessToken(ctx);
+  if (access.expiresAt !== null && access.expiresAt <= ctx.deps.now().getTime()) {
+    throw new UsageError(
+      'token-expired',
+      'Claude OAuth token expired; the CLI refreshes it on use',
+    );
+  }
   try {
     return await fetchClaudeBody(ctx, access.token);
   } catch (error: unknown) {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandRunner } from './providers.js';
 import type { Account } from './types.js';
-import { UsageError, readUsage } from './usage.js';
+import { UsageError, UsageRateLimitError, readUsage, usageCooldownMs } from './usage.js';
 import type { UsageDeps } from './usage.js';
 
 const NOW = new Date('2026-11-18T12:00:00.000Z');
@@ -229,5 +229,127 @@ describe('readUsage gemini edge cases', () => {
       }),
     );
     expect(otherErr.code).toBe('bad-response');
+  });
+});
+
+function claudeAccount(): Account {
+  return {
+    id: 'cl-1',
+    provider: 'claude',
+    label: 'pessoal',
+    homeDir,
+    createdAt: NOW.toISOString(),
+  };
+}
+
+async function writeClaudeToken(expiresAt: number): Promise<void> {
+  await writeFile(
+    join(homeDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'secret-token', expiresAt } }),
+  );
+}
+
+function claudeDeps(response: { status: number; retryAfter?: string }): {
+  deps: UsageDeps;
+  urls: string[];
+} {
+  const urls: string[] = [];
+  const deps: UsageDeps = {
+    platform: 'linux',
+    now: () => NOW,
+    runner: { run: () => Promise.resolve({ notFound: true }) },
+    fetch: (url) => {
+      urls.push(url);
+      return Promise.resolve({
+        ok: response.status < 400,
+        status: response.status,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === 'retry-after' ? (response.retryAfter ?? null) : null,
+        },
+        json: () => Promise.resolve({}),
+      });
+    },
+  };
+  return { deps, urls };
+}
+
+function retryAfterOf(error: UsageError): number | null {
+  if (!(error instanceof UsageRateLimitError)) throw new Error('expected a UsageRateLimitError');
+  return error.retryAfterMs;
+}
+
+describe('readUsage claude rate limit edge cases', () => {
+  it('skips the usage request when the OAuth token already expired', async () => {
+    await writeClaudeToken(NOW.getTime() - 1);
+    const { deps, urls } = claudeDeps({ status: 200 });
+    const error = await captureError(readUsage({ account: claudeAccount(), deps }));
+    expect(error.code).toBe('token-expired');
+    expect(error.message).not.toContain('secret-token');
+    expect(urls).toEqual([]);
+  });
+
+  it('treats a token expiring exactly now as expired', async () => {
+    await writeClaudeToken(NOW.getTime());
+    const { deps, urls } = claudeDeps({ status: 200 });
+    const error = await captureError(readUsage({ account: claudeAccount(), deps }));
+    expect(error.code).toBe('token-expired');
+    expect(urls).toEqual([]);
+  });
+
+  it('maps 429 to a rate-limit error carrying Retry-After seconds', async () => {
+    await writeClaudeToken(NOW.getTime() + 3_600_000);
+    const { deps } = claudeDeps({ status: 429, retryAfter: '90' });
+    const error = await captureError(readUsage({ account: claudeAccount(), deps }));
+    expect(error.code).toBe('rate-limited');
+    expect(error.status).toBe(429);
+    expect(retryAfterOf(error)).toBe(90_000);
+  });
+
+  it('parses Retry-After as an HTTP date and ignores garbage', async () => {
+    await writeClaudeToken(NOW.getTime() + 3_600_000);
+    const dated = claudeDeps({
+      status: 429,
+      retryAfter: new Date(NOW.getTime() + 300_000).toUTCString(),
+    });
+    const datedError = await captureError(
+      readUsage({ account: claudeAccount(), deps: dated.deps }),
+    );
+    expect(retryAfterOf(datedError)).toBe(300_000);
+
+    const garbage = claudeDeps({ status: 429, retryAfter: 'soon' });
+    const garbageError = await captureError(
+      readUsage({ account: claudeAccount(), deps: garbage.deps }),
+    );
+    expect(retryAfterOf(garbageError)).toBeNull();
+  });
+
+  it('handles a 429 response without a headers object', async () => {
+    await writeClaudeToken(NOW.getTime() + 3_600_000);
+    const deps: UsageDeps = {
+      platform: 'linux',
+      now: () => NOW,
+      runner: { run: () => Promise.resolve({ notFound: true }) },
+      fetch: () => Promise.resolve({ ok: false, status: 429, json: () => Promise.resolve({}) }),
+    };
+    const error = await captureError(readUsage({ account: claudeAccount(), deps }));
+    expect(retryAfterOf(error)).toBeNull();
+  });
+});
+
+describe('usageCooldownMs', () => {
+  it('honors Retry-After when present', () => {
+    expect(usageCooldownMs({ retryAfterMs: 45_000, consecutiveFailures: 5 })).toBe(45_000);
+  });
+
+  it('backs off exponentially from 2 minutes and caps at 30 minutes', () => {
+    const waits = [1, 2, 3, 4, 5, 6].map((consecutiveFailures) =>
+      usageCooldownMs({ retryAfterMs: null, consecutiveFailures }),
+    );
+    expect(waits).toEqual([120_000, 240_000, 480_000, 960_000, 1_800_000, 1_800_000]);
+  });
+
+  it('treats a non-positive failure count as the first failure', () => {
+    expect(usageCooldownMs({ retryAfterMs: null, consecutiveFailures: 0 })).toBe(120_000);
   });
 });

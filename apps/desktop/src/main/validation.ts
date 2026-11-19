@@ -941,6 +941,10 @@ function usageMessage(error: UsageError): string {
       return 'Não foi possível ler o consumo: resposta inválida.';
     case 'unauthorized':
       return SESSION_EXPIRED_USAGE_MESSAGE;
+    case 'rate-limited':
+      return 'Limite de consultas de consumo atingido. O app tenta de novo em alguns minutos.';
+    case 'token-expired':
+      return 'Token da conta vencido. O consumo volta a atualizar no próximo uso da conta.';
   }
 }
 

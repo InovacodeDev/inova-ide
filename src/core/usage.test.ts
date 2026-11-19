@@ -33,7 +33,9 @@ interface Recorder {
 }
 
 function credentialsJson(): string {
-  return JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: 1 } });
+  return JSON.stringify({
+    claudeAiOauth: { accessToken: TOKEN, expiresAt: NOW.getTime() + 3_600_000 },
+  });
 }
 
 async function fixtureBody(): Promise<unknown> {
@@ -218,15 +220,15 @@ describe('readUsage claude response', () => {
     expect(JSON.stringify(error)).not.toContain(TOKEN);
   });
 
-  it('keeps a plain http error for 401 when the access token already expired locally', async () => {
+  it('does not report revocation when the access token already expired locally', async () => {
     await writeFile(
       join(homeDir, '.credentials.json'),
       JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: NOW.getTime() - 1 } }),
     );
     const rec = recorder({ platform: 'linux', response: { ok: false, status: 401, body: {} } });
     const error = await captureError(readUsage({ account: account('claude'), deps: rec.deps }));
-    expect(error.code).toBe('http');
-    expect(error.message).toContain('401');
+    expect(error.code).toBe('token-expired');
+    expect(rec.requests).toEqual([]);
   });
 
   it('reports http errors with the status but never the token', async () => {
