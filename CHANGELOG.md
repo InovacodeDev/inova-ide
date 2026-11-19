@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Corrigido
+
+- Status de consumo do Claude deixou de ficar preso em HTTP 429 depois de um longo tempo sem uso: o Inova renova o token OAuth vencido da conta (mesmo endpoint, lock e armazenamento do Claude Code CLI, com verificação da gravação no Keychain ou em `.credentials.json`), e um 429 pausa as consultas da conta (respeita `Retry-After`; sem o header, espera de 2 min a 30 min em backoff exponencial) mantendo o último valor válido na tela.
+
 ## [0.10.2] - 2026-11-18
 
 ### Alterado
@@ -15,7 +19,6 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ### Corrigido
 
 - Consumo de contas Gemini (Antigravity) passou a resolver o binário `agy` pelo ambiente efetivo do usuário (`baseEnv`) com diretório da conta e timeout de 30s, corrigindo a exibição de consumo indisponível no app empacotado e detectando sessão expirada.
-- Status de consumo do Claude deixou de ficar preso em HTTP 429 depois de um longo tempo sem uso: o Inova renova o token OAuth vencido da conta (mesmo endpoint, lock e armazenamento do Claude Code CLI, com verificação da gravação no Keychain ou em `.credentials.json`), e um 429 pausa as consultas da conta (respeita `Retry-After`; sem o header, espera de 2 min a 30 min em backoff exponencial) mantendo o último valor válido na tela.
 
 ## [0.10.1] - 2026-11-18
 
