@@ -1,6 +1,6 @@
 {
   "name": "@inova/desktop",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "license": "SEE LICENSE IN LICENSE",
   "description": "Multi-provider IDE for local coding agents",
   "homepage": "https://github.com/InovacodeDev/inova-ide",
