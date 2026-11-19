@@ -18,6 +18,13 @@ import {
   spreadsheetColumnLabel,
 } from './file-viewer-format';
 import { clampViewerWidth, type FileViewerTab } from './file-viewer-state';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu';
+import {
+  TAB_SCOPE_LABEL_KEYS,
+  availableCloseScopes,
+  isMiddleButton,
+  tabsToClose,
+} from './context-menu';
 import { useI18n } from './I18nContext';
 import {
   AlertIcon,
@@ -865,6 +872,7 @@ export function FileViewerPane({
   onOpenFile,
 }: FileViewerPaneProps) {
   const { t } = useI18n();
+  const tabMenu = useContextMenu<string>();
   const [isDragging, setIsDragging] = useState(false);
   const dragCounterRef = useRef(0);
   const panelRef = useRef<HTMLElement | null>(null);
@@ -881,6 +889,17 @@ export function FileViewerPane({
     () => tabs.find((tab) => tab.resolvedPath === activePath),
     [tabs, activePath],
   );
+
+  const tabMenuItems = (targetPath: string): ContextMenuItem[] => {
+    const ids = tabs.map((tab) => tab.resolvedPath);
+    return availableCloseScopes({ ids, targetId: targetPath, withRight: false }).map((scope) => ({
+      id: scope,
+      label: t(TAB_SCOPE_LABEL_KEYS[scope]),
+      onSelect: () => {
+        for (const path of tabsToClose({ ids, targetId: targetPath, scope })) onCloseTab(path);
+      },
+    }));
+  };
 
   const handleResizeMouseDown = (e: MouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -1019,6 +1038,15 @@ export function FileViewerPane({
                 aria-selected={isActive}
                 className={`file-viewer-tab ${isActive ? 'file-viewer-tab-active' : ''}`}
                 onClick={() => onSelectTab(tab.resolvedPath)}
+                onMouseDown={(event) => {
+                  if (isMiddleButton(event.button)) event.preventDefault();
+                }}
+                onAuxClick={(event) => {
+                  if (!isMiddleButton(event.button)) return;
+                  event.preventDefault();
+                  onCloseTab(tab.resolvedPath);
+                }}
+                onContextMenu={(event) => tabMenu.open(event, tab.resolvedPath)}
                 title={tab.resolvedPath}
               >
                 <span className="file-viewer-tab-icon">
@@ -1050,6 +1078,16 @@ export function FileViewerPane({
             <PlusIcon size={14} />
           </button>
         </div>
+        {tabMenu.state && (
+          <ContextMenu
+            label={t('fileViewer.tabActions')}
+            items={tabMenuItems(tabMenu.state.target)}
+            anchor={tabMenu.state.anchor}
+            focusFirst={tabMenu.state.fromKeyboard}
+            returnFocusTo={tabMenu.state.opener}
+            onClose={tabMenu.close}
+          />
+        )}
         <div className="file-viewer-header-actions">
           <button
             type="button"
