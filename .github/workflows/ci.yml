@@ -34,7 +34,7 @@ jobs:
         run: node --test scripts/winget-manifest.test.mjs
 
       - name: Test development flow policy
-        run: node --test scripts/dev-flow/policy.contract.test.mjs scripts/dev-flow/policy.edge.test.mjs
+        run: node --test scripts/dev-flow/*.test.mjs
 
       - name: Check root CLI (POSIX)
         if: runner.os != 'Windows'

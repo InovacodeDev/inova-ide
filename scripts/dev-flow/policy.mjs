@@ -6,6 +6,8 @@ export const LABELS = {
 
 const TASK_BRANCH =
   /^(feat|fix|refactor|perf|docs|test|chore|ci|build)\/([1-9]\d*)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const FLOW_BRANCH =
+  /^(feat|fix|refactor|perf|docs|test|chore|ci|build)\/([A-Z][A-Z0-9]*-[1-9]\d*)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const RELEASE_BRANCH = /^release\/v\d+\.\d+\.\d+$/;
 const CODE_FILE = /\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
 const TEST_FILE = /\.test\.[a-z]+$/;
@@ -19,6 +21,8 @@ const STATUSES_WITHOUT_CONTENT = new Set(['removed', 'unchanged']);
 
 export function parseBranch(headRef) {
   if (RELEASE_BRANCH.test(headRef)) return { kind: 'release', type: 'release' };
+  const flow = FLOW_BRANCH.exec(headRef);
+  if (flow) return { kind: 'flow', type: flow[1], issueKey: flow[2] };
   const match = TASK_BRANCH.exec(headRef);
   if (!match) return null;
   return { kind: 'task', type: match[1], issueNumber: Number(match[2]) };
@@ -88,6 +92,27 @@ function checkIssueLink({ branch, headRef, isCrossRepository, closingIssues, iss
   return violations;
 }
 
+export function mentionsIssueKey({ text, issueKey }) {
+  return new RegExp(`(?:^|[^A-Za-z0-9-])${issueKey}(?![0-9])`).test(text);
+}
+
+function checkFlowIssueReference({ branch, title, body }) {
+  const { issueKey } = branch;
+  if (mentionsIssueKey({ text: `${title}\n${body}`, issueKey })) return [];
+  return [
+    violation(
+      'pr-missing-flow-issue',
+      `O PR não cita a issue ${issueKey} do InovaFlow. Adicione "${issueKey}" no título ou na descrição.`,
+    ),
+  ];
+}
+
+function checkIssueReference(input) {
+  if (input.branch.kind === 'task') return checkIssueLink(input);
+  if (input.branch.kind === 'flow') return checkFlowIssueReference(input);
+  return [];
+}
+
 function checkContractImmutability(files, labels) {
   const changed = files.filter(isExistingContractChange).map(pathOnBase);
   if (changed.length === 0 || labels.includes(LABELS.contractChangeApproved)) return [];
@@ -142,20 +167,27 @@ export function evaluatePullRequest({
   closingIssues,
   files,
   issue,
+  title = '',
+  body = '',
 }) {
   const branch = parseBranch(headRef);
   if (!branch) {
     return [
       violation(
         'branch-name',
-        `Nome de branch inválido: "${headRef}". Use <tipo>/<numero-da-issue>-<slug> ou release/vX.Y.Z.`,
+        `Nome de branch inválido: "${headRef}". Use <tipo>/<CHAVE-N>-<slug> (issue do InovaFlow), <tipo>/<numero-da-issue>-<slug> ou release/vX.Y.Z.`,
       ),
     ];
   }
-  const issueViolations =
-    branch.kind === 'task'
-      ? checkIssueLink({ branch, headRef, isCrossRepository, closingIssues, issue })
-      : [];
+  const issueViolations = checkIssueReference({
+    branch,
+    headRef,
+    isCrossRepository,
+    closingIssues,
+    issue,
+    title,
+    body,
+  });
   return [
     ...issueViolations,
     ...checkContractImmutability(files, labels),
