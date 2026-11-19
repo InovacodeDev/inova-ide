@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.10.2] - 2026-11-18
+
 ### Alterado
 
 - Lista de modelos disponíveis atualizada para todos os providers (`Claude`, `Codex`, `Gemini`, `DeepSeek`, `Kimi`, `Grok`, `Qwen` e `OpenCode`), incluindo `GPT 6.2 Astra`, `GPT 6.2 Sol`, `Gemini 4 Neon`, `DeepSeek V4.1 Flash`, `Kimi K3.1 Pro`, `Grok 4.7` e `Qwen 4 Max`.
