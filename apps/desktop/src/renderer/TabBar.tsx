@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu';
+import {
+  TAB_SCOPE_LABEL_KEYS,
+  availableCloseScopes,
+  isMiddleButton,
+  tabsToClose,
+} from './context-menu';
 import { useI18n } from './I18nContext';
 import { CloseIcon, SplitViewIcon } from './icons';
 import { ProviderBadge } from './ProviderBadge';
@@ -35,6 +42,7 @@ export function TabBar(props: TabBarProps) {
   const { locale, t } = useI18n();
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
+  const menu = useContextMenu<Tab>();
   const activeTabRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -49,6 +57,29 @@ export function TabBar(props: TabBarProps) {
     if (draggedId === null || !onMove) return;
     const toIndex = dropIndex({ ids: tabIds, draggedId, targetId, after });
     if (toIndex !== null) onMove({ sessionId: draggedId, toIndex });
+  };
+  const menuItemsFor = (target: Tab): ContextMenuItem[] => {
+    const scopes = availableCloseScopes({
+      ids: tabIds,
+      targetId: target.sessionId,
+      withRight: true,
+    });
+    const items: ContextMenuItem[] = scopes.map((scope) => ({
+      id: scope,
+      label: t(TAB_SCOPE_LABEL_KEYS[scope]),
+      onSelect: () => {
+        const doomed = new Set(tabsToClose({ ids: tabIds, targetId: target.sessionId, scope }));
+        for (const tab of tabs) if (doomed.has(tab.sessionId)) onClose(tab);
+      },
+    }));
+    if (onSplit && active !== null && !paneIds.includes(target.sessionId)) {
+      items.push({
+        id: 'split',
+        label: t('tabMenu.openToSide'),
+        onSelect: () => onSplit(target.sessionId),
+      });
+    }
+    return items;
   };
   return (
     <div
@@ -102,6 +133,15 @@ export function TabBar(props: TabBarProps) {
               endDrag();
             }}
             onDragEnd={endDrag}
+            onMouseDown={(event) => {
+              if (isMiddleButton(event.button)) event.preventDefault();
+            }}
+            onAuxClick={(event) => {
+              if (!isMiddleButton(event.button)) return;
+              event.preventDefault();
+              onClose(tab);
+            }}
+            onContextMenu={(event) => menu.open(event, tab)}
           >
             <button
               type="button"
@@ -149,6 +189,16 @@ export function TabBar(props: TabBarProps) {
           </div>
         );
       })}
+      {menu.state && (
+        <ContextMenu
+          label={t('tabMenu.label')}
+          items={menuItemsFor(menu.state.target)}
+          anchor={menu.state.anchor}
+          focusFirst={menu.state.fromKeyboard}
+          returnFocusTo={menu.state.opener}
+          onClose={menu.close}
+        />
+      )}
     </div>
   );
 }

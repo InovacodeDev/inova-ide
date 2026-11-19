@@ -6,6 +6,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Fechamento de abas com o botão do meio do mouse, nas abas de sessão e nas abas do leitor de arquivos.
+- Menu de ações com o botão direito (ou tecla de menu / Shift+F10) nas abas, sessões e projetos.
+
 ## [0.10.3] - 2026-11-19
 
 ### Corrigido

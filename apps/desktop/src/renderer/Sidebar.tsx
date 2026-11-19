@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { InboxItem, Session } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
+import { ContextMenu, useContextMenu, type ContextMenuItem } from './ContextMenu';
+import { MENU_WIDTH, type Point } from './context-menu';
 import { useI18n } from './I18nContext';
 import type { TranslationKey } from './i18n';
 import { InboxView } from './InboxView';
@@ -95,60 +97,25 @@ const NAV_ITEMS: {
   { view: 'accounts', labelKey: 'sidebar.nav.accounts', icon: <KeyIcon size={16} /> },
 ];
 
-interface SidebarMenuItem {
-  id: string;
-  label: string;
-  icon: ReactNode;
-  danger?: boolean;
-  onSelect: () => void;
-}
-
 interface SidebarActionMenuProps {
   label: string;
-  items: SidebarMenuItem[];
+  items: ContextMenuItem[];
 }
 
 function SidebarActionMenu({ label, items }: SidebarActionMenuProps) {
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [anchor, setAnchor] = useState<Point | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const open = position !== null;
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      setPosition(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setPosition(null);
-        triggerRef.current?.focus();
-      }
-    };
-    window.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+  const open = anchor !== null;
+  const close = useCallback(() => setAnchor(null), []);
 
   const toggle = () => {
     if (open) {
-      setPosition(null);
+      close();
       return;
     }
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const menuWidth = 220;
-    const menuHeight = items.length * 32 + 12;
-    const top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menuHeight - 8));
-    const left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
-    setPosition({ top, left });
+    setAnchor({ x: rect.right - MENU_WIDTH, y: rect.bottom + 4 });
   };
 
   return (
@@ -165,53 +132,39 @@ function SidebarActionMenu({ label, items }: SidebarActionMenuProps) {
       >
         <EllipsisIcon size={14} />
       </button>
-      {position && (
-        <div
-          ref={menuRef}
-          className="sidebar-menu"
-          role="menu"
-          aria-label={label}
-          style={{ top: position.top, left: position.left }}
-          onKeyDown={(event) => {
-            if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-            const buttons = Array.from(
-              event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-            );
-            if (buttons.length === 0) return;
-            const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
-            const delta = event.key === 'ArrowDown' ? 1 : -1;
-            const next =
-              current === -1
-                ? event.key === 'ArrowDown'
-                  ? 0
-                  : buttons.length - 1
-                : (current + delta + buttons.length) % buttons.length;
-            event.preventDefault();
-            buttons[next]?.focus();
-          }}
-        >
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="menuitem"
-              className={
-                item.danger ? 'sidebar-menu-item sidebar-menu-item-danger' : 'sidebar-menu-item'
-              }
-              onClick={() => {
-                setPosition(null);
-                item.onSelect();
-              }}
-            >
-              <span className="sidebar-menu-icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </div>
+      {anchor && (
+        <ContextMenu
+          label={label}
+          items={items}
+          anchor={anchor}
+          focusFirst={false}
+          ignoreRef={triggerRef}
+          returnFocusTo={triggerRef.current}
+          onClose={close}
+        />
       )}
     </>
+  );
+}
+
+interface RowContextMenuProps {
+  label: string;
+  items: ContextMenuItem[];
+  menu: ReturnType<typeof useContextMenu<null>>;
+}
+
+function RowContextMenu({ label, items, menu }: RowContextMenuProps) {
+  const { state, close } = menu;
+  if (!state) return null;
+  return (
+    <ContextMenu
+      label={label}
+      items={items}
+      anchor={state.anchor}
+      focusFirst={state.fromKeyboard}
+      returnFocusTo={state.opener}
+      onClose={close}
+    />
   );
 }
 
@@ -294,6 +247,7 @@ function SessionRow(props: SessionRowProps) {
   } = actions;
   const { session, children } = node;
   const [editing, setEditing] = useState(false);
+  const rowMenu = useContextMenu<null>();
   const archived = session.archivedAt !== null;
   const isSubsession = session.parentId !== null;
   const sessionProvider =
@@ -303,7 +257,7 @@ function SessionRow(props: SessionRowProps) {
   const rowClasses = ['session-row', isSubsession ? 'session-row-sub' : 'session-row-root'];
   if (session.id === activeSessionId) rowClasses.push('active');
 
-  const menuItems: SidebarMenuItem[] = [
+  const menuItems: ContextMenuItem[] = [
     {
       id: 'rename',
       label: t('sidebar.rename'),
@@ -344,7 +298,10 @@ function SessionRow(props: SessionRowProps) {
 
   return (
     <li className="session-node">
-      <div className={rowClasses.join(' ')}>
+      <div
+        className={rowClasses.join(' ')}
+        onContextMenu={editing ? undefined : (event) => rowMenu.open(event, null)}
+      >
         {editing ? (
           <div className="session-main">
             <ProviderBadge provider={sessionProvider} size={isSubsession ? 16 : 20} />
@@ -383,6 +340,7 @@ function SessionRow(props: SessionRowProps) {
             <SidebarActionMenu label={t('sidebar.sessionActions')} items={menuItems} />
           </div>
         )}
+        <RowContextMenu label={t('sidebar.sessionActions')} items={menuItems} menu={rowMenu} />
       </div>
       {children.length > 0 && (
         <ul className="session-children">
@@ -430,6 +388,7 @@ function ProjectSection(props: ProjectSectionProps) {
   const { onNewSession } = actions;
   const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
+  const headerMenu = useContextMenu<null>();
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const split = useMemo(() => splitArchived(sessions), [sessions]);
@@ -442,7 +401,7 @@ function ProjectSection(props: ProjectSectionProps) {
     activeSessionId,
   });
 
-  const projectMenuItems: SidebarMenuItem[] = [
+  const projectMenuItems: ContextMenuItem[] = [
     ...(onOpenProjectSettings
       ? [
           {
@@ -484,7 +443,7 @@ function ProjectSection(props: ProjectSectionProps) {
 
   return (
     <section className="project-section">
-      <div className="project-header">
+      <div className="project-header" onContextMenu={(event) => headerMenu.open(event, null)}>
         <button
           type="button"
           className="project-toggle"
@@ -517,6 +476,11 @@ function ProjectSection(props: ProjectSectionProps) {
           </button>
           <SidebarActionMenu label={t('sidebar.moreActions')} items={projectMenuItems} />
         </div>
+        <RowContextMenu
+          label={t('sidebar.moreActions')}
+          items={projectMenuItems}
+          menu={headerMenu}
+        />
       </div>
       {!collapsed &&
         (roots.length === 0 ? (
