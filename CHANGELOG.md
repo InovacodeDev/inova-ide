@@ -6,6 +6,15 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Alterado
+
+- Integração Gemini (`agy` 1.5.14): catálogo e parser agrupam modelos com variantes de esforço (`Gemini 4 Neon`, `Gemini 4 Argon`, `Gemini 4 Hydrogen`, `Gemini 3.8 Flash`, `Claude Opus 5.5`, `Claude Sonnet 5.5`), preservam modelos fixos (`Orchestrator (Neon)`, `Orchestrator (Argon)`, `GPT-OSS 120B (Medium)`), removem `--effort max`, adicionam `/effort`, leem `thinking_delta` em tempo real e leem `cache_read_tokens`.
+- Normalização de sessões e configurações legadas de Gemini com sufixo de esforço (como `gemini-4-hydrogen-high`) para o modelo base e esforço correspondente.
+
+### Corrigido
+
+- Seletor de esforço ocultado no chat, nas configurações de modelos e na comparação quando o modelo ou o provedor (`DeepSeek`, `Kimi`, `Grok`, `Qwen`, `OpenCode`, `Orchestrator` e `GPT-OSS`) não aceita seleção de esforço.
+
 ## [0.10.4] - 2026-11-19
 
 ### Adicionado

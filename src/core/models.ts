@@ -4,6 +4,7 @@ export interface ModelOption {
   id: string;
   label: string;
   description?: string;
+  efforts?: readonly EffortLevel[];
 }
 
 export interface ProviderModels {
@@ -101,31 +102,21 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
   gemini: {
     defaultModelLabel: 'Auto',
     models: [
-      { id: 'gemini-4-neon-xhigh', label: 'Gemini 4 Neon (XHigh)' },
-      { id: 'gemini-4-neon-high', label: 'Gemini 4 Neon (High)' },
-      { id: 'gemini-4-neon-medium', label: 'Gemini 4 Neon (Medium)' },
-      { id: 'gemini-4-neon-low', label: 'Gemini 4 Neon (Low)' },
-      { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
-      { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
-      { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
-      { id: 'gemini-4-hydrogen-xhigh', label: 'Gemini 4 Hydrogen (XHigh)' },
-      { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
-      { id: 'gemini-4-hydrogen-medium', label: 'Gemini 4 Hydrogen (Medium)' },
-      { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
-      { id: 'gemini-pro-orchestrator-neon', label: 'Gemini 4 Orchestrator (Neon)' },
-      { id: 'gemini-pro-orchestrator-g1-pro', label: 'Gemini 4 Orchestrator (Argon)' },
-      { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
-      { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
-      { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
-      { id: 'claude-opus-5-5-high', label: 'Claude Opus 5.5 (High)' },
-      { id: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 (Medium)' },
-      { id: 'claude-opus-5-5-low', label: 'Claude Opus 5.5 (Low)' },
-      { id: 'claude-sonnet-5-5-high', label: 'Claude Sonnet 5.5 (High)' },
-      { id: 'claude-sonnet-5-5-medium', label: 'Claude Sonnet 5.5 (Medium)' },
-      { id: 'claude-sonnet-5-5-low', label: 'Claude Sonnet 5.5 (Low)' },
-      { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)' },
+      { id: 'gemini-4-neon', label: 'Gemini 4 Neon', efforts: ['low', 'medium', 'high', 'xhigh'] },
+      { id: 'gemini-4-argon', label: 'Gemini 4 Argon', efforts: ['low', 'medium', 'high'] },
+      {
+        id: 'gemini-4-hydrogen',
+        label: 'Gemini 4 Hydrogen',
+        efforts: ['low', 'medium', 'high', 'xhigh'],
+      },
+      { id: 'gemini-pro-orchestrator-neon', label: 'Orchestrator (Neon)', efforts: [] },
+      { id: 'gemini-pro-orchestrator-g1-pro', label: 'Orchestrator (Argon)', efforts: [] },
+      { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', efforts: ['low', 'medium', 'high'] },
+      { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5', efforts: ['low', 'medium', 'high'] },
+      { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B (Medium)', efforts: [] },
     ],
-    efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    efforts: ['low', 'medium', 'high', 'xhigh'],
   },
   deepseek: {
     defaultModelLabel: 'Padrão',
@@ -141,7 +132,7 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
         description: 'MoE principal para raciocínio profundo e arquitetura',
       },
     ],
-    efforts: ['low', 'medium', 'high'],
+    efforts: [],
   },
   kimi: {
     defaultModelLabel: 'Padrão',
@@ -167,7 +158,7 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
         description: 'Otimizado para tarefas agênticas de código',
       },
     ],
-    efforts: ['low', 'medium', 'high'],
+    efforts: [],
   },
   grok: {
     defaultModelLabel: 'Padrão',
@@ -193,7 +184,7 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
         description: 'Alta velocidade e baixa latência para tarefas diretas',
       },
     ],
-    efforts: ['low', 'medium', 'high'],
+    efforts: [],
   },
   qwen: {
     defaultModelLabel: 'Padrão',
@@ -224,7 +215,7 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
         description: 'Contexto longo para repositórios',
       },
     ],
-    efforts: ['low', 'medium', 'high'],
+    efforts: [],
   },
   opencode: {
     defaultModelLabel: 'Padrão',
@@ -270,36 +261,131 @@ export const PROVIDER_MODELS: Record<ProviderId, ProviderModels> = {
         description: 'Gratuito via OpenCode Zen',
       },
     ],
-    efforts: ['low', 'medium', 'high'],
+    efforts: [],
   },
 };
 
-export function isEffortSupported(provider: ProviderId, effort: EffortLevel): boolean {
-  return PROVIDER_MODELS[provider].efforts.includes(effort);
+// REGEX: match a concrete effort suffix in a legacy/variant model ID such as `gemini-4-hydrogen-high`
+const MODEL_EFFORT_SUFFIX = /^(.+)-(minimal|low|medium|high|xhigh|max)$/i;
+// REGEX: match a display label suffix such as `Gemini 4 Hydrogen (High)`
+const LABEL_EFFORT_SUFFIX = /^(.+?)\s+\((minimal|low|medium|high|xhigh|max)\)$/i;
+// REGEX: match legacy Claude model IDs without thinking effort support
+const CLAUDE_NO_EFFORT_MODEL = /^claude-(3-|haiku-4-5|sonnet-4-(0|5)|opus-4-(0|1))/i;
+
+export function splitModelEffortVariant(
+  catalog: ProviderModels,
+  model: string | null,
+): { readonly model: string | null; readonly effort: EffortLevel | null } {
+  if (model === null || catalog.models.some((item) => item.id === model)) {
+    return { model, effort: null };
+  }
+  const match = MODEL_EFFORT_SUFFIX.exec(model);
+  if (!match) return { model, effort: null };
+  const baseId = match[1];
+  const rawEffort = match[2]?.toLowerCase();
+  if (!baseId || !isEffortLevel(rawEffort)) return { model, effort: null };
+  const base = catalog.models.find((item) => item.id === baseId);
+  if (!base) return { model, effort: null };
+  const baseEfforts = base.efforts ?? catalog.efforts;
+  if (baseEfforts.length === 0) return { model, effort: null };
+  return { model: baseId, effort: rawEffort };
+}
+
+export function effortsForModel(
+  catalog: ProviderModels,
+  model: string | null,
+): readonly EffortLevel[] {
+  if (catalog.efforts.length === 0) return [];
+  if (model === null) return catalog.efforts;
+  const normalized = splitModelEffortVariant(catalog, model).model ?? model;
+  const matched = catalog.models.find((item) => item.id === normalized);
+  if (matched?.efforts !== undefined) return matched.efforts;
+  if (
+    normalized.includes('orchestrator') ||
+    MODEL_EFFORT_SUFFIX.test(normalized) ||
+    CLAUDE_NO_EFFORT_MODEL.test(normalized)
+  ) {
+    return [];
+  }
+  return catalog.efforts;
+}
+
+export function isEffortSupported(
+  provider: ProviderId,
+  effort: EffortLevel,
+  model: string | null = null,
+  catalog: ProviderModels = PROVIDER_MODELS[provider],
+): boolean {
+  return effortsForModel(catalog, model).includes(effort);
 }
 
 export function resolveModelConfig(input: {
-  provider: ProviderId;
-  model: string | null;
-  effort: EffortLevel | null;
-  settings: Pick<Settings, 'models'>;
-}): { model: string | null; effort: EffortLevel | null } {
-  const { provider, model, effort, settings } = input;
-  const defaults = settings.models[provider];
-  const settingsEffort = isEffortSupported(provider, defaults.effort) ? defaults.effort : null;
-  const sessionEffort = effort !== null && isEffortSupported(provider, effort) ? effort : null;
-  return { model: model ?? defaults.model, effort: sessionEffort ?? settingsEffort };
+  readonly provider: ProviderId;
+  readonly model: string | null;
+  readonly effort: EffortLevel | null;
+  readonly settings: Pick<Settings, 'models'>;
+  readonly catalog?: ProviderModels;
+}): { readonly model: string | null; readonly effort: EffortLevel | null } {
+  const catalog = input.catalog ?? PROVIDER_MODELS[input.provider];
+  const defaults = input.settings.models[input.provider];
+  const rawModel = input.model ?? defaults.model;
+  const split = splitModelEffortVariant(catalog, rawModel);
+  const effectiveModel = split.model;
+  const supportedEfforts = effortsForModel(catalog, effectiveModel);
+  if (supportedEfforts.length === 0) {
+    return { model: effectiveModel, effort: null };
+  }
+  const candidates: readonly (EffortLevel | null)[] = [input.effort, split.effort, defaults.effort];
+  for (const candidate of candidates) {
+    if (candidate !== null && supportedEfforts.includes(candidate)) {
+      return { model: effectiveModel, effort: candidate };
+    }
+  }
+  return { model: effectiveModel, effort: null };
 }
 
 // REGEX: strip ANSI CSI/OSC sequences emitted by CLI spinners
 const ANSI_ESCAPE = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~]/g;
-// REGEX: match `<model-id>  <Display Name>` rows emitted by `agy models`
-const AGY_MODEL_ROW = /^([A-Za-z0-9][A-Za-z0-9._:/-]+)\s{2,}(.+)$/;
+// REGEX: match `<model-id><tab or 2+ spaces><Display Name>` rows emitted by `agy models`
+const AGY_MODEL_ROW = /^([A-Za-z0-9][A-Za-z0-9._:/-]+)(?:\t|\s{2,})(.+)$/;
+
+interface AgyParsedRow {
+  id: string;
+  label: string;
+  baseId: string | null;
+  baseLabel: string | null;
+  effort: EffortLevel | null;
+}
+
+function parseAgyCandidate(id: string, label: string): AgyParsedRow {
+  const idMatch = MODEL_EFFORT_SUFFIX.exec(id);
+  const labelMatch = LABEL_EFFORT_SUFFIX.exec(label);
+  const idEffort = idMatch?.[2]?.toLowerCase();
+  const labelEffort = labelMatch?.[2]?.toLowerCase();
+  if (
+    idMatch?.[1] &&
+    labelMatch?.[1] &&
+    idEffort &&
+    idEffort === labelEffort &&
+    isEffortLevel(idEffort)
+  ) {
+    return {
+      id,
+      label,
+      baseId: idMatch[1],
+      baseLabel: labelMatch[1].trim(),
+      effort: idEffort,
+    };
+  }
+  return { id, label, baseId: null, baseLabel: null, effort: null };
+}
 
 export function parseAgyModelsOutput(stdout: string): ModelOption[] {
   const cleaned = stdout.replace(ANSI_ESCAPE, '');
   const seen = new Set<string>();
-  const models: ModelOption[] = [];
+  const rows: AgyParsedRow[] = [];
+  const variantsByBase = new Map<string, Set<EffortLevel>>();
+
   for (const chunk of cleaned.split(/[\r\n]+/)) {
     const line = chunk.trim();
     const match = AGY_MODEL_ROW.exec(line);
@@ -308,7 +394,34 @@ export function parseAgyModelsOutput(stdout: string): ModelOption[] {
     const label = match[2]?.trim();
     if (!id || !label || seen.has(id)) continue;
     seen.add(id);
-    models.push({ id, label });
+    const row = parseAgyCandidate(id, label);
+    rows.push(row);
+    if (row.baseId !== null && row.effort !== null) {
+      let set = variantsByBase.get(row.baseId);
+      if (!set) {
+        set = new Set<EffortLevel>();
+        variantsByBase.set(row.baseId, set);
+      }
+      set.add(row.effort);
+    }
+  }
+
+  const emittedBases = new Set<string>();
+  const models: ModelOption[] = [];
+  for (const row of rows) {
+    if (row.baseId !== null && row.baseLabel !== null) {
+      const variants = variantsByBase.get(row.baseId);
+      if (variants && variants.size >= 2) {
+        if (emittedBases.has(row.baseId)) continue;
+        emittedBases.add(row.baseId);
+        const sortedEfforts = [...variants].sort(
+          (a, b) => EFFORT_LEVELS.indexOf(a) - EFFORT_LEVELS.indexOf(b),
+        );
+        models.push({ id: row.baseId, label: row.baseLabel, efforts: sortedEfforts });
+        continue;
+      }
+    }
+    models.push({ id: row.id, label: row.label });
   }
   return models;
 }

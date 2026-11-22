@@ -166,7 +166,10 @@ function usageFromRecord(usage: unknown): TurnTokenUsage | null {
   const anthropicCacheRead = num(usage['cache_read_input_tokens']);
   const anthropicCacheWrite = num(usage['cache_creation_input_tokens']);
   const codexCachedInput =
-    num(usage['cached_input_tokens']) ?? num(usage['cached_tokens']) ?? num(usage['cached']);
+    num(usage['cached_input_tokens']) ??
+    num(usage['cache_read_tokens']) ??
+    num(usage['cached_tokens']) ??
+    num(usage['cached']);
   const openCodeInput = num(usage['input']);
   const openCodeOutput = num(usage['output']);
   const rawInput = num(usage['input_tokens']);

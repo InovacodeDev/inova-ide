@@ -1878,11 +1878,13 @@ export function createHandlers(deps: HandlerDeps) {
     cachedSessionSettings = settings.sessions;
     cachedFailoverPolicy = settings.sessions.rateLimitFailover;
     cachedFailoverPolicyLoaded = true;
+    const cachedCatalog = modelsCache.get(account.id);
     const modelConfig = resolveModelConfig({
       provider: account.provider,
       model: session.model ?? null,
       effort: session.effort ?? null,
       settings,
+      ...(cachedCatalog ? { catalog: cachedCatalog } : {}),
     });
     const spec = buildChatTurn({
       account,
@@ -2128,8 +2130,12 @@ export function createHandlers(deps: HandlerDeps) {
               const account = project
                 ? resolveSessionAccount({ session, project, accounts: store.accounts })
                 : undefined;
-              if (account && !isEffortSupported(account.provider, effort)) {
-                return fail('Nível de esforço não suportado por este provedor.');
+              if (account) {
+                const targetModel = model !== undefined ? model : (session.model ?? null);
+                const catalog = modelsCache.get(account.id) ?? PROVIDER_MODELS[account.provider];
+                if (!isEffortSupported(account.provider, effort, targetModel, catalog)) {
+                  return fail('Nível de esforço não suportado por este provedor.');
+                }
               }
             }
             if (mode !== undefined && mode !== null) {
@@ -3245,10 +3251,30 @@ export function createHandlers(deps: HandlerDeps) {
           const baseEnv = await deps.baseEnv();
           const leftAdapter = providers[leftAccount.provider];
           const rightAdapter = providers[rightAccount.provider];
-          if (parsed.leftEffort && !isEffortSupported(leftAccount.provider, parsed.leftEffort)) {
+          const leftCatalog =
+            modelsCache.get(leftAccount.id) ?? PROVIDER_MODELS[leftAccount.provider];
+          const rightCatalog =
+            modelsCache.get(rightAccount.id) ?? PROVIDER_MODELS[rightAccount.provider];
+          if (
+            parsed.leftEffort &&
+            !isEffortSupported(
+              leftAccount.provider,
+              parsed.leftEffort,
+              parsed.leftModel ?? null,
+              leftCatalog,
+            )
+          ) {
             return fail(`Esforço não suportado para ${leftAccount.provider}: ${parsed.leftEffort}`);
           }
-          if (parsed.rightEffort && !isEffortSupported(rightAccount.provider, parsed.rightEffort)) {
+          if (
+            parsed.rightEffort &&
+            !isEffortSupported(
+              rightAccount.provider,
+              parsed.rightEffort,
+              parsed.rightModel ?? null,
+              rightCatalog,
+            )
+          ) {
             return fail(
               `Esforço não suportado para ${rightAccount.provider}: ${parsed.rightEffort}`,
             );

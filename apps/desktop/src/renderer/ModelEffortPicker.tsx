@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { type ProviderModels } from '@inova/core/models';
+import { effortsForModel, splitModelEffortVariant, type ProviderModels } from '@inova/core/models';
 import type { EffortLevel } from '@inova/core/types';
 import { CheckIcon, ChevronDownIcon } from './icons';
 import { useI18n } from './I18nContext';
@@ -59,20 +59,28 @@ export function ModelEffortPicker({
     };
   }, [isOpen]);
 
+  const split = splitModelEffortVariant(catalog, model);
+  const activeModel = split.model;
+  const availableEfforts = effortsForModel(catalog, activeModel);
+  const activeEffort = effort ?? split.effort;
   const triggerLabel = formatPickerLabel({ model, effort, catalog, locale });
   const modelOptions = resolveModelOptions({ model, catalog, locale });
   const normalizedCustom = normalizeCustomModelInput(customDraft);
 
-  const selectModel = (nextModel: string | null) => {
-    onChange({ model: nextModel });
+  const applyModelSelection = (nextModel: string | null) => {
+    const nextEfforts = effortsForModel(catalog, nextModel);
+    if (effort !== null && !nextEfforts.includes(effort)) {
+      onChange({ model: nextModel, effort: null });
+    } else {
+      onChange({ model: nextModel });
+    }
     setOpen(false);
   };
 
   const applyCustomModel = () => {
     if (normalizedCustom === null) return;
-    onChange({ model: normalizedCustom });
+    applyModelSelection(normalizedCustom);
     setCustomDraft('');
-    setOpen(false);
   };
 
   const onCustomKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -101,25 +109,27 @@ export function ModelEffortPicker({
 
       {isOpen ? (
         <div className="chat-picker-popover" role="dialog" aria-label={t('picker.dialogAria')}>
-          <div className="chat-picker-section">
-            <div className="chat-picker-title">{t('picker.effortTitle')}</div>
-            <div className="chat-effort-group" role="group" aria-label={t('picker.effortTitle')}>
-              {catalog.efforts.map((level) => {
-                const active = effort === level;
-                return (
-                  <button
-                    key={level}
-                    type="button"
-                    className={active ? 'chat-effort-btn active' : 'chat-effort-btn'}
-                    aria-pressed={active}
-                    onClick={() => onChange({ effort: level })}
-                  >
-                    {effortLabel(level, locale)}
-                  </button>
-                );
-              })}
+          {availableEfforts.length > 0 ? (
+            <div className="chat-picker-section">
+              <div className="chat-picker-title">{t('picker.effortTitle')}</div>
+              <div className="chat-effort-group" role="group" aria-label={t('picker.effortTitle')}>
+                {availableEfforts.map((level) => {
+                  const active = activeEffort === level;
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      className={active ? 'chat-effort-btn active' : 'chat-effort-btn'}
+                      aria-pressed={active}
+                      onClick={() => onChange({ effort: level })}
+                    >
+                      {effortLabel(level, locale)}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="chat-picker-section">
             <div className="chat-picker-title">{t('picker.modelGroupHeading')}</div>
@@ -130,7 +140,7 @@ export function ModelEffortPicker({
             >
               {modelOptions.map((option) => {
                 const optionValue = option.id === '' ? null : option.id;
-                const selected = model === optionValue;
+                const selected = activeModel === optionValue;
                 return (
                   <button
                     key={option.id || '__default__'}
@@ -138,7 +148,7 @@ export function ModelEffortPicker({
                     role="option"
                     aria-selected={selected}
                     className={selected ? 'chat-model-item active' : 'chat-model-item'}
-                    onClick={() => selectModel(optionValue)}
+                    onClick={() => applyModelSelection(optionValue)}
                   >
                     <span className="chat-model-item-main">
                       <span className="chat-model-item-label">{option.label}</span>

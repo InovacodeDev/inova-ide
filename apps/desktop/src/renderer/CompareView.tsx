@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatCostUsd } from '@inova/core/cost-tracking';
-import { PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
+import {
+  PROVIDER_MODELS,
+  effortsForModel,
+  resolveModelConfig,
+  splitModelEffortVariant,
+} from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
 import type { AccountView, ComparisonDiffView, ProjectView } from '../shared/api';
@@ -118,19 +123,25 @@ function SideConfigCard({
     }),
   ];
 
-  const effortOptions: PlatformSelectOption[] = catalog.efforts.map((level) => ({
+  const split = splitModelEffortVariant(catalog, draft.model);
+  const normalizedModel = split.model;
+  const availableEfforts = effortsForModel(catalog, normalizedModel);
+  const effortOptions: PlatformSelectOption[] = availableEfforts.map((level) => ({
     value: level,
     label: effortLabel(level, locale),
   }));
   const shownEffort =
-    modelDefaults === null
-      ? draft.effort
-      : resolveModelConfig({
-          provider,
-          model: draft.model,
-          effort: draft.effort,
-          settings: { models: modelDefaults },
-        }).effort;
+    availableEfforts.length === 0
+      ? null
+      : modelDefaults === null
+        ? (draft.effort ?? split.effort)
+        : resolveModelConfig({
+            provider,
+            model: draft.model,
+            effort: draft.effort,
+            settings: { models: modelDefaults },
+            catalog,
+          }).effort;
 
   const defaultOption = modeCatalog.options.find((opt) => opt.id === modeCatalog.defaultMode);
   const localizedDefaultMode = defaultOption
@@ -171,12 +182,18 @@ function SideConfigCard({
         <span className="modal-field-label">{t('compare.modelLabel')}</span>
         <PlatformSelect
           ariaLabel={t('compare.sideModelAria', { heading })}
-          value={draft.model ?? ''}
+          value={normalizedModel ?? ''}
           options={modelOptions}
-          onChange={(value) => onChange({ ...draft, model: value === '' ? null : value })}
+          onChange={(value) => {
+            const nextModel = value === '' ? null : value;
+            const nextEfforts = effortsForModel(catalog, nextModel);
+            const nextEffort =
+              draft.effort !== null && nextEfforts.includes(draft.effort) ? draft.effort : null;
+            onChange({ ...draft, model: nextModel, effort: nextEffort });
+          }}
         />
       </div>
-      {catalog.efforts.length > 0 ? (
+      {availableEfforts.length > 0 ? (
         <div className="modal-field">
           <span className="modal-field-label">{t('compare.effortLabel')}</span>
           <PlatformSelect

@@ -66,7 +66,28 @@ describe('model-picker-state', () => {
         effort: 'medium',
         catalog: PROVIDER_MODELS.gemini,
       }),
-    ).toBe('Gemini 4 Neon (High) (Médio)');
+    ).toBe('Gemini 4 Neon (Médio)');
+    expect(
+      formatPickerLabel({
+        model: 'gemini-4-neon-high',
+        effort: null,
+        catalog: PROVIDER_MODELS.gemini,
+      }),
+    ).toBe('Gemini 4 Neon (Alto)');
+    expect(
+      formatPickerLabel({
+        model: 'gemini-pro-orchestrator-neon',
+        effort: 'medium',
+        catalog: PROVIDER_MODELS.gemini,
+      }),
+    ).toBe('Orchestrator (Neon)');
+    expect(
+      formatPickerLabel({
+        model: 'deepseek-flash',
+        effort: 'medium',
+        catalog: PROVIDER_MODELS.deepseek,
+      }),
+    ).toBe('DeepSeek V4.1 Flash');
 
     const cases: [keyof typeof PROVIDER_MODELS, string][] = [
       ['codex', 'gpt-6.2-astra'],

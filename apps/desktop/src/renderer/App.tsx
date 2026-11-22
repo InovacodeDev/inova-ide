@@ -1654,6 +1654,7 @@ export function App() {
           model: activeSession.model ?? null,
           effort: activeSession.effort ?? null,
           settings,
+          ...(activeCatalog ? { catalog: activeCatalog } : {}),
         })
       : { model: activeSession?.model ?? null, effort: activeSession?.effort ?? null };
   const activeMode =
@@ -2084,6 +2085,7 @@ export function App() {
                           model: tabSession?.model ?? null,
                           effort: tabSession?.effort ?? null,
                           settings,
+                          catalog: tabCatalog,
                         })
                       : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
                     const tabState = chats[tab.sessionId] ?? initialChatState;
