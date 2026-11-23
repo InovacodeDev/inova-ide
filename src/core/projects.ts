@@ -6,7 +6,7 @@ import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from './library/validate.js';
 import { removeSessionsOfProjects } from './sessions.js';
 import { loadStore, saveStore, withStoreLock } from './store.js';
-import type { Project, Store, VerificationCheck } from './types.js';
+import type { Project, ProjectLibraryBinding, Store, VerificationCheck } from './types.js';
 
 export class PathNotFoundError extends Error {
   readonly path: string;
@@ -147,6 +147,84 @@ export async function updateProjectConfig(ctx: {
       project.pinnedMemory = normalizeProjectPinnedMemory(ctx.patch.pinnedMemory);
     }
     await saveStore(ctx.root, store);
+    return project;
+  });
+}
+
+function normalizeDisabledSkills(
+  disabledSkills: readonly string[] | undefined,
+): string[] | undefined {
+  if (disabledSkills === undefined) return undefined;
+  const unique = [...new Set(disabledSkills)];
+  if (unique.length > MAX_PROJECT_DISABLED_ITEMS || !unique.every(isLibraryId)) {
+    throw new Error('Os ids das skills do plugin no projeto são inválidos.');
+  }
+  return unique.length > 0 ? unique : undefined;
+}
+
+export async function setProjectLibraryBinding(ctx: {
+  root: string;
+  projectId: string;
+  itemId: string;
+  enabled: boolean;
+  disabledSkills?: readonly string[];
+}): Promise<Project> {
+  if (!isLibraryId(ctx.itemId)) {
+    throw new Error('O id do item da biblioteca é inválido.');
+  }
+  const nextDisabledSkills = normalizeDisabledSkills(ctx.disabledSkills);
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const project = store.projects.find((item) => item.id === ctx.projectId);
+    if (!project) {
+      throw new PathNotFoundError(ctx.projectId);
+    }
+    const current = project.libraryBindings ?? [];
+    const existingIndex = current.findIndex((entry) => entry.itemId === ctx.itemId);
+    if (existingIndex === -1 && current.length >= MAX_PROJECT_DISABLED_ITEMS) {
+      throw new Error(
+        `Um projeto aceita até ${MAX_PROJECT_DISABLED_ITEMS} vínculos da biblioteca.`,
+      );
+    }
+    const existing = existingIndex >= 0 ? current[existingIndex] : undefined;
+    const resolvedDisabledSkills =
+      ctx.disabledSkills !== undefined ? nextDisabledSkills : existing?.disabledSkills;
+    const nextEntry: ProjectLibraryBinding = {
+      itemId: ctx.itemId,
+      enabled: ctx.enabled,
+      ...(resolvedDisabledSkills && resolvedDisabledSkills.length > 0
+        ? { disabledSkills: resolvedDisabledSkills }
+        : {}),
+    };
+    project.libraryBindings =
+      existingIndex >= 0
+        ? current.map((entry, idx) => (idx === existingIndex ? nextEntry : entry))
+        : [...current, nextEntry];
+    await saveStore(ctx.root, store);
+    return project;
+  });
+}
+
+export async function removeProjectLibraryBinding(ctx: {
+  root: string;
+  projectId: string;
+  itemId: string;
+}): Promise<Project> {
+  if (!isLibraryId(ctx.itemId)) {
+    throw new Error('O id do item da biblioteca é inválido.');
+  }
+  return withStoreLock(ctx.root, async () => {
+    const store = await loadStore(ctx.root);
+    const project = store.projects.find((item) => item.id === ctx.projectId);
+    if (!project) {
+      throw new PathNotFoundError(ctx.projectId);
+    }
+    if (project.libraryBindings) {
+      project.libraryBindings = project.libraryBindings.filter(
+        (entry) => entry.itemId !== ctx.itemId,
+      );
+      await saveStore(ctx.root, store);
+    }
     return project;
   });
 }

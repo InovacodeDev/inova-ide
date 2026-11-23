@@ -74,11 +74,35 @@ function isLibraryOverrides(value: unknown): boolean {
   );
 }
 
+function isLibraryBinding(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const { itemId, enabled, disabledSkills } = value;
+  return (
+    isLibraryId(itemId) &&
+    typeof enabled === 'boolean' &&
+    (disabledSkills === undefined ||
+      (Array.isArray(disabledSkills) &&
+        disabledSkills.length <= MAX_PROJECT_DISABLED_ITEMS &&
+        disabledSkills.every(isLibraryId)))
+  );
+}
+
 function isProject(value: unknown): boolean {
   if (!isRecord(value) || !hasStrings(value, ['id', 'path', 'accountId'])) return false;
-  const { autoWorktree, autoVerify, verificationChecks, pinnedMemory, libraryOverrides } = value;
+  const {
+    autoWorktree,
+    autoVerify,
+    verificationChecks,
+    pinnedMemory,
+    libraryOverrides,
+    libraryBindings,
+  } = value;
   return (
     (libraryOverrides === undefined || isLibraryOverrides(libraryOverrides)) &&
+    (libraryBindings === undefined ||
+      (Array.isArray(libraryBindings) &&
+        libraryBindings.length <= MAX_PROJECT_DISABLED_ITEMS &&
+        libraryBindings.every(isLibraryBinding))) &&
     (autoWorktree === undefined || typeof autoWorktree === 'boolean') &&
     (autoVerify === undefined || typeof autoVerify === 'boolean') &&
     (verificationChecks === undefined ||

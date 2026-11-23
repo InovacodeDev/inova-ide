@@ -3,7 +3,7 @@ import { AccountError, findAccount } from '@inova/core/accounts';
 import { isCapabilityRef } from '@inova/core/capabilities/types';
 import type { CapabilityKind } from '@inova/core/capabilities/types';
 import { MAX_PINNED_MEMORY_CHARS } from '@inova/core/handoff';
-import { isLibraryId } from '@inova/core/library/index';
+import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from '@inova/core/library/index';
 import type { LibraryItemKind } from '@inova/core/library/index';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
@@ -815,8 +815,11 @@ function parseLibraryKindFields(input: {
       return valid ? { definition: raw['definition'], label } : undefined;
     }
     case 'mcp':
-    case 'plugin':
       return isBoundedDefinition(raw['definition']) ? { definition: raw['definition'] } : undefined;
+    case 'plugin': {
+      if (raw['definition'] === undefined) return {};
+      return isBoundedDefinition(raw['definition']) ? { definition: raw['definition'] } : undefined;
+    }
   }
 }
 
@@ -854,6 +857,74 @@ export function parseSetProjectOverride(
     return undefined;
   }
   return { projectId, itemId, disabled };
+}
+
+export interface ParsedImportLibraryZip {
+  zipPath: string;
+  expectedKind?: 'skill' | 'plugin';
+  idOverride?: string;
+}
+
+export function parseImportLibraryZip(input: unknown): ParsedImportLibraryZip | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['zipPath', 'expectedKind', 'idOverride'])) {
+    return undefined;
+  }
+  const { zipPath, expectedKind, idOverride } = input;
+  if (!isPath(zipPath)) return undefined;
+  if (expectedKind !== undefined && expectedKind !== 'skill' && expectedKind !== 'plugin') {
+    return undefined;
+  }
+  if (idOverride !== undefined && !isLibraryId(idOverride)) return undefined;
+  return {
+    zipPath,
+    ...(expectedKind === undefined ? {} : { expectedKind }),
+    ...(idOverride === undefined ? {} : { idOverride }),
+  };
+}
+
+export interface ParsedSetProjectLibraryBinding {
+  projectId: string;
+  itemId: string;
+  enabled: boolean;
+  disabledSkills?: string[];
+}
+
+export function parseSetProjectLibraryBinding(
+  input: unknown,
+): ParsedSetProjectLibraryBinding | undefined {
+  if (
+    !isRecord(input) ||
+    !hasOnlyKeys(input, ['projectId', 'itemId', 'enabled', 'disabledSkills'])
+  ) {
+    return undefined;
+  }
+  const { projectId, itemId, enabled, disabledSkills } = input;
+  if (!isSafeId(projectId) || !isLibraryId(itemId) || typeof enabled !== 'boolean') {
+    return undefined;
+  }
+  if (
+    disabledSkills !== undefined &&
+    (!Array.isArray(disabledSkills) ||
+      disabledSkills.length > MAX_PROJECT_DISABLED_ITEMS ||
+      !disabledSkills.every(isLibraryId))
+  ) {
+    return undefined;
+  }
+  return {
+    projectId,
+    itemId,
+    enabled,
+    ...(disabledSkills === undefined ? {} : { disabledSkills }),
+  };
+}
+
+export function parseRemoveProjectLibraryBinding(
+  input: unknown,
+): { projectId: string; itemId: string } | undefined {
+  if (!isRecord(input) || !hasOnlyKeys(input, ['projectId', 'itemId'])) return undefined;
+  const { projectId, itemId } = input;
+  if (!isSafeId(projectId) || !isLibraryId(itemId)) return undefined;
+  return { projectId, itemId };
 }
 
 function parseLibrarySyncSelection(

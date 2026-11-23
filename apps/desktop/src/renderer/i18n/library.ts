@@ -6,6 +6,10 @@ export const LIBRARY_PT_BR = {
   'library.kindOne.connector': 'Conector',
   'library.kindOne.plugin': 'Plugin',
   'library.newButton': 'Novo: {kind}',
+  'library.importZip': 'Importar ZIP',
+  'library.importingZip': 'Importando…',
+  'library.importZipSuccess': '{name} importado para a biblioteca.',
+  'library.importZipReplaced': '{name} atualizado na biblioteca.',
   'library.empty': 'A biblioteca está vazia. Crie o primeiro item.',
   'library.loadFailed': 'Não foi possível carregar a biblioteca: {message}',
   'library.edit': 'Editar',
@@ -52,6 +56,8 @@ export const LIBRARY_PT_BR = {
   'library.form.provider': 'Provider',
   'library.form.marketplace': 'Marketplace (opcional)',
   'library.form.pluginName': 'Nome do plugin',
+  'library.form.pluginPackageHint':
+    'Plugin importado por arquivo ZIP. Para atualizar o pacote, importe o novo arquivo ZIP.',
 
   'library.error.idInvalid':
     'O ID deve ter até 64 caracteres: minúsculas, números e hífen entre palavras.',
@@ -84,6 +90,9 @@ export const LIBRARY_PT_BR = {
   'library.plugin.noAccount': 'Nenhuma conta deste provider.',
   'library.plugin.confirming': 'Confirme o comando para instalar.',
   'library.plugin.started': 'Instalação enviada. Acompanhe em Comandos.',
+  'library.plugin.packageBadge': 'Pacote ZIP ({format})',
+  'library.plugin.skillsCount': '{count} skills',
+  'library.plugin.commandsCount': '{count} comandos',
 
   'library.sync.title': 'Sincronizar',
   'library.sync.desc':
@@ -113,12 +122,21 @@ export const LIBRARY_PT_BR = {
 
   'library.project.title': 'Biblioteca neste projeto',
   'library.project.desc':
-    'Desligue um item só neste projeto. Ele continua ligado nos outros projetos.',
+    'Importe skills e plugins da biblioteca para este projeto ou desligue itens para economizar tokens.',
+  'library.project.skillsTitle': 'Skills e plugins neste projeto',
+  'library.project.skillsDesc':
+    'Apenas os itens ativos abaixo ficam disponíveis como comandos /skill neste projeto.',
+  'library.project.skillsEmpty': 'Nenhuma skill ou plugin importado neste projeto ainda.',
+  'library.project.availableTitle': 'Disponíveis na biblioteca',
+  'library.project.availableEmpty':
+    'Todos os itens da biblioteca já foram adicionados ou não há skills e plugins cadastrados.',
+  'library.project.import': 'Importar para o projeto',
+  'library.project.removeFromProject': 'Remover',
+  'library.project.mcpTitle': 'MCPs e conectores neste projeto',
   'library.project.libraryOff': 'Desligado na biblioteca',
   'library.project.projectOff': 'Desligado neste projeto',
   'library.project.effective': 'Ativo neste projeto',
-  'library.project.skillNote':
-    'Vale para novas sincronizações. Uma cópia já aplicada na conta continua lá até a skill ser desligada ou removida na biblioteca.',
+  'library.project.skillNote': 'Ativo para comandos /skill e execuções neste projeto.',
 } as const;
 
 export type LibraryKey = keyof typeof LIBRARY_PT_BR;
@@ -131,6 +149,10 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.kindOne.connector': 'Connector',
   'library.kindOne.plugin': 'Plugin',
   'library.newButton': 'New: {kind}',
+  'library.importZip': 'Import ZIP',
+  'library.importingZip': 'Importing…',
+  'library.importZipSuccess': '{name} imported into the library.',
+  'library.importZipReplaced': '{name} updated in the library.',
   'library.empty': 'The library is empty. Create the first item.',
   'library.loadFailed': 'Could not load the library: {message}',
   'library.edit': 'Edit',
@@ -177,6 +199,8 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.form.provider': 'Provider',
   'library.form.marketplace': 'Marketplace (optional)',
   'library.form.pluginName': 'Plugin name',
+  'library.form.pluginPackageHint':
+    'Plugin imported from a ZIP package. To update the package, import the new ZIP file.',
 
   'library.error.idInvalid':
     'The ID must have up to 64 characters: lowercase letters, numbers and hyphens between words.',
@@ -208,6 +232,9 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.plugin.noAccount': 'No account for this provider.',
   'library.plugin.confirming': 'Confirm the command to install.',
   'library.plugin.started': 'Install sent. Follow it in Commands.',
+  'library.plugin.packageBadge': 'ZIP package ({format})',
+  'library.plugin.skillsCount': '{count} skills',
+  'library.plugin.commandsCount': '{count} commands',
 
   'library.sync.title': 'Sync',
   'library.sync.desc':
@@ -236,10 +263,20 @@ export const LIBRARY_EN_US: Record<LibraryKey, string> = {
   'library.status.unknown': 'Unknown ({status})',
 
   'library.project.title': 'Library in this project',
-  'library.project.desc': 'Turn an item off for this project only. It stays on in other projects.',
+  'library.project.desc':
+    'Import library skills and plugins into this project or turn items off to save tokens.',
+  'library.project.skillsTitle': 'Skills & plugins in this project',
+  'library.project.skillsDesc':
+    'Only active items below are exposed as /skill commands in this project.',
+  'library.project.skillsEmpty': 'No skills or plugins imported into this project yet.',
+  'library.project.availableTitle': 'Available in library',
+  'library.project.availableEmpty':
+    'All library skills and plugins are already in this project or none exist yet.',
+  'library.project.import': 'Import into project',
+  'library.project.removeFromProject': 'Remove',
+  'library.project.mcpTitle': 'MCPs & connectors in this project',
   'library.project.libraryOff': 'Off in the library',
   'library.project.projectOff': 'Off in this project',
   'library.project.effective': 'Active in this project',
-  'library.project.skillNote':
-    'Applies to new syncs. A copy already applied to the account stays there until the skill is turned off or removed in the library.',
+  'library.project.skillNote': 'Active for /skill commands and runs in this project.',
 };

@@ -24,8 +24,24 @@ export type ComposerPopupModel =
 
 function suggestionKey(suggestion: SlashSuggestion): string {
   if (suggestion.kind === 'native') return `native:${suggestion.command.name}`;
-  const { source, kind, name } = suggestion.command;
-  return `${source}:${kind}:${name}`;
+  const { source, kind, name, pluginId } = suggestion.command;
+  return `${source}:${pluginId ?? ''}:${kind}:${name}`;
+}
+
+function projectCommandBadge(
+  command: Extract<SlashSuggestion, { kind: 'project' }>['command'],
+  t: ReturnType<typeof useI18n>['t'],
+): string {
+  switch (command.source) {
+    case 'library':
+      return t('composer.badge.library');
+    case 'plugin':
+      return command.pluginName ?? t('composer.badge.plugin');
+    case 'claude':
+    case 'codex':
+    case 'gemini':
+      return PROVIDER_NAME[command.source];
+  }
 }
 
 export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
@@ -115,7 +131,7 @@ export function ComposerPopup({ model }: { model: ComposerPopupModel }) {
                 <span className="composer-popup-title mono">/{command.name}</span>
                 {suggestion.kind === 'project' ? (
                   <span className="composer-popup-badge">
-                    {PROVIDER_NAME[suggestion.command.source]}
+                    {projectCommandBadge(suggestion.command, t)}
                   </span>
                 ) : null}
                 {command.description !== '' ? (

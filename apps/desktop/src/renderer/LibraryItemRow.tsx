@@ -1,6 +1,6 @@
 import type { AccountView, LibraryItem, PluginInstallRecipe } from '../shared/api';
 import { useI18n } from './I18nContext';
-import { itemDetail } from './library-state';
+import { isPluginPackageItem, itemDetail } from './library-state';
 import { LibraryPluginInstall, type RunCommand } from './LibraryPluginInstall';
 import { Switch } from './settings-controls';
 import './library.css';
@@ -21,16 +21,39 @@ export function LibraryItemRow(props: LibraryItemRowProps) {
   const { t } = useI18n();
   const switchId = `library-item-${item.id}`;
   const detail = itemDetail(item);
+  const packagePlugin = isPluginPackageItem(item) ? item.definition : null;
 
   return (
     <li className="library-row">
       <div className="library-row-main">
         <div className="library-row-text">
-          <label className="library-row-name" htmlFor={switchId}>
-            {item.name}
-          </label>
+          <div className="library-row-title-line">
+            <label className="library-row-name" htmlFor={switchId}>
+              {item.name}
+            </label>
+            {packagePlugin ? (
+              <span className="library-badge">
+                {t('library.plugin.packageBadge', { format: packagePlugin.manifestFormat })}
+              </span>
+            ) : null}
+          </div>
           {item.description ? <span className="library-row-desc">{item.description}</span> : null}
           {detail !== '' ? <span className="library-row-detail mono">{detail}</span> : null}
+          {packagePlugin &&
+          (packagePlugin.skills.length > 0 || packagePlugin.commands.length > 0) ? (
+            <div className="library-package-tags">
+              {packagePlugin.skills.map((skill) => (
+                <span key={`skill-${skill.id}`} className="library-slash-tag mono">
+                  /{skill.id}
+                </span>
+              ))}
+              {packagePlugin.commands.map((cmd) => (
+                <span key={`cmd-${cmd.name}`} className="library-slash-tag mono">
+                  /{cmd.name}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="library-row-actions">
           <span className="library-row-state">
@@ -60,10 +83,10 @@ export function LibraryItemRow(props: LibraryItemRowProps) {
           </button>
         </div>
       </div>
-      {item.kind === 'plugin' && item.enabled ? (
+      {item.kind === 'plugin' && !packagePlugin && item.enabled ? (
         <LibraryPluginInstall item={item} recipe={recipe} accounts={accounts} onRun={onRun} />
       ) : null}
-      {item.kind === 'plugin' && !item.enabled ? (
+      {item.kind === 'plugin' && !packagePlugin && !item.enabled ? (
         <p className="library-hint">{t('library.plugin.disabled')}</p>
       ) : null}
     </li>

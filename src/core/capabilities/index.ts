@@ -21,7 +21,19 @@ export const capabilityAdapters: Record<ProviderId, CapabilityAdapter> = {
   grok: grokCapabilities,
 };
 
-export function capabilityLaunchArgs(account: Account): string[] {
+export function capabilityLaunchArgs(
+  account: Account,
+  extraDisabledSkills?: readonly string[],
+): string[] {
   const disabled = (account.disabledCapabilities ?? []).filter(isCapabilityRef);
-  return capabilityAdapters[account.provider].launchArgs(disabled);
+  if (extraDisabledSkills === undefined || extraDisabledSkills.length === 0) {
+    return capabilityAdapters[account.provider].launchArgs(disabled);
+  }
+  const merged = [...disabled];
+  for (const id of extraDisabledSkills) {
+    if (!merged.some((ref) => ref.kind === 'skill' && ref.id === id)) {
+      merged.push({ kind: 'skill', id });
+    }
+  }
+  return capabilityAdapters[account.provider].launchArgs(merged);
 }

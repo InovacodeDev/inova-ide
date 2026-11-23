@@ -291,13 +291,14 @@ export function buildChatTurn(ctx: {
   effort?: EffortLevel | null;
   executionMode?: ExecutionMode | null;
   extraDirs?: readonly string[];
+  disabledSkillIds?: readonly string[];
 }): LaunchSpec {
   const options: TurnModelOptions = {
     model: ctx.model,
     effort: ctx.effort,
     executionMode: ctx.executionMode,
     extraDirs: ctx.extraDirs,
-    capabilityArgs: capabilityLaunchArgs(ctx.account),
+    capabilityArgs: capabilityLaunchArgs(ctx.account, ctx.disabledSkillIds),
   };
   const args = argsForProvider(ctx.account.provider, ctx.prompt, ctx.turn, options);
   return buildLaunch({ account: ctx.account, cwd: ctx.cwd, args, baseEnv: ctx.baseEnv });

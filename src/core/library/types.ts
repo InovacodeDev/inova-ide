@@ -18,10 +18,42 @@ export interface SkillDefinition {
   hash: string;
 }
 
-export interface PluginDefinition {
+export interface PluginRecipeDefinition {
+  format?: 'recipe';
   provider: ProviderId;
   marketplace?: string;
   name: string;
+}
+
+export type PluginManifestFormat = 'claude' | 'codex' | 'cursor' | 'antigravity' | 'generic';
+
+export interface PluginPackageSkillMeta {
+  id: string;
+  name: string;
+  description: string | null;
+  path: string;
+}
+
+export interface PluginPackageCommandMeta {
+  name: string;
+  description: string | null;
+  path: string;
+}
+
+export interface PluginPackageDefinition {
+  format: 'package';
+  manifestFormat: PluginManifestFormat;
+  version?: string;
+  hash: string;
+  skills: PluginPackageSkillMeta[];
+  commands: PluginPackageCommandMeta[];
+  mcpServers?: string[];
+}
+
+export type PluginDefinition = PluginRecipeDefinition | PluginPackageDefinition;
+
+export function isPluginPackage(def: PluginDefinition): def is PluginPackageDefinition {
+  return def.format === 'package';
 }
 
 export interface SkillLibraryItem extends LibraryItemBase {

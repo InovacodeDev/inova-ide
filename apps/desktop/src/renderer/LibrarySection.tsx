@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { AccountView, LibraryItem, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
+import { DownloadIcon } from './icons';
 import { useI18n } from './I18nContext';
 import {
   ENV_VALUE_EXAMPLE,
@@ -35,11 +36,40 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState<LibraryItem | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
+  const [zipNotice, setZipNotice] = useState<string | null>(null);
+  const [importingZip, setImportingZip] = useState(false);
   const [libraryVersion, setLibraryVersion] = useState(0);
 
   const refresh = async () => {
     await reload();
     setLibraryVersion((version) => version + 1);
+  };
+
+  const importZip = async () => {
+    setRowError(null);
+    setZipNotice(null);
+    const picked = await libraryCall({ action: () => window.inova.pickLibraryZip(), locale });
+    if (!picked.ok) {
+      setRowError(picked.message);
+      return;
+    }
+    if (picked.value === null) return;
+    setImportingZip(true);
+    const result = await libraryCall({
+      action: () => window.inova.importLibraryZip({ zipPath: picked.value! }),
+      locale,
+    });
+    setImportingZip(false);
+    if (!result.ok) {
+      setRowError(result.message);
+      return;
+    }
+    setZipNotice(
+      t(result.value.replaced ? 'library.importZipReplaced' : 'library.importZipSuccess', {
+        name: result.value.item.name,
+      }),
+    );
+    await refresh();
   };
 
   const openForm = (next: LibraryFormState) => {
@@ -129,8 +159,22 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
               {t('library.newButton', { kind: t(`library.kindOne.${kind}`) })}
             </button>
           ))}
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={importingZip}
+            onClick={() => void importZip()}
+          >
+            <DownloadIcon size={14} />
+            <span>{t(importingZip ? 'library.importingZip' : 'library.importZip')}</span>
+          </button>
         </div>
       </SettingGroup>
+      {zipNotice ? (
+        <p className="library-notice" role="status">
+          {zipNotice}
+        </p>
+      ) : null}
       {form ? (
         <LibraryItemForm
           key={form.editing ? `edit-${form.id}` : `new-${form.kind}`}

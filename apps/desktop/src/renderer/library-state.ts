@@ -2,7 +2,12 @@ import type {
   LibraryItem,
   LibraryItemKind,
   PluginInstallRecipe,
+  PluginLibraryItem,
+  PluginPackageCommandMeta,
+  PluginPackageDefinition,
   ProfileSyncApplyResult,
+  ProjectLibraryBinding,
+  SkillLibraryItem,
 } from '../shared/api';
 import type { TranslationKey } from './i18n';
 
@@ -44,6 +49,14 @@ export function itemDetail(item: LibraryItem): string {
     case 'connector':
       return `${item.label} · ${item.definition.url}`;
     case 'plugin': {
+      if ('format' in item.definition && item.definition.format === 'package') {
+        const { manifestFormat, version, skills, commands } = item.definition;
+        const parts = [`ZIP (${manifestFormat})`];
+        if (version) parts.push(`v${version}`);
+        if (skills.length > 0) parts.push(`${skills.length} skills`);
+        if (commands.length > 0) parts.push(`${commands.length} comandos`);
+        return parts.join(' · ');
+      }
       const { provider, marketplace, name } = item.definition;
       return `${provider} · ${name}${marketplace === undefined ? '' : `@${marketplace}`}`;
     }
@@ -249,4 +262,92 @@ export function canPreviewSync(input: {
 }): boolean {
   const { projectId, accountCount, selectedCount } = input;
   return projectId !== null && (accountCount === 0 || selectedCount > 0);
+}
+
+export function isPluginPackageItem(
+  item: LibraryItem,
+): item is PluginLibraryItem & { definition: PluginPackageDefinition } {
+  return (
+    item.kind === 'plugin' && 'format' in item.definition && item.definition.format === 'package'
+  );
+}
+
+export interface ProjectPluginSkillState {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+}
+
+export interface ProjectSkillPluginRow {
+  item: SkillLibraryItem | PluginLibraryItem;
+  binding: ProjectLibraryBinding;
+  status: ProjectItemStatus;
+  effective: boolean;
+  packageSkills: ProjectPluginSkillState[];
+  packageCommands: readonly PluginPackageCommandMeta[];
+}
+
+export interface ProjectSkillPluginState {
+  imported: ProjectSkillPluginRow[];
+  available: (SkillLibraryItem | PluginLibraryItem)[];
+}
+
+export function projectSkillPluginState(input: {
+  items: readonly LibraryItem[];
+  bindings?: readonly ProjectLibraryBinding[];
+}): ProjectSkillPluginState {
+  const candidates = input.items
+    .filter(
+      (item): item is SkillLibraryItem | PluginLibraryItem =>
+        item.kind === 'skill' || item.kind === 'plugin',
+    )
+    .sort(compareItems);
+  const byId = new Map((input.bindings ?? []).map((binding) => [binding.itemId, binding]));
+  const imported: ProjectSkillPluginRow[] = [];
+  const available: (SkillLibraryItem | PluginLibraryItem)[] = [];
+
+  for (const item of candidates) {
+    const binding = byId.get(item.id);
+    if (!binding) {
+      available.push(item);
+      continue;
+    }
+    const status: ProjectItemStatus = !item.enabled
+      ? 'library-off'
+      : binding.enabled
+        ? 'effective'
+        : 'project-off';
+    const disabledSet = new Set(binding.disabledSkills ?? []);
+    const isPkg = isPluginPackageItem(item);
+    const packageSkills: ProjectPluginSkillState[] = isPkg
+      ? item.definition.skills.map((skill) => ({
+          id: skill.id,
+          name: skill.name,
+          description: skill.description,
+          enabled: !disabledSet.has(skill.id),
+        }))
+      : [];
+    const packageCommands = isPkg ? item.definition.commands : [];
+    imported.push({
+      item,
+      binding,
+      status,
+      effective: status === 'effective',
+      packageSkills,
+      packageCommands,
+    });
+  }
+
+  return { imported, available };
+}
+
+export function projectMcpConnectorRows(input: {
+  items: readonly LibraryItem[];
+  projectDisabled?: readonly string[];
+}): ProjectItemRow[] {
+  return projectItemRows({
+    items: input.items.filter((item) => item.kind === 'mcp' || item.kind === 'connector'),
+    ...(input.projectDisabled ? { projectDisabled: input.projectDisabled } : {}),
+  });
 }
