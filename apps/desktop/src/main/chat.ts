@@ -3,7 +3,13 @@ import type { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { createChatParser } from '@inova/core/chat-events';
 import type { ChatParser } from '@inova/core/chat-events';
-import type { ChatEvent, UsageWindow, VerificationCheckResult } from '@inova/core/chat-types';
+import type {
+  ChatEvent,
+  OrchestratorPhase,
+  OrchestratorVerdict,
+  UsageWindow,
+  VerificationCheckResult,
+} from '@inova/core/chat-types';
 import { extractTurnUsageFromLine } from '@inova/core/cost-tracking';
 import type { LaunchSpec } from '@inova/core/launch';
 import type { ProviderId } from '@inova/core/types';
@@ -248,6 +254,56 @@ function eventOf(record: Json): ChatEvent | undefined {
         (value === 'up' || value === 'down' || value === null)
         ? { kind: 'feedback', turnIndex, value }
         : undefined;
+    }
+    case 'orchestrator': {
+      const {
+        turnId,
+        phase,
+        round,
+        maxRounds,
+        orchestratorLabel,
+        developerLabel,
+        verdict,
+        summary,
+      } = record;
+      const validPhase =
+        phase === 'planning' ||
+        phase === 'developing' ||
+        phase === 'reviewing' ||
+        phase === 'completed' ||
+        phase === 'failed';
+      const validVerdict =
+        verdict === undefined ||
+        verdict === null ||
+        verdict === 'approved' ||
+        verdict === 'changes-requested';
+      if (
+        typeof turnId !== 'string' ||
+        !validPhase ||
+        typeof round !== 'number' ||
+        !Number.isInteger(round) ||
+        round < 1 ||
+        typeof maxRounds !== 'number' ||
+        !Number.isInteger(maxRounds) ||
+        maxRounds < 1 ||
+        typeof orchestratorLabel !== 'string' ||
+        typeof developerLabel !== 'string' ||
+        !validVerdict ||
+        (summary !== undefined && summary !== null && typeof summary !== 'string')
+      ) {
+        return undefined;
+      }
+      return {
+        kind: 'orchestrator',
+        turnId,
+        phase: phase as OrchestratorPhase,
+        round,
+        maxRounds,
+        orchestratorLabel,
+        developerLabel,
+        ...(verdict !== undefined ? { verdict: verdict as OrchestratorVerdict | null } : {}),
+        ...(summary !== undefined ? { summary: summary as string | null } : {}),
+      };
     }
     case 'error':
       return strings(record, ['message'])

@@ -129,6 +129,28 @@ export function activeTurnActivity(
   }
   const last = turnItems[turnItems.length - 1];
   if (last?.type === 'thinking' && last.streaming) return translate(locale, 'turn.activeThinking');
+  for (let i = turnItems.length - 1; i >= 0; i -= 1) {
+    const item = turnItems[i];
+    if (item?.type !== 'orchestrator') continue;
+    if (item.phase === 'planning') {
+      return translate(locale, 'turn.orchestratorPlanning', { model: item.orchestratorLabel });
+    }
+    if (item.phase === 'developing') {
+      return translate(locale, 'turn.orchestratorDeveloping', {
+        model: item.developerLabel,
+        round: item.round,
+        max: item.maxRounds,
+      });
+    }
+    if (item.phase === 'reviewing') {
+      return translate(locale, 'turn.orchestratorReviewing', {
+        model: item.orchestratorLabel,
+        round: item.round,
+        max: item.maxRounds,
+      });
+    }
+    break;
+  }
   return translate(locale, 'turn.activePending');
 }
 

@@ -66,6 +66,14 @@ import {
 } from '@inova/core/models';
 import type { ProviderModels } from '@inova/core/models';
 import { isModeSupported, resolveExecutionMode, reviewExecutionMode } from '@inova/core/modes';
+import {
+  buildDeveloperGuidedPrompt,
+  buildOrchestratorPlanPrompt,
+  buildOrchestratorReviewPrompt,
+  clampOrchestratorRounds,
+  hasDirectGuidanceMarker,
+  parseOrchestratorVerdict,
+} from '@inova/core/orchestrator';
 import { applyProfileSync, previewProfileSync } from '@inova/core/profile-sync';
 import {
   PathNotFoundError,
@@ -115,6 +123,7 @@ import type {
   QueuedTurn,
   RateLimitFailoverPolicy,
   Session,
+  SessionOrchestratorConfig,
   SessionUsageTotals,
   Settings,
   Store,
@@ -151,6 +160,20 @@ import { readFilePreviewContent } from './file-preview.js';
 import { createLoginFlowManager } from './login-flow.js';
 import { isInsideRoot } from './preview-protocol.js';
 import type { PreviewRegistry } from './preview-protocol.js';
+import {
+  accumulateOrchestrationDone,
+  accumulateOrchestrationUsage,
+  activeAgentOf,
+  clearPhaseOutput,
+  createOrchestrationState,
+  formatAgentModelLabel,
+  prefixOrchestrationEvent,
+  readOrchestratorGitSummary,
+  readPhaseText,
+  recordPhaseTextEvent,
+  type OrchestrationAgentRuntime,
+  type OrchestrationTurnState,
+} from './orchestrator-flow.js';
 import type { SessionManager } from './sessions.js';
 import { findBinary, readEnvPath } from './shell-env.js';
 import { createTurnQueue } from './turn-queue.js';
@@ -607,6 +630,20 @@ export function createHandlers(deps: HandlerDeps) {
   const failoverTriedAccounts = new Map<string, Set<string>>();
   const pendingFailoverSessions = new Set<string>();
   const pendingTurnUsage = new Map<string, TurnTokenUsage>();
+  const activeOrchestrations = new Map<string, OrchestrationTurnState>();
+
+  function isSessionBusy(sessionId: string): boolean {
+    return deps.chat.isRunning(sessionId) || activeOrchestrations.has(sessionId);
+  }
+
+  function busyAccountIds(): Set<string> {
+    const busy = new Set(deps.chat.accountsInUse());
+    for (const orch of activeOrchestrations.values()) {
+      busy.add(orch.orch.account.id);
+      busy.add(orch.dev.account.id);
+    }
+    return busy;
+  }
   let cachedFailoverPolicy: RateLimitFailoverPolicy = 'off';
   let cachedFailoverPolicyLoaded = false;
   let cachedSessionSettings: Settings['sessions'] = { ...DEFAULT_SETTINGS.sessions };
@@ -836,6 +873,11 @@ export function createHandlers(deps: HandlerDeps) {
       failoverTriedAccounts.delete(id);
       pendingFailoverSessions.delete(id);
       pendingTurnUsage.delete(id);
+      const orch = activeOrchestrations.get(id);
+      if (orch) {
+        orch.cancelled = true;
+        activeOrchestrations.delete(id);
+      }
       turnQueue.cancelBySession(id);
       setQueuePaused({ sessionId: id, paused: false });
     }
@@ -853,7 +895,7 @@ export function createHandlers(deps: HandlerDeps) {
   }
 
   function accountAvailabilityState(accounts: readonly Account[]) {
-    const busyIds = deps.chat.accountsInUse();
+    const busyIds = busyAccountIds();
     const exhaustedIds = new Set<string>();
     for (const account of accounts) {
       if (isAccountExhausted(account.id)) exhaustedIds.add(account.id);
@@ -952,7 +994,7 @@ export function createHandlers(deps: HandlerDeps) {
     if (ranked.length === 0) return null;
     const baseEnv = input.baseEnv ?? (await deps.baseEnv());
     for (const candidate of ranked) {
-      if (!allowBusy && deps.chat.accountsInUse().has(candidate.id)) continue;
+      if (!allowBusy && busyAccountIds().has(candidate.id)) continue;
       const file = await prepareRunnableAccount(candidate, baseEnv);
       if (file === null) continue;
       return { account: candidate, file, baseEnv };
@@ -1038,7 +1080,7 @@ export function createHandlers(deps: HandlerDeps) {
                 !pausedQueues.has(sessionId) &&
                 !verifyingSessions.has(sessionId) &&
                 !pendingFailoverSessions.has(sessionId) &&
-                !deps.chat.isRunning(sessionId),
+                !isSessionBusy(sessionId),
             ),
         ),
       ];
@@ -1134,7 +1176,7 @@ export function createHandlers(deps: HandlerDeps) {
         if (truncated !== null) {
           const cwd = effectiveCwd(session, project);
           const sharesRunningTree = sessionsOf(store).some((other) => {
-            if (other.id === sessionId || !deps.chat.isRunning(other.id)) return false;
+            if (other.id === sessionId || !isSessionBusy(other.id)) return false;
             const otherProject = store.projects.find((item) => item.id === other.projectId);
             return otherProject !== undefined && effectiveCwd(other, otherProject) === cwd;
           });
@@ -1188,18 +1230,67 @@ export function createHandlers(deps: HandlerDeps) {
         console.error(`inova: failed to drain turn queue for ${targetAccountId}`, error);
       });
     }
-    if (
-      !deps.chat.accountsInUse().has(owner.accountId) &&
-      turnQueue.list(owner.accountId).length > 0
-    ) {
+    if (!busyAccountIds().has(owner.accountId) && turnQueue.list(owner.accountId).length > 0) {
       void drainAccountQueue(owner.accountId).catch((error: unknown) => {
         console.error(`inova: failed to drain turn queue for ${owner.accountId}`, error);
       });
     }
   }
 
+  type OrchestratorLaunchPreparation =
+    | { ok: true; value?: { account: Account; file: string; config: SessionOrchestratorConfig } }
+    | { ok: false; reason: 'busy' | 'error'; message: string };
+
+  async function prepareOrchestratorLaunch(input: {
+    store: Store;
+    session: Session;
+    prompt: string;
+    devAccountId: string;
+    devFile: string;
+    baseEnv: NodeJS.ProcessEnv;
+  }): Promise<OrchestratorLaunchPreparation> {
+    const config = input.session.orchestrator;
+    const isCompact = splitLeadingSlash(input.prompt.trim())?.name === 'compact';
+    if (!config?.enabled || isCompact) return { ok: true };
+    const orchAccount = input.store.accounts.find((item) => item.id === config.accountId);
+    if (!orchAccount) {
+      return { ok: false, reason: 'error', message: 'Conta do orquestrador não encontrada.' };
+    }
+    if (orchAccount.id === input.devAccountId) {
+      return { ok: true, value: { account: orchAccount, file: input.devFile, config } };
+    }
+    if (busyAccountIds().has(orchAccount.id)) {
+      return {
+        ok: false,
+        reason: 'busy',
+        message:
+          'CONTA_OCUPADA: A conta do orquestrador já está executando outra sessão. Enfileire o turno ou troque de conta.',
+      };
+    }
+    const orchEntry = exhaustionEntry(orchAccount.id);
+    if (orchEntry !== null) {
+      const blocked = isFutureReset(orchEntry.resetsAt)
+        ? exhaustedMessage(orchEntry.resetsAt)
+        : await recheckExhaustion({ account: orchAccount, resetsAt: orchEntry.resetsAt });
+      if (blocked !== null) {
+        return { ok: false, reason: 'error', message: blocked };
+      }
+    }
+    const orchAdapter = providers[orchAccount.provider];
+    const orchFile = await findBinary(orchAdapter.binary, readEnvPath(input.baseEnv));
+    if (orchFile === undefined) {
+      return {
+        ok: false,
+        reason: 'error',
+        message: `${orchAdapter.binary} não encontrado. Instale: ${orchAdapter.installHint}`,
+      };
+    }
+    await orchAdapter.prepareLaunch(orchAccount.homeDir, input.baseEnv['HOME']);
+    return { ok: true, value: { account: orchAccount, file: orchFile, config } };
+  }
+
   async function drainAccountQueue(accountId: string): Promise<void> {
-    if (deps.chat.accountsInUse().has(accountId)) return;
+    if (busyAccountIds().has(accountId)) return;
     if (isAccountExhausted(accountId)) {
       if (!cachedFailoverPolicyLoaded || cachedFailoverPolicy !== 'off') {
         const settings = await getSettings(deps.root);
@@ -1233,6 +1324,7 @@ export function createHandlers(deps: HandlerDeps) {
       ...pausedQueues,
       ...verifyingSessions,
       ...pendingFailoverSessions,
+      ...activeOrchestrations.keys(),
     ]);
     const preferred = preferredQueueSession.get(accountId);
     if (preferred !== undefined && !skipSessions.has(preferred)) {
@@ -1282,8 +1374,34 @@ export function createHandlers(deps: HandlerDeps) {
       return;
     }
     await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
+    const orchPrep = await prepareOrchestratorLaunch({
+      store,
+      session,
+      prompt: next.prompt,
+      devAccountId: account.id,
+      devFile: file,
+      baseEnv,
+    });
+    if (!orchPrep.ok) {
+      if (orchPrep.reason === 'busy') {
+        turnQueue.requeueFront(next);
+        emitQueueSnapshot();
+        return;
+      }
+      enqueueInboxUpdate({
+        sessionId: session.id,
+        kind: 'failed',
+        summary: orchPrep.message,
+      });
+      return;
+    }
     await serialized(async () => {
-      if (deps.chat.isRunning(session.id) || deps.chat.accountsInUse().has(account.id)) {
+      if (isSessionBusy(session.id) || busyAccountIds().has(account.id)) {
+        turnQueue.requeueFront(next);
+        emitQueueSnapshot();
+        return;
+      }
+      if (orchPrep.value && busyAccountIds().has(orchPrep.value.account.id)) {
         turnQueue.requeueFront(next);
         emitQueueSnapshot();
         return;
@@ -1296,6 +1414,7 @@ export function createHandlers(deps: HandlerDeps) {
         file,
         baseEnv,
         ...(next.extraDirs ? { extraDirs: next.extraDirs } : {}),
+        ...(orchPrep.value ? { orchestratorRun: orchPrep.value } : {}),
       });
     });
   }
@@ -1339,6 +1458,41 @@ export function createHandlers(deps: HandlerDeps) {
       }
     }).catch((error: unknown) => {
       console.error(`inova: failed to clear provider session of ${sessionId}`, error);
+    });
+  }
+
+  function adoptOrchestratorSession(input: { sessionId: string; providerSessionId: string }): void {
+    const { sessionId, providerSessionId } = input;
+    void serialized(async () => {
+      const session = requireSession(await loadStore(deps.root), sessionId);
+      if (session.orchestrator && (session.orchestrator.providerSessionId ?? null) === null) {
+        await updateSession({
+          root: deps.root,
+          sessionId,
+          patch: { orchestrator: { ...session.orchestrator, providerSessionId } },
+        });
+      }
+    }).catch((error: unknown) => {
+      console.error(`inova: failed to store orchestrator session of ${sessionId}`, error);
+    });
+  }
+
+  function discardProvisionalOrchestratorSession(input: {
+    sessionId: string;
+    providerSessionId: string;
+  }): void {
+    const { sessionId, providerSessionId } = input;
+    void serialized(async () => {
+      const session = requireSession(await loadStore(deps.root), sessionId);
+      if (session.orchestrator?.providerSessionId === providerSessionId) {
+        await updateSession({
+          root: deps.root,
+          sessionId,
+          patch: { orchestrator: { ...session.orchestrator, providerSessionId: null } },
+        });
+      }
+    }).catch((error: unknown) => {
+      console.error(`inova: failed to clear orchestrator session of ${sessionId}`, error);
     });
   }
 
@@ -1455,7 +1609,7 @@ export function createHandlers(deps: HandlerDeps) {
         if (turnQueue.forSession(sessionId).length > 0) {
           preferredQueueSession.set(accountId, sessionId);
         }
-        if (!deps.chat.accountsInUse().has(accountId)) {
+        if (!busyAccountIds().has(accountId)) {
           void drainAccountQueue(accountId).catch((error: unknown) => {
             console.error(`inova: failed to drain turn queue for ${accountId}`, error);
           });
@@ -1501,16 +1655,18 @@ export function createHandlers(deps: HandlerDeps) {
     return lastError ?? 'Turno encerrado com erro.';
   }
 
-  function handleChatEvent(sessionId: string, event: ChatEvent): void {
-    deps.emit(sessionId, event);
-    if (event.kind !== 'text-delta' && event.kind !== 'thinking-delta') {
-      enqueueAppend(sessionId, event);
+  function nextTurnForAgent(agent: OrchestrationAgentRuntime): ChatTurn {
+    if (agent.providerSessionId !== null) {
+      return { mode: 'resume', providerSessionId: agent.providerSessionId };
     }
-    if (event.kind === 'session') {
-      adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
-    }
-    trackProvisionalSession(sessionId, event);
-    const owner = turnOwners.get(sessionId);
+    return { mode: 'new', sessionId: randomUUID() };
+  }
+
+  function recordAccountStreamEvent(
+    owner: { accountId: string; accountLabel: string; provider: ProviderId } | undefined,
+    sessionId: string,
+    event: ChatEvent,
+  ): void {
     if (event.kind === 'usage-limits' && owner) {
       streamUsage.set(owner.accountId, {
         provider: owner.provider,
@@ -1537,6 +1693,415 @@ export function createHandlers(deps: HandlerDeps) {
         exhaustedAccounts.set(owner.accountId, knownReset ?? cooldownReset);
       }
     }
+  }
+
+  function finalizeOrchestratedTurn(input: {
+    sessionId: string;
+    orch: OrchestrationTurnState;
+    isError: boolean;
+    failedInOrchPhase: boolean;
+  }): void {
+    const { sessionId, orch, isError, failedInOrchPhase } = input;
+    if (activeOrchestrations.get(sessionId) === orch) {
+      activeOrchestrations.delete(sessionId);
+    }
+    if (failedInOrchPhase) {
+      activeTurnInputs.delete(sessionId);
+    }
+    turnOwners.set(sessionId, {
+      accountId: orch.dev.account.id,
+      accountLabel: orch.dev.account.label,
+      provider: orch.dev.account.provider,
+    });
+    if (orch.usage.hasUsage) {
+      handleChatEvent(sessionId, {
+        kind: 'turn-usage',
+        inputTokens: orch.usage.inputTokens,
+        outputTokens: orch.usage.outputTokens,
+        cacheReadTokens: orch.usage.cacheReadTokens,
+        cacheWriteTokens: orch.usage.cacheWriteTokens,
+      });
+    }
+    handleChatEvent(sessionId, {
+      kind: 'done',
+      isError,
+      costUsd: orch.totalCostUsd,
+      durationMs: orch.totalDurationMs,
+    });
+    if (
+      orch.orch.account.id !== orch.dev.account.id &&
+      !busyAccountIds().has(orch.orch.account.id)
+    ) {
+      void drainAccountQueue(orch.orch.account.id).catch((error: unknown) => {
+        console.error(`inova: failed to drain turn queue for ${orch.orch.account.id}`, error);
+      });
+    }
+  }
+
+  function launchOrchestratedDeveloperPhase(input: {
+    sessionId: string;
+    orch: OrchestrationTurnState;
+    feedback: string | null;
+  }): void {
+    const { sessionId, orch, feedback } = input;
+    const devTurn = orch.devInitialTurn ?? nextTurnForAgent(orch.dev);
+    orch.devInitialTurn = null;
+    if (orch.dev.account.provider === 'claude' && devTurn.mode !== 'resume') {
+      orch.dev.providerSessionId = devTurn.sessionId;
+      orch.dev.provisionalSessionId = devTurn.sessionId;
+      orch.dev.provisionalConfirmed = false;
+      adoptProviderSession({ sessionId, providerSessionId: devTurn.sessionId });
+    }
+    turnOwners.set(sessionId, {
+      accountId: orch.dev.account.id,
+      accountLabel: orch.dev.account.label,
+      provider: orch.dev.account.provider,
+    });
+    const prompt = buildDeveloperGuidedPrompt({
+      userPrompt: orch.userPrompt,
+      plan: orch.lastPlan,
+      round: orch.round,
+      maxRounds: orch.maxRounds,
+      feedback,
+      ...(orch.round === 1 && orch.contextPrefix !== ''
+        ? { contextPrefix: orch.contextPrefix }
+        : {}),
+    });
+    const spec = buildChatTurn({
+      account: orch.dev.account,
+      cwd: orch.cwd,
+      prompt,
+      turn: devTurn,
+      baseEnv: orch.baseEnv,
+      model: orch.dev.model,
+      effort: orch.dev.effort,
+      executionMode: orch.dev.executionMode,
+      extraDirs: orch.extraDirs,
+    });
+    deps.chat.send({
+      sessionId,
+      accountId: orch.dev.account.id,
+      provider: orch.dev.account.provider,
+      file: orch.dev.file,
+      spec,
+    });
+  }
+
+  async function launchOrchestratorReviewPhase(input: {
+    sessionId: string;
+    orch: OrchestrationTurnState;
+    developerReport: string;
+  }): Promise<void> {
+    const { sessionId, orch, developerReport } = input;
+    try {
+      const gitSummary = await readOrchestratorGitSummary(orch.cwd);
+      if (
+        orch.cancelled ||
+        cancelledTurns.has(sessionId) ||
+        activeOrchestrations.get(sessionId) !== orch
+      ) {
+        if (activeOrchestrations.get(sessionId) === orch) {
+          orch.transitioning = false;
+          handleChatEvent(sessionId, {
+            kind: 'orchestrator',
+            turnId: orch.turnId,
+            phase: 'failed',
+            round: orch.round,
+            maxRounds: orch.maxRounds,
+            orchestratorLabel: orch.orch.label,
+            developerLabel: orch.dev.label,
+            summary: lastErrorBySession.get(sessionId) ?? null,
+          });
+          finalizeOrchestratedTurn({ sessionId, orch, isError: true, failedInOrchPhase: true });
+        }
+        return;
+      }
+      orch.transitioning = false;
+      const orchTurn = nextTurnForAgent(orch.orch);
+      if (orch.orch.account.provider === 'claude' && orchTurn.mode !== 'resume') {
+        orch.orch.providerSessionId = orchTurn.sessionId;
+        orch.orch.provisionalSessionId = orchTurn.sessionId;
+        orch.orch.provisionalConfirmed = false;
+        adoptOrchestratorSession({ sessionId, providerSessionId: orchTurn.sessionId });
+      }
+      turnOwners.set(sessionId, {
+        accountId: orch.orch.account.id,
+        accountLabel: orch.orch.account.label,
+        provider: orch.orch.account.provider,
+      });
+      const spec = buildChatTurn({
+        account: orch.orch.account,
+        cwd: orch.cwd,
+        prompt: buildOrchestratorReviewPrompt({
+          userPrompt: orch.userPrompt,
+          plan: orch.lastPlan,
+          developerReport,
+          gitSummary,
+          round: orch.round,
+          maxRounds: orch.maxRounds,
+        }),
+        turn: orchTurn,
+        baseEnv: orch.baseEnv,
+        model: orch.orch.model,
+        effort: orch.orch.effort,
+        executionMode: orch.orch.executionMode,
+      });
+      deps.chat.send({
+        sessionId,
+        accountId: orch.orch.account.id,
+        provider: orch.orch.account.provider,
+        file: orch.orch.file,
+        spec,
+      });
+    } catch (error: unknown) {
+      if (activeOrchestrations.get(sessionId) !== orch) return;
+      orch.transitioning = false;
+      const message =
+        error instanceof Error ? error.message : 'Falha ao preparar a revisão do orquestrador.';
+      handleChatEvent(sessionId, { kind: 'error', message });
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId: orch.turnId,
+        phase: 'failed',
+        round: orch.round,
+        maxRounds: orch.maxRounds,
+        orchestratorLabel: orch.orch.label,
+        developerLabel: orch.dev.label,
+        summary: message,
+      });
+      finalizeOrchestratedTurn({ sessionId, orch, isError: true, failedInOrchPhase: true });
+    }
+  }
+
+  function handleOrchestratedEvent(
+    sessionId: string,
+    orch: OrchestrationTurnState,
+    event: ChatEvent,
+  ): void {
+    const active = activeAgentOf(orch);
+    const owner = turnOwners.get(sessionId);
+
+    if (event.kind === 'session') {
+      active.providerSessionId = event.providerSessionId;
+      if (active.provisionalSessionId !== null) active.provisionalConfirmed = true;
+      if (orch.phase === 'developing') {
+        adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
+      } else {
+        adoptOrchestratorSession({ sessionId, providerSessionId: event.providerSessionId });
+      }
+      return;
+    }
+
+    if (event.kind === 'turn-usage') {
+      accumulateOrchestrationUsage(orch, event);
+      return;
+    }
+
+    if (event.kind === 'usage-limits' || event.kind === 'error' || event.kind === 'context') {
+      deps.emit(sessionId, event);
+      enqueueAppend(sessionId, event);
+      recordAccountStreamEvent(owner, sessionId, event);
+      if (event.kind === 'context' && !isCompactTurn(sessionId)) {
+        const reason = circuitBreaker.recordContext({
+          sessionId,
+          usedTokens: event.usedTokens,
+          windowTokens: event.windowTokens,
+          limits: cachedSessionSettings,
+        });
+        if (reason !== null) {
+          orch.cancelled = true;
+          deps.chat.cancel(sessionId);
+          emitCircuitBreakerError(sessionId, reason);
+          if (turnQueue.forSession(sessionId).length > 0) {
+            setQueuePaused({ sessionId, paused: true });
+          }
+          enqueueInboxUpdate({ sessionId, kind: 'waiting-input', summary: reason });
+        }
+      }
+      return;
+    }
+
+    if (
+      event.kind === 'text' ||
+      event.kind === 'text-delta' ||
+      event.kind === 'thinking' ||
+      event.kind === 'thinking-delta' ||
+      event.kind === 'tool-use' ||
+      event.kind === 'tool-result' ||
+      event.kind === 'subagent'
+    ) {
+      recordPhaseTextEvent(orch, event);
+      const prefixed = prefixOrchestrationEvent(orch, event);
+      deps.emit(sessionId, prefixed);
+      if (prefixed.kind !== 'text-delta' && prefixed.kind !== 'thinking-delta') {
+        enqueueAppend(sessionId, prefixed);
+      }
+      if (prefixed.kind === 'tool-use') {
+        circuitBreaker.recordToolUse({ sessionId, toolId: prefixed.toolId, name: prefixed.name });
+      } else if (prefixed.kind === 'tool-result') {
+        const reason = circuitBreaker.recordToolResult({
+          sessionId,
+          toolId: prefixed.toolId,
+          output: prefixed.output,
+          isError: prefixed.isError,
+          limits: cachedSessionSettings,
+        });
+        if (reason !== null) {
+          orch.cancelled = true;
+          deps.chat.cancel(sessionId);
+          emitCircuitBreakerError(sessionId, reason);
+          if (turnQueue.forSession(sessionId).length > 0) {
+            setQueuePaused({ sessionId, paused: true });
+          }
+          enqueueInboxUpdate({ sessionId, kind: 'waiting-input', summary: reason });
+        }
+      }
+      return;
+    }
+
+    if (event.kind !== 'done') return;
+
+    accumulateOrchestrationDone(orch, event);
+    if (event.isError && active.provisionalSessionId !== null && !active.provisionalConfirmed) {
+      if (orch.phase === 'developing') {
+        discardProvisionalSession({
+          sessionId,
+          providerSessionId: active.provisionalSessionId,
+        });
+      } else {
+        discardProvisionalOrchestratorSession({
+          sessionId,
+          providerSessionId: active.provisionalSessionId,
+        });
+      }
+      active.providerSessionId = null;
+    }
+    active.provisionalSessionId = null;
+    active.provisionalConfirmed = false;
+
+    const failedInOrchPhase = orch.phase !== 'developing';
+    if (event.isError || orch.cancelled || cancelledTurns.has(sessionId)) {
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId: orch.turnId,
+        phase: 'failed',
+        round: orch.round,
+        maxRounds: orch.maxRounds,
+        orchestratorLabel: orch.orch.label,
+        developerLabel: orch.dev.label,
+        summary: lastErrorBySession.get(sessionId) ?? null,
+      });
+      finalizeOrchestratedTurn({ sessionId, orch, isError: true, failedInOrchPhase });
+      return;
+    }
+
+    if (orch.phase === 'planning') {
+      const plan = readPhaseText(orch);
+      if (hasDirectGuidanceMarker(plan)) {
+        handleChatEvent(sessionId, {
+          kind: 'orchestrator',
+          turnId: orch.turnId,
+          phase: 'completed',
+          round: orch.round,
+          maxRounds: orch.maxRounds,
+          orchestratorLabel: orch.orch.label,
+          developerLabel: orch.dev.label,
+          verdict: 'approved',
+          summary: null,
+        });
+        finalizeOrchestratedTurn({ sessionId, orch, isError: false, failedInOrchPhase: true });
+        return;
+      }
+      orch.lastPlan = plan;
+      orch.phase = 'developing';
+      clearPhaseOutput(orch);
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId: orch.turnId,
+        phase: 'developing',
+        round: orch.round,
+        maxRounds: orch.maxRounds,
+        orchestratorLabel: orch.orch.label,
+        developerLabel: orch.dev.label,
+      });
+      launchOrchestratedDeveloperPhase({ sessionId, orch, feedback: null });
+      return;
+    }
+
+    if (orch.phase === 'developing') {
+      const developerReport = readPhaseText(orch);
+      orch.phase = 'reviewing';
+      orch.transitioning = true;
+      clearPhaseOutput(orch);
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId: orch.turnId,
+        phase: 'reviewing',
+        round: orch.round,
+        maxRounds: orch.maxRounds,
+        orchestratorLabel: orch.orch.label,
+        developerLabel: orch.dev.label,
+      });
+      void launchOrchestratorReviewPhase({ sessionId, orch, developerReport });
+      return;
+    }
+
+    const reviewText = readPhaseText(orch);
+    const verdict = parseOrchestratorVerdict(reviewText);
+    if (verdict === 'changes-requested' && orch.round < orch.maxRounds) {
+      orch.round += 1;
+      orch.phase = 'developing';
+      clearPhaseOutput(orch);
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId: orch.turnId,
+        phase: 'developing',
+        round: orch.round,
+        maxRounds: orch.maxRounds,
+        orchestratorLabel: orch.orch.label,
+        developerLabel: orch.dev.label,
+        verdict: 'changes-requested',
+      });
+      launchOrchestratedDeveloperPhase({ sessionId, orch, feedback: reviewText });
+      return;
+    }
+
+    handleChatEvent(sessionId, {
+      kind: 'orchestrator',
+      turnId: orch.turnId,
+      phase: 'completed',
+      round: orch.round,
+      maxRounds: orch.maxRounds,
+      orchestratorLabel: orch.orch.label,
+      developerLabel: orch.dev.label,
+      verdict,
+    });
+    finalizeOrchestratedTurn({ sessionId, orch, isError: false, failedInOrchPhase: true });
+  }
+
+  function handleChatEvent(sessionId: string, event: ChatEvent): void {
+    const activeOrch = activeOrchestrations.get(sessionId);
+    if (
+      activeOrch &&
+      event.kind !== 'checkpoint' &&
+      event.kind !== 'user' &&
+      event.kind !== 'orchestrator' &&
+      event.kind !== 'verification' &&
+      event.kind !== 'feedback'
+    ) {
+      handleOrchestratedEvent(sessionId, activeOrch, event);
+      return;
+    }
+    deps.emit(sessionId, event);
+    if (event.kind !== 'text-delta' && event.kind !== 'thinking-delta') {
+      enqueueAppend(sessionId, event);
+    }
+    if (event.kind === 'session') {
+      adoptProviderSession({ sessionId, providerSessionId: event.providerSessionId });
+    }
+    trackProvisionalSession(sessionId, event);
+    const owner = turnOwners.get(sessionId);
+    recordAccountStreamEvent(owner, sessionId, event);
     if (event.kind === 'tool-use') {
       circuitBreaker.recordToolUse({ sessionId, toolId: event.toolId, name: event.name });
     }
@@ -1723,7 +2288,7 @@ export function createHandlers(deps: HandlerDeps) {
           });
         }
       }
-      if (owner && !deps.chat.accountsInUse().has(owner.accountId)) {
+      if (owner && !busyAccountIds().has(owner.accountId)) {
         void drainAccountQueue(owner.accountId).catch((error: unknown) => {
           console.error(`inova: failed to drain turn queue for ${owner.accountId}`, error);
         });
@@ -1827,8 +2392,9 @@ export function createHandlers(deps: HandlerDeps) {
     file: string;
     baseEnv: NodeJS.ProcessEnv;
     extraDirs?: readonly string[];
+    orchestratorRun?: { account: Account; file: string; config: SessionOrchestratorConfig };
   }): Promise<Result<null>> {
-    const { sessionId, prompt, account, project } = input;
+    const { sessionId, prompt, account, project, orchestratorRun } = input;
     verificationControllers.get(sessionId)?.abort();
     const store = await loadStore(deps.root);
     const session = requireSession(store, sessionId);
@@ -1868,12 +2434,162 @@ export function createHandlers(deps: HandlerDeps) {
     const commandPrompt = await expandProjectCommand({
       projectPath: project.path,
       prompt,
-      keepClaudeLiteral: account.provider === 'claude' && contextPrefix === '',
+      keepClaudeLiteral: !orchestratorRun && account.provider === 'claude' && contextPrefix === '',
     });
     const promptForCli =
       contextPrefix !== ''
         ? `${contextPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
         : commandPrompt;
+    const settings = await getSettings(deps.root);
+    cachedSessionSettings = settings.sessions;
+    cachedFailoverPolicy = settings.sessions.rateLimitFailover;
+    cachedFailoverPolicyLoaded = true;
+    const executionMode = resolveExecutionMode({
+      provider: account.provider,
+      sessionMode: session.mode ?? null,
+      defaultModes: store.defaultModes,
+    });
+    const cachedCatalog = getCachedCatalog(account.id);
+    const modelConfig = resolveModelConfig({
+      provider: account.provider,
+      model: session.model ?? null,
+      effort: session.effort ?? null,
+      settings,
+      ...(cachedCatalog ? { catalog: cachedCatalog } : {}),
+    });
+
+    if (orchestratorRun && !isCompactSlash) {
+      const orchAccount = orchestratorRun.account;
+      const orchConfig = orchestratorRun.config;
+      const orchCatalog = getCachedCatalog(orchAccount.id);
+      const orchModelConfig = resolveModelConfig({
+        provider: orchAccount.provider,
+        model: orchConfig.model ?? null,
+        effort: orchConfig.effort ?? null,
+        settings,
+        ...(orchCatalog ? { catalog: orchCatalog } : {}),
+      });
+      const existingOrchSessionId = orchConfig.providerSessionId ?? null;
+      const orchTurn: ChatTurn = existingOrchSessionId
+        ? { mode: 'resume', providerSessionId: existingOrchSessionId }
+        : { mode: 'new', sessionId: randomUUID() };
+      const persistOrchNow = orchAccount.provider === 'claude' && orchTurn.mode === 'new';
+      const initialOrchSessionId = persistOrchNow ? orchTurn.sessionId : existingOrchSessionId;
+      await updateSession({
+        root: deps.root,
+        sessionId,
+        patch: {
+          ...(persistOrchNow
+            ? { orchestrator: { ...orchConfig, providerSessionId: orchTurn.sessionId } }
+            : {}),
+          ...(DEFAULT_TITLES.has(session.title) ? { title: titleFromPrompt(prompt) } : {}),
+          ...(handoffPrefix ? { handoffContext: null } : {}),
+          pinnedMemoryHash: currentPinnedHash,
+        },
+      });
+      const orchestratorLabel = formatAgentModelLabel({
+        provider: orchAccount.provider,
+        model: orchModelConfig.model,
+        ...(orchCatalog ? { catalog: orchCatalog } : {}),
+      });
+      const developerLabel = formatAgentModelLabel({
+        provider: account.provider,
+        model: modelConfig.model,
+        ...(cachedCatalog ? { catalog: cachedCatalog } : {}),
+      });
+      const maxRounds = clampOrchestratorRounds(orchConfig.maxRounds);
+      const orchState = createOrchestrationState({
+        turnId,
+        sessionId,
+        cwd,
+        userPrompt: commandPrompt,
+        contextPrefix,
+        baseEnv: input.baseEnv,
+        extraDirs: input.extraDirs ?? [],
+        maxRounds,
+        orch: {
+          account: orchAccount,
+          file: orchestratorRun.file,
+          model: orchModelConfig.model,
+          effort: orchModelConfig.effort,
+          executionMode: reviewExecutionMode(orchAccount.provider),
+          providerSessionId: initialOrchSessionId,
+          label: orchestratorLabel,
+          provisionalSessionId: persistOrchNow ? orchTurn.sessionId : null,
+          provisionalConfirmed: false,
+        },
+        dev: {
+          account,
+          file: input.file,
+          model: modelConfig.model,
+          effort: modelConfig.effort,
+          executionMode,
+          providerSessionId: session.providerSessionId,
+          label: developerLabel,
+          provisionalSessionId: null,
+          provisionalConfirmed: false,
+        },
+        devInitialTurn: turn,
+      });
+      activeOrchestrations.set(sessionId, orchState);
+      syncProjectAutoVerify(project);
+      circuitBreaker.startTurn(sessionId);
+      sessionProjects.set(sessionId, session.projectId);
+      turnOwners.set(sessionId, {
+        accountId: orchAccount.id,
+        accountLabel: orchAccount.label,
+        provider: orchAccount.provider,
+      });
+      activeTurnInputs.set(sessionId, {
+        prompt,
+        ...(input.extraDirs && input.extraDirs.length > 0
+          ? { extraDirs: [...input.extraDirs] }
+          : {}),
+        handoffContext: preservedHandoff,
+      });
+      if (checkpoint !== null) {
+        handleChatEvent(sessionId, {
+          kind: 'checkpoint',
+          turnId: checkpoint.turnId,
+          ref: checkpoint.ref,
+          createdAt: checkpoint.createdAt,
+          skippedLargeFiles: checkpoint.skippedLargeFiles,
+        });
+      }
+      handleChatEvent(sessionId, { kind: 'user', text: prompt, at: new Date().toISOString() });
+      handleChatEvent(sessionId, {
+        kind: 'orchestrator',
+        turnId,
+        phase: 'planning',
+        round: 1,
+        maxRounds,
+        orchestratorLabel,
+        developerLabel,
+      });
+      const planSpec = buildChatTurn({
+        account: orchAccount,
+        cwd,
+        prompt: buildOrchestratorPlanPrompt({
+          userPrompt: commandPrompt,
+          developerLabel,
+          ...(contextPrefix !== '' ? { contextPrefix } : {}),
+        }),
+        turn: orchTurn,
+        baseEnv: input.baseEnv,
+        model: orchModelConfig.model,
+        effort: orchModelConfig.effort,
+        executionMode: orchState.orch.executionMode,
+      });
+      deps.chat.send({
+        sessionId,
+        accountId: orchAccount.id,
+        provider: orchAccount.provider,
+        file: orchestratorRun.file,
+        spec: planSpec,
+      });
+      return ok(null);
+    }
+
     await updateSession({
       root: deps.root,
       sessionId,
@@ -1883,23 +2599,6 @@ export function createHandlers(deps: HandlerDeps) {
         ...(handoffPrefix ? { handoffContext: null } : {}),
         pinnedMemoryHash: isCompactSlash ? null : currentPinnedHash,
       },
-    });
-    const executionMode = resolveExecutionMode({
-      provider: account.provider,
-      sessionMode: session.mode ?? null,
-      defaultModes: store.defaultModes,
-    });
-    const settings = await getSettings(deps.root);
-    cachedSessionSettings = settings.sessions;
-    cachedFailoverPolicy = settings.sessions.rateLimitFailover;
-    cachedFailoverPolicyLoaded = true;
-    const cachedCatalog = getCachedCatalog(account.id);
-    const modelConfig = resolveModelConfig({
-      provider: account.provider,
-      model: session.model ?? null,
-      effort: session.effort ?? null,
-      settings,
-      ...(cachedCatalog ? { catalog: cachedCatalog } : {}),
     });
     const spec = buildChatTurn({
       account,
@@ -1956,7 +2655,7 @@ export function createHandlers(deps: HandlerDeps) {
       const store = await loadStore(deps.root);
       const sessions = sessionsOf(store);
       const busyIds = new Set([
-        ...sessions.filter((session) => deps.chat.isRunning(session.id)).map(({ id }) => id),
+        ...sessions.filter((session) => isSessionBusy(session.id)).map(({ id }) => id),
         ...(store.workspace?.openSessionIds ?? []),
         ...(uiFocus.activeSessionId === null ? [] : [uiFocus.activeSessionId]),
         ...[...inboxMap.values()].filter((item) => item.unread).map(({ sessionId }) => sessionId),
@@ -2007,7 +2706,7 @@ export function createHandlers(deps: HandlerDeps) {
           if (account && deps.sessions.accountsInUse().has(account.id)) {
             return fail('Feche as abas desta conta antes de removê-la.');
           }
-          if (account && deps.chat.accountsInUse().has(account.id)) {
+          if (account && busyAccountIds().has(account.id)) {
             return fail('Pare os turnos desta conta antes de removê-la.');
           }
           const projectIds = new Set(
@@ -2057,7 +2756,7 @@ export function createHandlers(deps: HandlerDeps) {
             store.projects.filter((item) => item.path === resolved).map((item) => item.id),
           );
           const orphaned = sessionIdsOfProjects(store, projectIds);
-          if (orphaned.some((sessionId) => deps.chat.isRunning(sessionId))) {
+          if (orphaned.some((sessionId) => isSessionBusy(sessionId))) {
             return fail('Pare os turnos deste projeto antes de desvinculá-lo.');
           }
           await unbindProject({ root: deps.root, path });
@@ -2131,12 +2830,12 @@ export function createHandlers(deps: HandlerDeps) {
       validated(
         input,
         parseSessionUpdate,
-        ({ sessionId, title, archived, model, effort, mode, pinnedMemory }) =>
+        ({ sessionId, title, archived, model, effort, mode, pinnedMemory, orchestrator }) =>
           serialized(async () => {
             const store = await loadStore(deps.root);
             const session = requireSession(store, sessionId);
             if (archived === true) {
-              if ([...descendantIds(store, sessionId)].some((id) => deps.chat.isRunning(id))) {
+              if ([...descendantIds(store, sessionId)].some((id) => isSessionBusy(id))) {
                 return fail('Pare o turno em andamento antes de arquivar.');
               }
             }
@@ -2162,6 +2861,26 @@ export function createHandlers(deps: HandlerDeps) {
                 return fail('Modo não suportado por este provedor.');
               }
             }
+            if (orchestrator !== undefined && orchestrator !== null) {
+              const orchAccount = store.accounts.find((item) => item.id === orchestrator.accountId);
+              if (!orchAccount) {
+                return fail('Conta do orquestrador não encontrada.');
+              }
+              if (orchestrator.effort !== undefined && orchestrator.effort !== null) {
+                const orchCatalog =
+                  getCachedCatalog(orchAccount.id) ?? PROVIDER_MODELS[orchAccount.provider];
+                if (
+                  !isEffortSupported(
+                    orchAccount.provider,
+                    orchestrator.effort,
+                    orchestrator.model,
+                    orchCatalog,
+                  )
+                ) {
+                  return fail('Nível de esforço não suportado pelo orquestrador.');
+                }
+              }
+            }
             const patch = {
               ...(title === undefined ? {} : { title }),
               ...(archived === undefined ? {} : { archived }),
@@ -2169,6 +2888,7 @@ export function createHandlers(deps: HandlerDeps) {
               ...(effort === undefined ? {} : { effort }),
               ...(mode === undefined ? {} : { mode }),
               ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
+              ...(orchestrator === undefined ? {} : { orchestrator }),
             };
             return ok(await updateSession({ root: deps.root, sessionId, patch }));
           }),
@@ -2264,7 +2984,7 @@ export function createHandlers(deps: HandlerDeps) {
           const store = await loadStore(deps.root);
           const target = requireSession(store, sessionId);
           const affected = descendantIds(store, sessionId);
-          if ([...affected].some((id) => deps.chat.isRunning(id))) {
+          if ([...affected].some((id) => isSessionBusy(id))) {
             return fail('Pare o turno em andamento antes de apagar.');
           }
           const project = store.projects.find((item) => item.id === target.projectId);
@@ -2319,7 +3039,7 @@ export function createHandlers(deps: HandlerDeps) {
           const store = await loadStore(deps.root);
           const session = requireSession(store, sessionId);
           if (!session.worktree) return fail('Esta sessão não possui worktree isolado.');
-          if (deps.chat.isRunning(sessionId)) {
+          if (isSessionBusy(sessionId)) {
             return fail('Pare o turno em andamento antes de aplicar o worktree.');
           }
           const project = store.projects.find((item) => item.id === session.projectId);
@@ -2336,7 +3056,7 @@ export function createHandlers(deps: HandlerDeps) {
     restoreCheckpoint: (input: unknown): Promise<Result<null>> =>
       validated(input, parseRestoreCheckpoint, ({ sessionId, ref, preserveFiles, files }) =>
         serialized(async () => {
-          if (deps.chat.isRunning(sessionId)) {
+          if (isSessionBusy(sessionId)) {
             return fail('Pare o turno em andamento antes de restaurar o checkpoint.');
           }
           const store = await loadStore(deps.root);
@@ -2388,7 +3108,7 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     runVerification: (input: unknown): Promise<Result<null>> =>
       validated(input, parseSessionRef, async ({ sessionId }) => {
-        if (deps.chat.isRunning(sessionId)) return fail(BUSY_MESSAGE);
+        if (isSessionBusy(sessionId)) return fail(BUSY_MESSAGE);
         const store = await loadStore(deps.root);
         const session = requireSession(store, sessionId);
         const project = store.projects.find((item) => item.id === session.projectId);
@@ -2407,7 +3127,7 @@ export function createHandlers(deps: HandlerDeps) {
       ),
     sendMessage: (input: unknown): Promise<Result<null>> =>
       validated(input, parseMessage, async ({ sessionId, prompt, extraDirs }) => {
-        if (deps.chat.isRunning(sessionId) || pendingFailoverSessions.has(sessionId)) {
+        if (isSessionBusy(sessionId) || pendingFailoverSessions.has(sessionId)) {
           return fail(BUSY_MESSAGE);
         }
         const store = await loadStore(deps.root);
@@ -2418,7 +3138,7 @@ export function createHandlers(deps: HandlerDeps) {
           ? resolveSessionAccount({ session, project, accounts: store.accounts })
           : undefined;
         if (!project || !account) return fail('Projeto não encontrado.');
-        if (deps.chat.accountsInUse().has(account.id)) {
+        if (busyAccountIds().has(account.id)) {
           return fail(
             'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
           );
@@ -2459,13 +3179,33 @@ export function createHandlers(deps: HandlerDeps) {
           await adapter.prepareLaunch(activeAccount.homeDir, baseEnv['HOME']);
         }
         const targetFile = file;
+        const orchPrep = await prepareOrchestratorLaunch({
+          store,
+          session,
+          prompt,
+          devAccountId: activeAccount.id,
+          devFile: targetFile,
+          baseEnv,
+        });
+        if (!orchPrep.ok) {
+          return fail(orchPrep.message);
+        }
         return serialized(async () => {
-          if (deps.chat.isRunning(sessionId) || pendingFailoverSessions.has(sessionId)) {
+          if (isSessionBusy(sessionId) || pendingFailoverSessions.has(sessionId)) {
             return fail(BUSY_MESSAGE);
           }
-          if (deps.chat.accountsInUse().has(activeAccount.id)) {
+          if (busyAccountIds().has(activeAccount.id)) {
             return fail(
               'CONTA_OCUPADA: A conta já está executando outra sessão. Enfileire o turno ou troque de conta.',
+            );
+          }
+          if (
+            orchPrep.value &&
+            orchPrep.value.account.id !== activeAccount.id &&
+            busyAccountIds().has(orchPrep.value.account.id)
+          ) {
+            return fail(
+              'CONTA_OCUPADA: A conta do orquestrador já está executando outra sessão. Enfileire o turno ou troque de conta.',
             );
           }
           if (activeAccount.id !== account.id) {
@@ -2489,6 +3229,7 @@ export function createHandlers(deps: HandlerDeps) {
             file: targetFile,
             baseEnv,
             extraDirs,
+            ...(orchPrep.value ? { orchestratorRun: orchPrep.value } : {}),
           });
         });
       }),
@@ -2509,7 +3250,7 @@ export function createHandlers(deps: HandlerDeps) {
           extraDirs,
         });
         emitQueueSnapshot();
-        if (!deps.chat.accountsInUse().has(account.id)) {
+        if (!busyAccountIds().has(account.id)) {
           void drainAccountQueue(account.id).catch((error: unknown) => {
             console.error(`inova: failed to drain turn queue for ${account.id}`, error);
           });
@@ -2595,7 +3336,7 @@ export function createHandlers(deps: HandlerDeps) {
     ): Promise<Result<{ session: Session; hadHistory: boolean }>> =>
       validated(input, parseSwitchAccount, ({ sessionId, accountId, generateHandoff }) =>
         serialized(async () => {
-          if (deps.chat.isRunning(sessionId)) {
+          if (isSessionBusy(sessionId)) {
             return fail('Pare o turno em andamento antes de trocar de conta.');
           }
           const store = await loadStore(deps.root);
@@ -2868,7 +3609,7 @@ export function createHandlers(deps: HandlerDeps) {
     rewindSession: (input: unknown): Promise<Result<{ text: string }>> =>
       validated(input, parseRewindSession, ({ sessionId, turnIndex }) =>
         serialized(async () => {
-          if (deps.chat.isRunning(sessionId)) {
+          if (isSessionBusy(sessionId)) {
             return fail('Pare o turno em andamento antes de voltar a conversa.');
           }
           const store = await loadStore(deps.root);
@@ -2883,7 +3624,7 @@ export function createHandlers(deps: HandlerDeps) {
           const { kept, removedUserText, checkpointRef, skippedLargeFiles } = truncated;
           const cwd = effectiveCwd(session, project);
           const sharesRunningTree = sessionsOf(store).some((other) => {
-            if (other.id === sessionId || !deps.chat.isRunning(other.id)) return false;
+            if (other.id === sessionId || !isSessionBusy(other.id)) return false;
             const otherProject = store.projects.find((item) => item.id === other.projectId);
             return otherProject !== undefined && effectiveCwd(other, otherProject) === cwd;
           });
@@ -2921,6 +3662,9 @@ export function createHandlers(deps: HandlerDeps) {
               sessionId,
               patch: {
                 providerSessionId: null,
+                ...(session.orchestrator
+                  ? { orchestrator: { ...session.orchestrator, providerSessionId: null } }
+                  : {}),
                 handoffContext,
                 ...(session.parentId === null ? {} : { detachedFromParent: true }),
               },
@@ -2936,7 +3680,7 @@ export function createHandlers(deps: HandlerDeps) {
     clearSession: (input: unknown): Promise<Result<null>> =>
       validated(input, parseClearSession, ({ sessionId, keepContext }) =>
         serialized(async () => {
-          if (deps.chat.isRunning(sessionId)) {
+          if (isSessionBusy(sessionId)) {
             return fail('Pare o turno em andamento antes de limpar a conversa.');
           }
           const store = await loadStore(deps.root);
@@ -2963,6 +3707,9 @@ export function createHandlers(deps: HandlerDeps) {
             sessionId,
             patch: {
               providerSessionId: null,
+              ...(session.orchestrator
+                ? { orchestrator: { ...session.orchestrator, providerSessionId: null } }
+                : {}),
               handoffContext,
               ...(session.parentId === null ? {} : { detachedFromParent: true }),
             },
@@ -3069,6 +3816,8 @@ export function createHandlers(deps: HandlerDeps) {
       if (parsed) uiFocus = parsed;
     },
     cancelTurn: (sessionId: string): void => {
+      const orch = activeOrchestrations.get(sessionId);
+      if (orch) orch.cancelled = true;
       cancelledTurns.add(sessionId);
       verificationControllers.get(sessionId)?.abort();
       deps.chat.cancel(sessionId);
@@ -3284,7 +4033,7 @@ export function createHandlers(deps: HandlerDeps) {
           if (leftAccount.id === rightAccount.id) {
             return fail('Selecione duas contas diferentes para executar em paralelo.');
           }
-          const inUse = deps.chat.accountsInUse();
+          const inUse = busyAccountIds();
           if (inUse.has(leftAccount.id) || inUse.has(rightAccount.id)) {
             return fail('Uma das contas selecionadas já está executando outra sessão.');
           }
@@ -3483,7 +4232,7 @@ export function createHandlers(deps: HandlerDeps) {
           if (!left?.worktree || !right?.worktree) {
             return fail('Comparação ou worktrees não encontrados.');
           }
-          if (deps.chat.isRunning(left.id) || deps.chat.isRunning(right.id)) {
+          if (isSessionBusy(left.id) || isSessionBusy(right.id)) {
             return fail('Aguarde ambos os agentes concluírem antes de aplicar o vencedor.');
           }
           const project = store.projects.find((item) => item.id === left.projectId);

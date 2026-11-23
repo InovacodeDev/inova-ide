@@ -16,12 +16,18 @@ import {
 } from '@inova/core/circuit-breaker';
 import { isRateLimitMessage } from '@inova/core/handoff';
 import type { ProviderModels } from '@inova/core/models';
+import {
+  DEFAULT_ORCHESTRATOR_MAX_ROUNDS,
+  parseOrchestratorSlashCommand,
+  resolveOrchestratorPair,
+} from '@inova/core/orchestrator';
 import { nativeSlashCommands, type SlashCommandAction } from '@inova/core/slash-commands';
 import type {
   EffortLevel,
   ExecutionMode,
   ProviderId,
   QueuedTurn,
+  SessionOrchestratorConfig,
   Settings,
   VoicePolishMode,
 } from '@inova/core/types';
@@ -58,8 +64,10 @@ import { translate, type SupportedLocale } from './i18n';
 import { useI18n } from './I18nContext';
 import {
   AlertIcon,
+  CheckIcon,
   ClockIcon,
   CloseIcon,
+  CompareIcon,
   CopyIcon,
   FileIcon,
   FolderIcon,
@@ -81,6 +89,7 @@ import { Markdown } from './Markdown';
 import { ModelEffortPicker } from './ModelEffortPicker';
 import { defaultModelLabel, localizeModelOption } from './model-picker-state';
 import { ModePicker } from './ModePicker';
+import { OrchestratorPicker } from './OrchestratorPicker';
 import { ProviderBadge } from './ProviderBadge';
 import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
@@ -131,6 +140,14 @@ export interface ChatViewProps {
   onChangeModelConfig: (patch: { model?: string | null; effort?: EffortLevel | null }) => void;
   onChangeMode: (mode: ExecutionMode) => void;
   onSetDefaultMode: (mode: ExecutionMode) => void;
+  orchestrator?: SessionOrchestratorConfig | null;
+  accounts?: readonly AccountView[];
+  activeAccountId?: string | null;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
+  onChangeOrchestrator?: (input: {
+    orchestrator: SessionOrchestratorConfig | null;
+    developer?: { accountId: string; model: string | null };
+  }) => void;
   onRestoreCheckpoint?: (input: { ref: string; skippedLargeFiles: string[] }) => void;
   onForkTurn?: (turnIndex: number) => void;
   onRewindTurn?: (turnIndex: number) => void;
@@ -709,6 +726,53 @@ function Message({
           />
         </div>
       );
+    case 'orchestrator': {
+      const phaseLabel =
+        item.phase === 'planning'
+          ? t('chat.orchestrator.phasePlanning')
+          : item.phase === 'developing'
+            ? t('chat.orchestrator.phaseDeveloping')
+            : item.phase === 'reviewing'
+              ? t('chat.orchestrator.phaseReviewing')
+              : item.phase === 'completed'
+                ? t('chat.orchestrator.phaseCompleted')
+                : t('chat.orchestrator.phaseFailed');
+      const verdictLabel =
+        item.verdict === 'approved'
+          ? t('chat.orchestrator.verdictApproved')
+          : item.verdict === 'changes-requested'
+            ? t('chat.orchestrator.verdictChanges')
+            : null;
+      return (
+        <div className="chat-row">
+          <div className={`chat-orchestrator-step chat-orchestrator-${item.phase}`}>
+            <span className="chat-orchestrator-icon" aria-hidden="true">
+              {item.phase === 'completed' ? <CheckIcon size={13} /> : <CompareIcon size={13} />}
+            </span>
+            <span className="chat-orchestrator-phase">{phaseLabel}</span>
+            <span className="chat-orchestrator-pair">
+              {t('chat.orchestrator.pairLabel', {
+                orchestrator: item.orchestratorLabel,
+                developer: item.developerLabel,
+              })}
+            </span>
+            <span className="chat-orchestrator-round">
+              {t('chat.orchestrator.roundBadge', { round: item.round, max: item.maxRounds })}
+            </span>
+            {verdictLabel ? (
+              <span
+                className={`chat-orchestrator-verdict chat-orchestrator-verdict-${item.verdict}`}
+              >
+                {verdictLabel}
+              </span>
+            ) : null}
+            {item.summary ? (
+              <span className="chat-orchestrator-summary">{item.summary}</span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
     case 'error': {
       const contextTrip = isContextCircuitBreakerMessage(item.message);
       const canCompactAndContinue = contextTrip && Boolean(onCompactAndContinue);
@@ -953,6 +1017,11 @@ export function ChatView({
   onChangeModelConfig,
   onChangeMode,
   onSetDefaultMode,
+  orchestrator = null,
+  accounts = [],
+  activeAccountId = null,
+  modelsByAccount = {},
+  onChangeOrchestrator,
   onRestoreCheckpoint,
   onForkTurn,
   onRewindTurn,
@@ -988,6 +1057,7 @@ export function ChatView({
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [showFormatToolbar, setShowFormatToolbar] = useState(false);
   const [pickerOpenRequest, setPickerOpenRequest] = useState(0);
+  const [orchestratorOpenRequest, setOrchestratorOpenRequest] = useState(0);
   const mergedVoiceHints = useMemo(
     () =>
       collectVoiceHints({
@@ -1245,13 +1315,14 @@ export function ChatView({
     if (running) return;
     if (action === 'clear') setConfirmingClear(true);
     else if (action === 'model-picker') setPickerOpenRequest((current) => current + 1);
+    else if (action === 'orchestrator') setOrchestratorOpenRequest((current) => current + 1);
   };
 
   const applySelectedCommand = (suggestion: SlashSuggestion) => {
     const editor = editorRef.current;
     if (!activeTrigger || activeTrigger.kind !== 'command' || editor === null) return;
     const action = suggestion.kind === 'native' ? suggestion.command.action : 'passthrough';
-    if (action === 'passthrough' || action === 'pin') {
+    if (action === 'passthrough' || action === 'pin' || action === 'orchestrator') {
       insertCommandTag(suggestion.command);
     } else {
       if (running) return;
@@ -1446,6 +1517,65 @@ export function ChatView({
       setDraft('');
       commitTrigger(null);
       onPinNote(pinCommand.note);
+      return;
+    }
+    const orchCommand = parseOrchestratorSlashCommand(markdown);
+    if (orchCommand !== null && attachedFiles.length === 0 && !readOnly) {
+      if (running) {
+        onWarn?.(t('chat.orchestrator.runningWarn'));
+        return;
+      }
+      if (orchCommand.kind === 'open-picker') {
+        editor?.clear();
+        setDraft('');
+        commitTrigger(null);
+        setOrchestratorOpenRequest((current) => current + 1);
+        return;
+      }
+      if (!onChangeOrchestrator) return;
+      if (orchCommand.kind === 'disable') {
+        editor?.clear();
+        setDraft('');
+        commitTrigger(null);
+        onChangeOrchestrator({ orchestrator: null });
+        return;
+      }
+      const catalogsByAccount: Record<string, ProviderModels> = {};
+      for (const account of accounts) {
+        const loaded = modelsByAccount[account.label];
+        if (loaded) catalogsByAccount[account.id] = loaded;
+      }
+      const resolved = resolveOrchestratorPair({
+        rawArgs: orchCommand.rawArgs,
+        accounts,
+        activeAccountId,
+        catalogsByAccount,
+      });
+      if (resolved === null) {
+        onWarn?.(t('chat.orchestrator.parseError'));
+        return;
+      }
+      editor?.clear();
+      setDraft('');
+      commitTrigger(null);
+      onChangeOrchestrator({
+        orchestrator: {
+          enabled: true,
+          accountId: resolved.orchestrator.accountId,
+          model: resolved.orchestrator.modelId,
+          effort: null,
+          maxRounds: orchestrator?.maxRounds ?? DEFAULT_ORCHESTRATOR_MAX_ROUNDS,
+          providerSessionId: null,
+        },
+        ...(resolved.developer
+          ? {
+              developer: {
+                accountId: resolved.developer.accountId,
+                model: resolved.developer.modelId,
+              },
+            }
+          : {}),
+      });
       return;
     }
     const prompt = buildPromptWithAttachedFiles({ text: markdown, files: attachedFiles });
@@ -1831,6 +1961,17 @@ export function ChatView({
                   onChangeMode={onChangeMode}
                   onSetDefault={onSetDefaultMode}
                 />
+                {onChangeOrchestrator ? (
+                  <OrchestratorPicker
+                    orchestrator={orchestrator}
+                    accounts={accounts}
+                    activeAccountId={activeAccountId}
+                    modelsByAccount={modelsByAccount}
+                    disabled={readOnly || running}
+                    openRequest={orchestratorOpenRequest}
+                    onChange={(next) => onChangeOrchestrator({ orchestrator: next })}
+                  />
+                ) : null}
               </>
             ) : null}
             {readOnly ? null : <DictationControl dictation={dictation} />}

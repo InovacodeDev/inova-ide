@@ -6,6 +6,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+### Adicionado
+
+- Modo Orquestrador multi-provedor com comando `/orchestrator` e seletor na barra do compositor, permitindo parear qualquer modelo em modo plano/leitura como orquestrador de qualquer outro modelo desenvolvedor, mesmo ou entre provedores distintos, com até 3 rodadas de revisão e linha do tempo de fases.
+
 ## [0.10.5] - 2026-11-23
 
 ### Alterado

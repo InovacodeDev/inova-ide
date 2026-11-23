@@ -150,7 +150,10 @@ export function nativeActionForSubmit(input: {
   const parsed = splitLeadingSlash(input.text.trim());
   if (parsed === null || parsed.rest !== '') return null;
   const command = nativeSlashCommands(input.provider).find((item) => item.name === parsed.name);
-  return command !== undefined && command.action !== 'passthrough' && command.action !== 'pin'
+  return command !== undefined &&
+    command.action !== 'passthrough' &&
+    command.action !== 'pin' &&
+    command.action !== 'orchestrator'
     ? command
     : null;
 }

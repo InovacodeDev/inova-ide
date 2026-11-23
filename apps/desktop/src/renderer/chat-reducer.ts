@@ -1,4 +1,10 @@
-import type { ChatEvent, SubagentSnapshot, VerificationCheckResult } from '@inova/core/chat-types';
+import type {
+  ChatEvent,
+  OrchestratorPhase,
+  OrchestratorVerdict,
+  SubagentSnapshot,
+  VerificationCheckResult,
+} from '@inova/core/chat-types';
 
 export type ChatItem =
   | { type: 'user'; id: string; text: string; at: string | null }
@@ -26,6 +32,18 @@ export type ChatItem =
       turnId: string;
       status: 'running' | 'passed' | 'failed' | 'skipped';
       checks: VerificationCheckResult[];
+    }
+  | {
+      type: 'orchestrator';
+      id: string;
+      turnId: string;
+      phase: OrchestratorPhase;
+      round: number;
+      maxRounds: number;
+      orchestratorLabel: string;
+      developerLabel: string;
+      verdict: OrchestratorVerdict | null;
+      summary: string | null;
     }
   | { type: 'error'; id: string; message: string };
 
@@ -223,6 +241,25 @@ function applyEvent(state: ChatState, event: ChatEvent): ChatState {
       return {
         ...state,
         items: upsertVerification(items, event),
+      };
+    case 'orchestrator':
+      return {
+        ...state,
+        items: [
+          ...closeStreaming(items),
+          {
+            type: 'orchestrator',
+            id: `orchestrator-${event.turnId}-${items.length}`,
+            turnId: event.turnId,
+            phase: event.phase,
+            round: event.round,
+            maxRounds: event.maxRounds,
+            orchestratorLabel: event.orchestratorLabel,
+            developerLabel: event.developerLabel,
+            verdict: event.verdict ?? null,
+            summary: event.summary ?? null,
+          },
+        ],
       };
     case 'error':
       return {

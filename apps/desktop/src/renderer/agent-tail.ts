@@ -16,6 +16,13 @@ function itemText(item: ChatItem, locale: SupportedLocale): string {
       return translate(locale, 'tool.checkpointSaved');
     case 'verification':
       return translate(locale, 'tool.verificationPrefix', { status: item.status });
+    case 'orchestrator':
+      return translate(locale, 'tool.orchestratorPrefix', {
+        orchestrator: item.orchestratorLabel,
+        developer: item.developerLabel,
+        round: item.round,
+        max: item.maxRounds,
+      });
   }
 }
 

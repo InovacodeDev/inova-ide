@@ -70,6 +70,9 @@ export interface TurnTokenUsage {
   cacheWriteTokens: number;
 }
 
+export type OrchestratorPhase = 'planning' | 'developing' | 'reviewing' | 'completed' | 'failed';
+export type OrchestratorVerdict = 'approved' | 'changes-requested';
+
 export type ChatEvent =
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'user'; text: string; at: string }
@@ -95,6 +98,17 @@ export type ChatEvent =
       turnId: string;
       status: 'running' | 'passed' | 'failed' | 'skipped';
       checks: VerificationCheckResult[];
+    }
+  | {
+      kind: 'orchestrator';
+      turnId: string;
+      phase: OrchestratorPhase;
+      round: number;
+      maxRounds: number;
+      orchestratorLabel: string;
+      developerLabel: string;
+      verdict?: OrchestratorVerdict | null;
+      summary?: string | null;
     }
   | { kind: 'feedback'; turnIndex: number; value: 'up' | 'down' | null }
   | { kind: 'error'; message: string }

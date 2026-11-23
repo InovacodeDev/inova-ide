@@ -7,6 +7,7 @@ import {
 import { MAX_PINNED_MEMORY_CHARS } from './handoff.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode, isModeSupported } from './modes.js';
+import { normalizeOrchestratorConfig } from './orchestrator.js';
 import { loadStore, saveStore, withStoreLock } from './store.js';
 import type {
   Account,
@@ -15,6 +16,7 @@ import type {
   Project,
   ProviderId,
   Session,
+  SessionOrchestratorConfig,
   SessionUsageTotals,
   SessionWorktree,
   Store,
@@ -30,7 +32,8 @@ type SessionErrorCode =
   | 'invalid-effort'
   | 'invalid-mode'
   | 'invalid-workspace'
-  | 'invalid-pinned-memory';
+  | 'invalid-pinned-memory'
+  | 'invalid-orchestrator';
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_MODEL_LENGTH = 200;
@@ -201,6 +204,19 @@ function normalizePinnedMemory(value: string | null): string | null {
   return trimmed;
 }
 
+function normalizeSessionOrchestrator(
+  input: SessionOrchestratorConfig | null,
+): SessionOrchestratorConfig | null {
+  try {
+    return normalizeOrchestratorConfig(input);
+  } catch (error: unknown) {
+    throw new SessionError(
+      'invalid-orchestrator',
+      error instanceof Error ? error.message : 'Invalid orchestrator configuration',
+    );
+  }
+}
+
 function providerForSession(
   store: Store,
   projectId: string,
@@ -253,6 +269,7 @@ export async function createSession(ctx: {
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
+  orchestrator?: SessionOrchestratorConfig | null;
   usageTotals?: SessionUsageTotals | null;
   now?: () => Date;
 }): Promise<Session> {
@@ -279,6 +296,8 @@ export async function createSession(ctx: {
     const resolvedModel = normalizeModel(ctx.model ?? null);
     const resolvedPinnedMemory =
       ctx.pinnedMemory === undefined ? undefined : normalizePinnedMemory(ctx.pinnedMemory);
+    const resolvedOrchestrator =
+      ctx.orchestrator === undefined ? undefined : normalizeSessionOrchestrator(ctx.orchestrator);
     const resolvedEffort = ctx.effort ?? null;
     if (resolvedEffort !== null && !isEffortLevel(resolvedEffort)) {
       throw new SessionError('invalid-effort', `Invalid effort level: ${String(resolvedEffort)}`);
@@ -315,6 +334,7 @@ export async function createSession(ctx: {
       effort: resolvedEffort,
       mode: inheritedMode,
       worktree: ctx.worktree !== undefined ? ctx.worktree : parentWorktree,
+      ...(resolvedOrchestrator === undefined ? {} : { orchestrator: resolvedOrchestrator }),
       usageTotals: ctx.usageTotals ?? { ...EMPTY_SESSION_USAGE_TOTALS },
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -352,6 +372,7 @@ export async function updateSession(ctx: {
       | 'effort'
       | 'mode'
       | 'worktree'
+      | 'orchestrator'
     >
   > & {
     archived?: boolean;
@@ -373,6 +394,7 @@ export async function updateSession(ctx: {
       effort,
       mode,
       worktree,
+      orchestrator,
       archived,
     } = ctx.patch;
     const timestamp = (ctx.now?.() ?? new Date()).toISOString();
@@ -401,6 +423,25 @@ export async function updateSession(ctx: {
     if (detachedFromParent !== undefined) session.detachedFromParent = detachedFromParent;
     if (model !== undefined) session.model = normalizeModel(model);
     if (worktree !== undefined) session.worktree = worktree;
+    if (orchestrator !== undefined) {
+      const normalized = normalizeSessionOrchestrator(orchestrator);
+      if (normalized === null) {
+        session.orchestrator = null;
+      } else {
+        const prev = session.orchestrator ?? null;
+        const targetChanged =
+          prev !== null &&
+          (prev.accountId !== normalized.accountId || prev.model !== normalized.model);
+        const explicitProviderSessionId = orchestrator?.providerSessionId;
+        const nextProviderSessionId =
+          explicitProviderSessionId !== undefined
+            ? explicitProviderSessionId
+            : targetChanged
+              ? null
+              : (prev?.providerSessionId ?? null);
+        session.orchestrator = { ...normalized, providerSessionId: nextProviderSessionId };
+      }
+    }
     if (effort !== undefined) {
       if (effort !== null && !isEffortLevel(effort)) {
         throw new SessionError('invalid-effort', `Invalid effort: ${String(effort)}`);

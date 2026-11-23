@@ -17,6 +17,7 @@ import type {
   ProviderId,
   QueuedTurn,
   Session,
+  SessionOrchestratorConfig,
   VerificationCheck,
 } from '@inova/core/types';
 import type {
@@ -1203,6 +1204,7 @@ export function App() {
       effort?: EffortLevel | null;
       mode?: ExecutionMode | null;
       pinnedMemory?: string | null;
+      orchestrator?: SessionOrchestratorConfig | null;
     };
   }): Promise<boolean> => {
     const result = await call(() =>
@@ -1217,6 +1219,86 @@ export function App() {
       ),
     }));
     return true;
+  };
+
+  const describeOrchestratorModel = (accountId: string, modelId: string | null): string => {
+    const account = latest.current.accounts.find((item) => item.id === accountId);
+    if (!account) return modelId ?? 'auto';
+    const catalog = modelsByAccount[account.label] ?? PROVIDER_MODELS[account.provider];
+    if (modelId === null) {
+      return `${PROVIDER_NAME[account.provider]} (${catalog.defaultModelLabel})`;
+    }
+    const matched = catalog.models.find((item) => item.id === modelId);
+    return matched?.label ?? modelId;
+  };
+
+  const updateSessionOrchestrator = async (input: {
+    sessionId: string;
+    orchestrator: SessionOrchestratorConfig | null;
+    developer?: { accountId: string; model: string | null };
+  }) => {
+    const currentSession = Object.values(latest.current.sessions)
+      .flat()
+      .find((item) => item.id === input.sessionId);
+    const project = currentSession
+      ? latest.current.projects.find((item) => item.id === currentSession.projectId)
+      : undefined;
+    const currentDevAccountId =
+      currentSession?.accountIdOverride ??
+      latest.current.accounts.find((a) => a.label === project?.accountLabel)?.id ??
+      null;
+
+    if (input.developer && input.developer.accountId !== currentDevAccountId) {
+      const switched = await call(() =>
+        window.inova.switchSessionAccount({
+          sessionId: input.sessionId,
+          accountId: input.developer!.accountId,
+          generateHandoff: false,
+        }),
+      );
+      if (!switched) return;
+      const switchedSession = switched.value.session;
+      const matched = latest.current.accounts.find(
+        (candidate) => candidate.id === input.developer!.accountId,
+      );
+      await reloadSessions(switchedSession.projectId);
+      dispatch({
+        type: 'rebind',
+        sessionId: switchedSession.id,
+        provider: matched?.provider ?? null,
+      });
+    }
+
+    const saved = await updateSessionModelConfig({
+      sessionId: input.sessionId,
+      patch: {
+        orchestrator: input.orchestrator,
+        ...(input.developer ? { model: input.developer.model, effort: null } : {}),
+      },
+    });
+    if (!saved) return;
+
+    if (!input.orchestrator?.enabled) {
+      setNotice(translate(localeRef.current, 'chat.orchestrator.disabledNotice'));
+      return;
+    }
+
+    const devAccountId = input.developer?.accountId ?? currentDevAccountId;
+    const devModelId =
+      input.developer !== undefined ? input.developer.model : (currentSession?.model ?? null);
+    const orchLabel = describeOrchestratorModel(
+      input.orchestrator.accountId,
+      input.orchestrator.model,
+    );
+    const devLabel = devAccountId
+      ? describeOrchestratorModel(devAccountId, devModelId)
+      : (devModelId ?? 'auto');
+    setNotice(
+      translate(localeRef.current, 'chat.orchestrator.enabledNotice', {
+        orchestrator: orchLabel,
+        developer: devLabel,
+      }),
+    );
   };
 
   const updateProjectPinnedMemory = async (projectId: string, pinnedMemory: string | null) => {
@@ -2208,6 +2290,13 @@ export function App() {
                           onSetDefaultMode={(mode) => {
                             if (tabProvider) void setDefaultProviderMode(tabProvider, mode);
                           }}
+                          orchestrator={tabSession?.orchestrator ?? null}
+                          accounts={accounts}
+                          activeAccountId={tabAccount?.id ?? null}
+                          modelsByAccount={modelsByAccount}
+                          onChangeOrchestrator={(input) =>
+                            void updateSessionOrchestrator({ sessionId: tab.sessionId, ...input })
+                          }
                           onRestoreCheckpoint={(cp) =>
                             setPendingRestore({
                               sessionId: tab.sessionId,

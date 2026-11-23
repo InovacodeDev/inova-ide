@@ -52,6 +52,15 @@ export interface SessionUsageTotals {
   cacheWriteTokens: number;
 }
 
+export interface SessionOrchestratorConfig {
+  enabled: boolean;
+  accountId: string;
+  model: string | null;
+  effort?: EffortLevel | null;
+  maxRounds?: number;
+  providerSessionId?: string | null;
+}
+
 export interface Session {
   id: string;
   projectId: string;
@@ -69,6 +78,7 @@ export interface Session {
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   worktree?: SessionWorktree | null;
+  orchestrator?: SessionOrchestratorConfig | null;
   usageTotals?: SessionUsageTotals | null;
   createdAt: string;
   updatedAt: string;

@@ -61,6 +61,7 @@ import type {
   ProviderId,
   QueuedTurn,
   Session,
+  SessionOrchestratorConfig,
   Settings,
   SettingsPatch,
   VerificationCheck,
@@ -84,6 +85,8 @@ export interface WorktreeStatusView {
   dirty: boolean;
   scope?: 'session';
 }
+
+export type { SessionOrchestratorConfig } from '@inova/core/types';
 
 export type SessionView = Session;
 
@@ -326,6 +329,7 @@ export interface InovaApi {
     effort?: EffortLevel | null;
     mode?: ExecutionMode | null;
     pinnedMemory?: string | null;
+    orchestrator?: SessionOrchestratorConfig | null;
   }): Promise<Result<SessionView>>;
   getDefaultModes(): Promise<Result<Partial<Record<ProviderId, ExecutionMode>>>>;
   setDefaultMode(input: {
