@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.11.0] - 2026-11-23
+
 ### Adicionado
 
 - Importação de skills (`SKILL.md`) e plugins nos formatos padrão de mercado (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.antigravity-plugin/plugin.json`, `plugin.json` e `gemini-extension.json`) via arquivo `.zip` diretamente na biblioteca da IDE, com validação de segredos e bloqueio de arquivos `.env`.
