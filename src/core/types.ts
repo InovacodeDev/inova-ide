@@ -23,6 +23,12 @@ export interface VerificationCheck {
   enabled: boolean;
 }
 
+export interface ProjectLibraryBinding {
+  itemId: string;
+  enabled: boolean;
+  disabledSkills?: string[];
+}
+
 export interface Project {
   id: string;
   path: string;
@@ -32,6 +38,7 @@ export interface Project {
   verificationChecks?: VerificationCheck[];
   pinnedMemory?: string | null;
   libraryOverrides?: { disabled: string[] };
+  libraryBindings?: ProjectLibraryBinding[];
 }
 
 export interface SessionWorktree {

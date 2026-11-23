@@ -24,12 +24,14 @@ interface PluginInstallProps {
 
 export function LibraryPluginInstall({ item, recipe, accounts, onRun }: PluginInstallProps) {
   const { t } = useI18n();
-  const candidates = accountsForProvider(accounts, item.definition.provider);
+  const candidates =
+    'provider' in item.definition ? accountsForProvider(accounts, item.definition.provider) : [];
   const state = pluginInstallState({ recipe, accountCount: candidates.length });
   const [open, setOpen] = useState(false);
   const [accountId, setAccountId] = useState('');
   const [message, setMessage] = useState<{ text: string; failed: boolean } | null>(null);
   const [running, setRunning] = useState(false);
+  if (!('provider' in item.definition)) return null;
   const selected = candidates.some((account) => account.id === accountId)
     ? accountId
     : (candidates[0]?.id ?? '');

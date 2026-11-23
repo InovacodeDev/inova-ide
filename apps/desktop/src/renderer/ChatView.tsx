@@ -106,6 +106,7 @@ export interface ChatViewProps {
   ref?: Ref<ChatViewHandle>;
   sessionId?: string | null;
   projectId: string | null;
+  commandsVersion?: number;
   state: ChatState;
   visible: boolean;
   provider: ProviderId | null;
@@ -928,6 +929,7 @@ export function ChatView({
   ref,
   sessionId = null,
   projectId,
+  commandsVersion = 0,
   state,
   visible,
   provider,
@@ -1167,7 +1169,7 @@ export function ChatView({
     return () => {
       alive = false;
     };
-  }, [commandTriggerActive, projectId]);
+  }, [commandTriggerActive, projectId, commandsVersion]);
 
   const nativeCommands = useMemo(() => (provider ? nativeSlashCommands(provider) : []), [provider]);
   const knownCommands = useMemo(

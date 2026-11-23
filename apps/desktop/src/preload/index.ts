@@ -93,8 +93,13 @@ const api: InovaApi = {
   applyProfileSync: (input) => ipcRenderer.invoke(CHANNELS.applyProfileSync, input),
   listLibrary: () => ipcRenderer.invoke(CHANNELS.listLibrary),
   saveLibraryItem: (input) => ipcRenderer.invoke(CHANNELS.saveLibraryItem, input),
+  pickLibraryZip: () => ipcRenderer.invoke(CHANNELS.pickLibraryZip),
+  importLibraryZip: (input) => ipcRenderer.invoke(CHANNELS.importLibraryZip, input),
   removeLibraryItem: (input) => ipcRenderer.invoke(CHANNELS.removeLibraryItem, input),
   setProjectOverride: (input) => ipcRenderer.invoke(CHANNELS.setProjectOverride, input),
+  setProjectLibraryBinding: (input) => ipcRenderer.invoke(CHANNELS.setProjectLibraryBinding, input),
+  removeProjectLibraryBinding: (input) =>
+    ipcRenderer.invoke(CHANNELS.removeProjectLibraryBinding, input),
   previewLibrarySync: (input) => ipcRenderer.invoke(CHANNELS.previewLibrarySync, input),
   applyLibrarySync: (input) => ipcRenderer.invoke(CHANNELS.applyLibrarySync, input),
   onChatEvent: (callback) => subscribe(CHANNELS.chatEvent, callback),

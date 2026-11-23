@@ -44,6 +44,7 @@ export interface LibraryFormState {
   provider: ProviderId;
   marketplace: string;
   pluginName: string;
+  pluginPackage: boolean;
 }
 
 export type LibraryFormErrorCode =
@@ -116,6 +117,7 @@ export function emptyForm(kind: LibraryItemKind): LibraryFormState {
     provider: 'claude',
     marketplace: '',
     pluginName: '',
+    pluginPackage: false,
   };
 }
 
@@ -162,8 +164,16 @@ export function formFromItem(item: LibraryItem): LibraryFormState {
         label: item.label,
       };
     case 'plugin':
+      if ('format' in item.definition && item.definition.format === 'package') {
+        return {
+          ...base,
+          pluginPackage: true,
+          pluginName: item.name,
+        };
+      }
       return {
         ...base,
+        pluginPackage: false,
         provider: item.definition.provider,
         marketplace: item.definition.marketplace ?? '',
         pluginName: item.definition.name,
@@ -305,6 +315,9 @@ function buildKind(form: LibraryFormState, common: CommonFields): LibraryFormRes
         : { ok: true, input: { ...common, kind: 'connector', definition, label } };
     }
     case 'plugin': {
+      if (form.editing && form.pluginPackage) {
+        return { ok: true, input: { ...common, kind: 'plugin' } };
+      }
       const definition = buildPlugin(form);
       return isFailure(definition)
         ? definition

@@ -9,6 +9,7 @@ import type {
   LibraryItem,
   PluginDefinition,
   PluginInstallRecipe,
+  ZipImportResult,
 } from '@inova/core/library/index';
 import type { ProviderModels } from '@inova/core/models';
 import type {
@@ -29,7 +30,11 @@ export type {
   PluginDefinition,
   PluginInstallRecipe,
   PluginLibraryItem,
+  PluginPackageCommandMeta,
+  PluginPackageDefinition,
+  PluginPackageSkillMeta,
   SkillLibraryItem,
+  ZipImportResult,
 } from '@inova/core/library/index';
 
 export type {
@@ -58,6 +63,7 @@ import type {
   EffortLevel,
   ExecutionMode,
   InboxItem,
+  ProjectLibraryBinding,
   ProviderId,
   QueuedTurn,
   Session,
@@ -68,6 +74,8 @@ import type {
   VoicePolishMode,
   Workspace,
 } from '@inova/core/types';
+
+export type { ProjectLibraryBinding } from '@inova/core/types';
 
 export type ProjectCommandView = ProjectCommand;
 
@@ -145,8 +153,14 @@ export type SaveLibraryItemInput = SaveLibraryItemBase &
     | { kind: 'skill'; content?: string }
     | { kind: 'mcp'; definition: McpServerConfig }
     | { kind: 'connector'; definition: McpHttpServer; label: string }
-    | { kind: 'plugin'; definition: PluginDefinition }
+    | { kind: 'plugin'; definition?: PluginDefinition }
   );
+
+export interface ImportLibraryZipInput {
+  zipPath: string;
+  expectedKind?: 'skill' | 'plugin';
+  idOverride?: string;
+}
 
 export interface RemoveLibraryItemInput {
   id: string;
@@ -156,6 +170,18 @@ export interface SetProjectOverrideInput {
   projectId: string;
   itemId: string;
   disabled: boolean;
+}
+
+export interface SetProjectLibraryBindingInput {
+  projectId: string;
+  itemId: string;
+  enabled: boolean;
+  disabledSkills?: string[];
+}
+
+export interface RemoveProjectLibraryBindingInput {
+  projectId: string;
+  itemId: string;
 }
 
 export interface PreviewLibrarySyncInput {
@@ -190,6 +216,7 @@ export interface ProjectView {
   verificationChecks?: VerificationCheck[];
   pinnedMemory?: string | null;
   libraryDisabled?: string[];
+  libraryBindings?: ProjectLibraryBinding[];
 }
 
 export interface VoiceModelInfo {
@@ -482,8 +509,16 @@ export interface InovaApi {
   }): Promise<Result<ProfileSyncApplyResult>>;
   listLibrary(): Promise<Result<LibraryListing>>;
   saveLibraryItem(input: SaveLibraryItemInput): Promise<Result<LibraryItem>>;
+  pickLibraryZip(): Promise<Result<string | null>>;
+  importLibraryZip(input: ImportLibraryZipInput): Promise<Result<ZipImportResult>>;
   removeLibraryItem(input: RemoveLibraryItemInput): Promise<Result<{ removed: boolean }>>;
   setProjectOverride(input: SetProjectOverrideInput): Promise<Result<{ disabled: string[] }>>;
+  setProjectLibraryBinding(
+    input: SetProjectLibraryBindingInput,
+  ): Promise<Result<{ bindings: ProjectLibraryBinding[] }>>;
+  removeProjectLibraryBinding(
+    input: RemoveProjectLibraryBindingInput,
+  ): Promise<Result<{ bindings: ProjectLibraryBinding[] }>>;
   previewLibrarySync(input: PreviewLibrarySyncInput): Promise<Result<ProfileSyncPreview>>;
   applyLibrarySync(input: ApplyLibrarySyncInput): Promise<Result<ProfileSyncApplyResult>>;
   onChatEvent(cb: (e: { sessionId: string; event: ChatEvent }) => void): () => void;
@@ -570,8 +605,12 @@ export const CHANNELS = {
   applyProfileSync: 'inova:applyProfileSync',
   listLibrary: 'inova:listLibrary',
   saveLibraryItem: 'inova:saveLibraryItem',
+  pickLibraryZip: 'inova:library:pickZip',
+  importLibraryZip: 'inova:library:importZip',
   removeLibraryItem: 'inova:removeLibraryItem',
   setProjectOverride: 'inova:setProjectOverride',
+  setProjectLibraryBinding: 'inova:library:setProjectBinding',
+  removeProjectLibraryBinding: 'inova:library:removeProjectBinding',
   previewLibrarySync: 'inova:previewLibrarySync',
   applyLibrarySync: 'inova:applyLibrarySync',
   chatEvent: 'inova:chat:event',

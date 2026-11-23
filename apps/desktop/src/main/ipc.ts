@@ -100,8 +100,14 @@ export function registerIpc(deps: {
   handle(CHANNELS.applyProfileSync, (input) => handlers.applyProfileSync(input));
   handle(CHANNELS.listLibrary, () => library.listLibrary());
   handle(CHANNELS.saveLibraryItem, (input) => library.saveLibraryItem(input));
+  handle(CHANNELS.pickLibraryZip, () => library.pickLibraryZip());
+  handle(CHANNELS.importLibraryZip, (input) => library.importLibraryZip(input));
   handle(CHANNELS.removeLibraryItem, (input) => library.removeLibraryItem(input));
   handle(CHANNELS.setProjectOverride, (input) => library.setProjectOverride(input));
+  handle(CHANNELS.setProjectLibraryBinding, (input) => library.setProjectLibraryBinding(input));
+  handle(CHANNELS.removeProjectLibraryBinding, (input) =>
+    library.removeProjectLibraryBinding(input),
+  );
   handle(CHANNELS.previewLibrarySync, (input) => library.previewLibrarySync(input));
   handle(CHANNELS.applyLibrarySync, (input) => library.applyLibrarySync(input));
   handle(CHANNELS.startLogin, (input) => handlers.startLogin(input));

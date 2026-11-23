@@ -204,6 +204,7 @@ export function App() {
   const [confirmUpdateRestart, setConfirmUpdateRestart] = useState(false);
   const { settings, update: updateSettings } = useSettings(call);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [commandsVersion, setCommandsVersion] = useState(0);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [pendingArchive, setPendingArchive] = useState<Session | null>(null);
   const inboxRef = useRef<HTMLElement>(null);
@@ -2163,6 +2164,7 @@ export function App() {
                           ref={tab.sessionId === tabs.active ? activeChatRef : undefined}
                           sessionId={tab.sessionId}
                           projectId={tabProject?.id ?? null}
+                          commandsVersion={commandsVersion}
                           state={tabState}
                           visible={inWorkspace && paneIndex !== -1}
                           provider={tabProvider}
@@ -2697,13 +2699,22 @@ export function App() {
             onRunVerification={() => {
               if (activeSession) void runVerification(activeSession.id);
             }}
-            onLibraryDisabledChange={(libraryDisabled) =>
+            onLibraryDisabledChange={(libraryDisabled) => {
               setProjects((current) =>
                 current.map((item) =>
                   item.id === projectSettingsTarget.id ? { ...item, libraryDisabled } : item,
                 ),
-              )
-            }
+              );
+              setCommandsVersion((version) => version + 1);
+            }}
+            onLibraryBindingsChange={(libraryBindings) => {
+              setProjects((current) =>
+                current.map((item) =>
+                  item.id === projectSettingsTarget.id ? { ...item, libraryBindings } : item,
+                ),
+              );
+              setCommandsVersion((version) => version + 1);
+            }}
             onClose={() => setProjectSettingsId(null)}
           />
         )}
@@ -2746,7 +2757,10 @@ export function App() {
             onCheckUpdate={updates.checkNow}
             onUpdate={(patch) => void updateSettings(patch)}
             onSetDefaultMode={(provider, mode) => void setDefaultProviderMode(provider, mode)}
-            onClose={() => setSettingsOpen(false)}
+            onClose={() => {
+              setSettingsOpen(false);
+              setCommandsVersion((version) => version + 1);
+            }}
           />
         )}
         {commandRuns.pending ? (

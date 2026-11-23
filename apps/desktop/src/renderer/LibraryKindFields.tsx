@@ -193,6 +193,9 @@ function ConnectorFields({ form, onChange }: KindFieldsProps) {
 
 function PluginFields({ form, onChange }: KindFieldsProps) {
   const { t } = useI18n();
+  if (form.editing && form.pluginPackage) {
+    return <p className="library-hint">{t('library.form.pluginPackageHint')}</p>;
+  }
   return (
     <>
       <div className="modal-field">

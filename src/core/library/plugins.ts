@@ -1,4 +1,5 @@
 import type { ProviderId } from '../types.js';
+import { isPluginPackage } from './types.js';
 import type { PluginDefinition } from './types.js';
 
 export type PluginCommandId = 'claude.plugin.install' | 'codex.plugin.add' | 'agy.plugin.install';
@@ -32,6 +33,9 @@ function isPluginReference(value: unknown): value is string {
 }
 
 export function buildPluginInstallRecipe(def: PluginDefinition): PluginInstallRecipe {
+  if (isPluginPackage(def)) {
+    return { ok: false, reason: 'Plugin instalado como pacote ZIP na biblioteca da IDE.' };
+  }
   const commandId = COMMAND_BY_PROVIDER[def.provider];
   if (commandId === undefined) {
     return {

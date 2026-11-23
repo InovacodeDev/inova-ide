@@ -9,8 +9,8 @@ import { containsSecretShape, isLibraryId } from './validate.js';
 export const SKILL_MARKER_FILE = '.inova-managed';
 export const SKILL_FILE = 'SKILL.md';
 
-const MAX_SKILL_FILE_BYTES = 256 * 1024;
-const MAX_SCANNED_FILE_BYTES = 1024 * 1024;
+export const MAX_SKILL_FILE_BYTES = 256 * 1024;
+export const MAX_SCANNED_FILE_BYTES = 1024 * 1024;
 const MAX_FILES = 200;
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
 const MAX_DEPTH = 5;
@@ -21,6 +21,8 @@ const OWNER_EXECUTE = 0o100;
 const FRONT_MATTER = /^﻿?---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 // REGEX: top-level YAML "key: value" line
 const FRONT_MATTER_LINE = /^([A-Za-z0-9_-]+):[ \t]*(.*?)[ \t]*$/;
+// REGEX: YAML block scalar indicator (>, |, >-, |-)
+const YAML_BLOCK_SCALAR = /^[>|][+-]?$/;
 
 export class SkillValidationError extends Error {
   constructor(reason: string) {
@@ -62,11 +64,49 @@ function parseFrontMatter(content: string): Map<string, string> | null {
   const block = FRONT_MATTER.exec(content)?.[1];
   if (block === undefined) return null;
   const fields = new Map<string, string>();
-  for (const line of block.split(/\r?\n/)) {
+  const lines = block.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
     const match = FRONT_MATTER_LINE.exec(line);
-    if (match) fields.set(match[1] ?? '', unquote(match[2] ?? ''));
+    if (!match) continue;
+    const key = match[1] ?? '';
+    const rawValue = match[2] ?? '';
+    const trimmedValue = rawValue.trim();
+    if (YAML_BLOCK_SCALAR.test(trimmedValue)) {
+      const folded = trimmedValue.startsWith('>');
+      const collected: string[] = [];
+      while (i + 1 < lines.length) {
+        const nextLine = lines[i + 1] ?? '';
+        if (nextLine !== '' && !/^[ \t]/.test(nextLine)) break;
+        i += 1;
+        const trimmedLine = nextLine.trim();
+        if (trimmedLine !== '' || !folded) collected.push(trimmedLine);
+      }
+      fields.set(key, (folded ? collected.join(' ') : collected.join('\n')).trim());
+    } else {
+      fields.set(key, unquote(rawValue));
+    }
   }
   return fields;
+}
+
+export function parseSkillFrontMatter(content: string): {
+  name: string | null;
+  description: string | null;
+  body: string;
+} {
+  const match = FRONT_MATTER.exec(content);
+  if (!match) {
+    return { name: null, description: null, body: content.trim() };
+  }
+  const fields = parseFrontMatter(content);
+  const name = fields?.get('name') ?? '';
+  const description = fields?.get('description') ?? '';
+  return {
+    name: name === '' ? null : name,
+    description: description === '' ? null : description,
+    body: content.slice(match[0].length).trim(),
+  };
 }
 
 export function validateSkillMarkdown(content: string): void {
@@ -96,11 +136,14 @@ async function walkDirectory(input: {
   relative: string;
   depth: number;
   envPolicy: EnvFilePolicy;
+  maxFiles: number;
+  maxTotalBytes: number;
+  maxDepth: number;
   state: WalkState;
 }): Promise<void> {
-  const { dir, relative, depth, envPolicy, state } = input;
-  if (depth > MAX_DEPTH) {
-    throw new SkillValidationError(`folder nesting exceeds ${MAX_DEPTH} levels`);
+  const { dir, relative, depth, envPolicy, maxFiles, maxTotalBytes, maxDepth, state } = input;
+  if (depth > maxDepth) {
+    throw new SkillValidationError(`folder nesting exceeds ${maxDepth} levels`);
   }
   for (const name of (await readdir(dir)).sort()) {
     if (name.includes('\0')) throw new SkillValidationError('entry name contains a null byte');
@@ -125,10 +168,8 @@ async function walkDirectory(input: {
       throw new SkillValidationError(`unsupported entry type: ${entryRelative}`);
     }
     state.totalBytes += stats.size;
-    if (state.files.length + 1 > MAX_FILES || state.totalBytes > MAX_TOTAL_BYTES) {
-      throw new SkillValidationError(
-        `folder exceeds ${MAX_FILES} files or ${MAX_TOTAL_BYTES} bytes`,
-      );
+    if (state.files.length + 1 > maxFiles || state.totalBytes > maxTotalBytes) {
+      throw new SkillValidationError(`folder exceeds ${maxFiles} files or ${maxTotalBytes} bytes`);
     }
     state.files.push({
       relative: entryRelative,
@@ -142,6 +183,9 @@ async function walkDirectory(input: {
 export async function listSkillFiles(input: {
   dir: string;
   envPolicy: EnvFilePolicy;
+  maxFiles?: number;
+  maxTotalBytes?: number;
+  maxDepth?: number;
 }): Promise<SkillFile[]> {
   const root = await lstat(input.dir);
   if (!root.isDirectory()) {
@@ -153,6 +197,9 @@ export async function listSkillFiles(input: {
     relative: '',
     depth: 0,
     envPolicy: input.envPolicy,
+    maxFiles: input.maxFiles ?? MAX_FILES,
+    maxTotalBytes: input.maxTotalBytes ?? MAX_TOTAL_BYTES,
+    maxDepth: input.maxDepth ?? MAX_DEPTH,
     state,
   });
   return state.files.sort((a, b) =>
@@ -170,8 +217,11 @@ async function hashSkillFiles(files: readonly SkillFile[]): Promise<string> {
   return hash.digest('hex');
 }
 
-export async function hashSkillDir(dir: string): Promise<string> {
-  return hashSkillFiles(await listSkillFiles({ dir, envPolicy: 'skip' }));
+export async function hashSkillDir(
+  dir: string,
+  limits?: { maxFiles?: number; maxTotalBytes?: number; maxDepth?: number },
+): Promise<string> {
+  return hashSkillFiles(await listSkillFiles({ dir, envPolicy: 'skip', ...limits }));
 }
 
 export async function readLibrarySkillHash(dir: string): Promise<string> {
@@ -245,33 +295,52 @@ export async function removeEntry(target: string): Promise<void> {
   await discardQuietly(aside);
 }
 
+export async function commitLibraryDirectory(input: {
+  root: string;
+  target: string;
+  backupSubdir: string;
+  id: string;
+  now: () => Date;
+  limits?: { maxFiles?: number; maxTotalBytes?: number; maxDepth?: number };
+  populate: (staged: string) => Promise<void>;
+}): Promise<{ hash: string; replaced: boolean }> {
+  const { root, target, backupSubdir, id, now, limits, populate } = input;
+  return serialize(target, async () => {
+    const parentRoot = dirname(target);
+    await mkdir(parentRoot, { recursive: true, mode: 0o700 });
+    const staged = join(parentRoot, temporaryEntryName(''));
+    try {
+      await mkdir(staged, { mode: 0o700 });
+      await populate(staged);
+      const hash = await hashSkillDir(staged, limits);
+      const existing = await lstatIfExists(target);
+      const backupTo = existing
+        ? join(await createBackupDir({ root, at: now() }), backupSubdir, id)
+        : undefined;
+      await replaceEntry({ staged, target, ...(backupTo ? { backupTo } : {}) });
+      return { hash, replaced: existing !== null };
+    } catch (error: unknown) {
+      await rm(staged, { recursive: true, force: true });
+      throw error;
+    }
+  });
+}
+
 async function commitSkill(input: {
   root: string;
   id: string;
   now: () => Date;
   populate: (staged: string) => Promise<void>;
 }): Promise<{ hash: string }> {
-  const { root, id, now, populate } = input;
-  const target = skillDir(root, id);
-  return serialize(target, async () => {
-    const skillsRoot = dirname(target);
-    await mkdir(skillsRoot, { recursive: true, mode: 0o700 });
-    const staged = join(skillsRoot, temporaryEntryName(''));
-    try {
-      await mkdir(staged, { mode: 0o700 });
-      await populate(staged);
-      const hash = await hashSkillDir(staged);
-      const existing = await lstatIfExists(target);
-      const backupTo = existing
-        ? join(await createBackupDir({ root, at: now() }), 'skills', id)
-        : undefined;
-      await replaceEntry({ staged, target, ...(backupTo ? { backupTo } : {}) });
-      return { hash };
-    } catch (error: unknown) {
-      await rm(staged, { recursive: true, force: true });
-      throw error;
-    }
+  const { hash } = await commitLibraryDirectory({
+    root: input.root,
+    target: skillDir(input.root, input.id),
+    backupSubdir: 'skills',
+    id: input.id,
+    now: input.now,
+    populate: input.populate,
   });
+  return { hash };
 }
 
 export async function installSkillFromText(input: {
