@@ -1,5 +1,5 @@
 import { loadStore, saveStore, withStoreLock } from './store.js';
-import { isEffortLevel, isEffortSupported } from './models.js';
+import { PROVIDER_MODELS, isEffortLevel, isEffortSupported } from './models.js';
 import type {
   LocalePreference,
   ProviderId,
@@ -78,7 +78,7 @@ const isBoolean: FieldGuard = (value) => typeof value === 'boolean';
 
 const MAX_MODEL_ID_LENGTH = 200;
 
-function providerModelDefaults(provider: ProviderId): FieldGuard {
+function providerModelDefaults(provider: ProviderId, allowStoredEffort: boolean): FieldGuard {
   return (value) =>
     isRecord(value) &&
     Object.keys(value).length === 2 &&
@@ -87,7 +87,9 @@ function providerModelDefaults(provider: ProviderId): FieldGuard {
         value['model'].length > 0 &&
         value['model'].length <= MAX_MODEL_ID_LENGTH)) &&
     isEffortLevel(value['effort']) &&
-    isEffortSupported(provider, value['effort']);
+    (allowStoredEffort ||
+      PROVIDER_MODELS[provider].efforts.length === 0 ||
+      isEffortSupported(provider, value['effort']));
 }
 
 function oneOf(options: readonly unknown[]): FieldGuard {
@@ -107,48 +109,52 @@ const isCustomDictionary: FieldGuard = (value) =>
       typeof item === 'string' && item.trim() !== '' && item.length <= MAX_DICTIONARY_ITEM_LENGTH,
   );
 
-const SECTION_GUARDS: { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } =
-  {
-    appearance: {
-      theme: oneOf(['system', 'dark', 'light']),
-      locale: oneOf(LOCALE_PREFERENCES),
-      sidebarCollapsed: isBoolean,
-      detailsCollapsed: isBoolean,
-    },
-    voice: {
-      language: oneOf(['auto', 'pt', 'en', 'es']),
-      modelId: oneOf(VOICE_MODEL_IDS),
-      polishMode: oneOf(VOICE_POLISH_MODES),
-      polishModel: isPolishModel,
-      polishEndpoint: isPolishEndpoint,
-      customDictionary: isCustomDictionary,
-    },
-    sessions: {
-      autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
-      collapseFinishedTurns: isBoolean,
-      rateLimitFailover: oneOf(RATE_LIMIT_FAILOVER_POLICIES),
-      maxConsecutiveToolErrors: oneOf([0, 3, 5, 10]),
-      maxConsecutiveVerificationFailures: oneOf([0, 2, 3, 5]),
-      maxSessionCostUsd: oneOf([0, 1, 5, 10, 25]),
-      maxContextPercent: oneOf([0, 80, 90, 95]),
-    },
-    notifications: {
-      waitingInput: isBoolean,
-      failed: isBoolean,
-      completed: isBoolean,
-      onlyWhenUnfocused: isBoolean,
-    },
-    models: {
-      claude: providerModelDefaults('claude'),
-      codex: providerModelDefaults('codex'),
-      gemini: providerModelDefaults('gemini'),
-      deepseek: providerModelDefaults('deepseek'),
-      kimi: providerModelDefaults('kimi'),
-      grok: providerModelDefaults('grok'),
-      qwen: providerModelDefaults('qwen'),
-      opencode: providerModelDefaults('opencode'),
-    },
-  };
+const buildSectionGuards = (
+  allowStoredEffort: boolean,
+): { [Section in keyof Settings]: Record<keyof Settings[Section], FieldGuard> } => ({
+  appearance: {
+    theme: oneOf(['system', 'dark', 'light']),
+    locale: oneOf(LOCALE_PREFERENCES),
+    sidebarCollapsed: isBoolean,
+    detailsCollapsed: isBoolean,
+  },
+  voice: {
+    language: oneOf(['auto', 'pt', 'en', 'es']),
+    modelId: oneOf(VOICE_MODEL_IDS),
+    polishMode: oneOf(VOICE_POLISH_MODES),
+    polishModel: isPolishModel,
+    polishEndpoint: isPolishEndpoint,
+    customDictionary: isCustomDictionary,
+  },
+  sessions: {
+    autoArchiveDays: oneOf([0, 1, 3, 7, 30]),
+    collapseFinishedTurns: isBoolean,
+    rateLimitFailover: oneOf(RATE_LIMIT_FAILOVER_POLICIES),
+    maxConsecutiveToolErrors: oneOf([0, 3, 5, 10]),
+    maxConsecutiveVerificationFailures: oneOf([0, 2, 3, 5]),
+    maxSessionCostUsd: oneOf([0, 1, 5, 10, 25]),
+    maxContextPercent: oneOf([0, 80, 90, 95]),
+  },
+  notifications: {
+    waitingInput: isBoolean,
+    failed: isBoolean,
+    completed: isBoolean,
+    onlyWhenUnfocused: isBoolean,
+  },
+  models: {
+    claude: providerModelDefaults('claude', allowStoredEffort),
+    codex: providerModelDefaults('codex', allowStoredEffort),
+    gemini: providerModelDefaults('gemini', allowStoredEffort),
+    deepseek: providerModelDefaults('deepseek', allowStoredEffort),
+    kimi: providerModelDefaults('kimi', allowStoredEffort),
+    grok: providerModelDefaults('grok', allowStoredEffort),
+    qwen: providerModelDefaults('qwen', allowStoredEffort),
+    opencode: providerModelDefaults('opencode', allowStoredEffort),
+  },
+});
+
+const STORED_SECTION_GUARDS = buildSectionGuards(true);
+const PATCH_SECTION_GUARDS = buildSectionGuards(false);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -170,9 +176,10 @@ function isValidSection(input: {
 function isValidSettingsShape(input: { value: unknown; allowUnknownKeys: boolean }): boolean {
   const { value, allowUnknownKeys } = input;
   if (!isRecord(value)) return false;
+  const sectionGuards = allowUnknownKeys ? STORED_SECTION_GUARDS : PATCH_SECTION_GUARDS;
   return Object.keys(value).every((section) => {
-    const guards = Object.hasOwn(SECTION_GUARDS, section)
-      ? SECTION_GUARDS[section as keyof Settings]
+    const guards = Object.hasOwn(sectionGuards, section)
+      ? sectionGuards[section as keyof Settings]
       : undefined;
     return guards === undefined
       ? allowUnknownKeys

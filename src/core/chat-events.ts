@@ -431,17 +431,20 @@ function createGeminiParser(prefix: string): ChatParser {
   function parseStepUpdate(step: Json): ChatEvent[] {
     switch (step['step_type']) {
       case 'agent_response': {
+        const thinkingBlockId = `${prefix}gemini-thinking-${num(step['step_index']) ?? block + 1}`;
+        const thinkingDelta = str(step['thinking_delta']);
         const thinking = str(step['thinking']);
-        const thinkingEvents: ChatEvent[] =
-          step['state'] === 'DONE' && thinking !== null && thinking.trim() !== ''
-            ? [
-                {
-                  kind: 'thinking',
-                  blockId: `${prefix}gemini-thinking-${num(step['step_index']) ?? block + 1}`,
-                  text: thinking,
-                },
-              ]
-            : [];
+        const thinkingEvents: ChatEvent[] = [];
+        if (thinkingDelta !== null && thinkingDelta !== '') {
+          thinkingEvents.push({
+            kind: 'thinking-delta',
+            blockId: thinkingBlockId,
+            text: thinkingDelta,
+          });
+        }
+        if (step['state'] === 'DONE' && thinking !== null && thinking.trim() !== '') {
+          thinkingEvents.push({ kind: 'thinking', blockId: thinkingBlockId, text: thinking });
+        }
         const delta = str(step['text_delta']);
         const events = delta === null ? [] : appendDelta(delta);
         if (step['state'] === 'DONE') return [...thinkingEvents, ...events, ...flush()];

@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { formatCostUsd } from '@inova/core/cost-tracking';
-import { PROVIDER_MODELS, resolveModelConfig } from '@inova/core/models';
+import {
+  PROVIDER_MODELS,
+  effortsForModel,
+  resolveModelConfig,
+  splitModelEffortVariant,
+  type ProviderModels,
+} from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
 import type { AccountView, ComparisonDiffView, ProjectView } from '../shared/api';
@@ -39,6 +45,7 @@ interface CompareViewProps {
   chats: Record<string, ChatState>;
   compareMetrics: Record<string, CompareMetrics>;
   modelDefaults: Settings['models'] | null;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   selectedGroupId: string | null;
   onSelectGroup: (groupId: string | null) => void;
   onStartComparison: (input: {
@@ -85,18 +92,21 @@ function SideConfigCard({
   draft,
   accounts,
   modelDefaults,
+  modelsByAccount,
   onChange,
 }: {
   heading: string;
   draft: CompareSideDraft;
   accounts: readonly AccountView[];
   modelDefaults: Settings['models'] | null;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   onChange: (next: CompareSideDraft) => void;
 }) {
   const { t, locale } = useI18n();
   const account = accounts.find((item) => item.id === draft.accountId) ?? accounts[0];
   const provider = account?.provider ?? 'claude';
-  const catalog = PROVIDER_MODELS[provider];
+  const catalog =
+    (account ? modelsByAccount?.[account.label] : undefined) ?? PROVIDER_MODELS[provider];
   const modeCatalog = PROVIDER_MODES[provider];
 
   const accountOptions: PlatformSelectOption[] = accounts.map((item) => ({
@@ -118,19 +128,25 @@ function SideConfigCard({
     }),
   ];
 
-  const effortOptions: PlatformSelectOption[] = catalog.efforts.map((level) => ({
+  const split = splitModelEffortVariant(catalog, draft.model);
+  const normalizedModel = split.model;
+  const availableEfforts = effortsForModel(catalog, normalizedModel);
+  const effortOptions: PlatformSelectOption[] = availableEfforts.map((level) => ({
     value: level,
     label: effortLabel(level, locale),
   }));
   const shownEffort =
-    modelDefaults === null
-      ? draft.effort
-      : resolveModelConfig({
-          provider,
-          model: draft.model,
-          effort: draft.effort,
-          settings: { models: modelDefaults },
-        }).effort;
+    availableEfforts.length === 0
+      ? null
+      : modelDefaults === null
+        ? (draft.effort ?? split.effort)
+        : resolveModelConfig({
+            provider,
+            model: draft.model,
+            effort: draft.effort,
+            settings: { models: modelDefaults },
+            catalog,
+          }).effort;
 
   const defaultOption = modeCatalog.options.find((opt) => opt.id === modeCatalog.defaultMode);
   const localizedDefaultMode = defaultOption
@@ -171,12 +187,18 @@ function SideConfigCard({
         <span className="modal-field-label">{t('compare.modelLabel')}</span>
         <PlatformSelect
           ariaLabel={t('compare.sideModelAria', { heading })}
-          value={draft.model ?? ''}
+          value={normalizedModel ?? ''}
           options={modelOptions}
-          onChange={(value) => onChange({ ...draft, model: value === '' ? null : value })}
+          onChange={(value) => {
+            const nextModel = value === '' ? null : value;
+            const nextEfforts = effortsForModel(catalog, nextModel);
+            const nextEffort =
+              draft.effort !== null && nextEfforts.includes(draft.effort) ? draft.effort : null;
+            onChange({ ...draft, model: nextModel, effort: nextEffort });
+          }}
         />
       </div>
-      {catalog.efforts.length > 0 ? (
+      {availableEfforts.length > 0 ? (
         <div className="modal-field">
           <span className="modal-field-label">{t('compare.effortLabel')}</span>
           <PlatformSelect
@@ -308,6 +330,7 @@ export function CompareView(props: CompareViewProps) {
     chats,
     compareMetrics,
     modelDefaults,
+    modelsByAccount,
     selectedGroupId,
     onSelectGroup,
     onStartComparison,
@@ -498,6 +521,7 @@ export function CompareView(props: CompareViewProps) {
                 draft={leftDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
+                modelsByAccount={modelsByAccount}
                 onChange={setLeftDraft}
               />
               <SideConfigCard
@@ -505,6 +529,7 @@ export function CompareView(props: CompareViewProps) {
                 draft={rightDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
+                modelsByAccount={modelsByAccount}
                 onChange={setRightDraft}
               />
             </div>

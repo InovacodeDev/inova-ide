@@ -1449,6 +1449,21 @@ export function App() {
     }
   }, [activeAccountLabel, modelsByAccount, loadModels]);
 
+  useEffect(() => {
+    for (const account of accounts) {
+      if (!modelsByAccount[account.label]) {
+        void loadModels(account.label);
+      }
+    }
+  }, [accounts, modelsByAccount, loadModels]);
+
+  useEffect(() => {
+    if (!settingsOpen && view !== 'compare') return;
+    for (const account of accounts) {
+      void loadModels(account.label);
+    }
+  }, [settingsOpen, view, accounts, loadModels]);
+
   const activeViewerTab = useMemo(
     () => fileViewer.tabs.find((tab) => tab.resolvedPath === fileViewer.activePath) ?? null,
     [fileViewer.tabs, fileViewer.activePath],
@@ -1654,6 +1669,7 @@ export function App() {
           model: activeSession.model ?? null,
           effort: activeSession.effort ?? null,
           settings,
+          ...(activeCatalog ? { catalog: activeCatalog } : {}),
         })
       : { model: activeSession?.model ?? null, effort: activeSession?.effort ?? null };
   const activeMode =
@@ -1970,6 +1986,7 @@ export function App() {
                 chats={chats}
                 compareMetrics={compareMetrics}
                 modelDefaults={settings?.models ?? null}
+                modelsByAccount={modelsByAccount}
                 selectedGroupId={selectedComparisonGroupId}
                 onSelectGroup={setSelectedComparisonGroupId}
                 onStartComparison={startComparison}
@@ -2084,6 +2101,7 @@ export function App() {
                           model: tabSession?.model ?? null,
                           effort: tabSession?.effort ?? null,
                           settings,
+                          catalog: tabCatalog,
                         })
                       : { model: tabSession?.model ?? null, effort: tabSession?.effort ?? null };
                     const tabState = chats[tab.sessionId] ?? initialChatState;
@@ -2719,6 +2737,7 @@ export function App() {
           <SettingsModal
             settings={settings}
             defaultModes={defaultModes}
+            modelsByAccount={modelsByAccount}
             isMac={IS_MAC}
             call={call}
             accounts={accounts}

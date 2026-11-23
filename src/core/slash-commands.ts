@@ -43,7 +43,11 @@ const NATIVE_SLASH_COMMANDS: Record<ProviderId, readonly NativeSlashCommand[]> =
     PIN_COMMAND,
     { name: 'model', description: 'Troca o modelo', action: 'model-picker' },
   ],
-  gemini: [PIN_COMMAND, { name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
+  gemini: [
+    PIN_COMMAND,
+    { name: 'model', description: 'Troca o modelo', action: 'model-picker' },
+    { name: 'effort', description: 'Ajusta o esforço de raciocínio', action: 'model-picker' },
+  ],
   deepseek: [PIN_COMMAND, { name: 'model', description: 'Troca o modelo', action: 'model-picker' }],
   kimi: [
     { name: 'clear', description: 'Limpa a conversa e a memória do agente', action: 'clear' },

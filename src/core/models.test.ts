@@ -63,7 +63,7 @@ describe('models', () => {
     ).toEqual({ model: null, effort: null });
   });
 
-  it('parses agy models output with spinner noise and deduplicates ids', () => {
+  it('parses agy models output with spinner noise, groups variants, and deduplicates ids', () => {
     const raw = [
       '\r\u001b[K⠋ Fetching available models...\r⠙ Fetching available models...',
       'gemini-4-hydrogen-high          Gemini 4 Hydrogen (High)',
@@ -74,8 +74,7 @@ describe('models', () => {
     ].join('\n');
 
     expect(parseAgyModelsOutput(raw)).toEqual([
-      { id: 'gemini-4-hydrogen-high', label: 'Gemini 4 Hydrogen (High)' },
-      { id: 'gemini-4-hydrogen-low', label: 'Gemini 4 Hydrogen (Low)' },
+      { id: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen', efforts: ['low', 'high'] },
       { id: 'claude-opus-5-5-medium', label: 'Claude Opus 5.5 (Medium)' },
     ]);
   });
@@ -102,13 +101,18 @@ describe('models', () => {
       'opencode',
     ] as const) {
       expect(PROVIDER_MODELS[provider].models.length).toBeGreaterThan(0);
-      expect(PROVIDER_MODELS[provider].efforts.length).toBeGreaterThan(0);
       const ids = new Set<string>();
       for (const model of PROVIDER_MODELS[provider].models) {
-        expect(model.label).toMatch(/\d/);
+        expect(model.label.trim().length).toBeGreaterThan(0);
         expect(ids.has(model.id)).toBe(false);
         ids.add(model.id);
       }
+    }
+    for (const provider of ['claude', 'codex', 'gemini'] as const) {
+      expect(PROVIDER_MODELS[provider].efforts.length).toBeGreaterThan(0);
+    }
+    for (const provider of ['deepseek', 'kimi', 'grok', 'qwen', 'opencode'] as const) {
+      expect(PROVIDER_MODELS[provider].efforts).toEqual([]);
     }
   });
 
@@ -119,8 +123,8 @@ describe('models', () => {
     expect(ids('codex')).toEqual(expect.arrayContaining(['gpt-6.2-astra', 'gpt-6.2-sol']));
     expect(ids('gemini')).toEqual(
       expect.arrayContaining([
-        'gemini-4-neon-high',
-        'gemini-4-hydrogen-high',
+        'gemini-4-neon',
+        'gemini-4-hydrogen',
         'gemini-pro-orchestrator-neon',
       ]),
     );

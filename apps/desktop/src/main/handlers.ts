@@ -74,7 +74,12 @@ import {
   unbindProject,
   updateProjectConfig,
 } from '@inova/core/projects';
-import { beginForcedReauth, providers, readAccountEmail } from '@inova/core/providers';
+import {
+  beginForcedReauth,
+  discoverAccountModelsFromDisk,
+  providers,
+  readAccountEmail,
+} from '@inova/core/providers';
 import type { AuthStatus, CommandRunner } from '@inova/core/providers';
 import {
   IMPORT_PROVIDERS,
@@ -344,11 +349,21 @@ function decideTurn(input: { session: Session; parent: Session | undefined; clau
   return { turn: { mode: 'new', sessionId }, newId: sessionId };
 }
 
+const MODELS_CACHE_TTL_MS = 5 * 60_000;
+
+interface CachedAccountModels {
+  readonly catalog: ProviderModels;
+  readonly fingerprint: string;
+  readonly cachedAt: number;
+}
+
 export function createHandlers(deps: HandlerDeps) {
   const transcriptDir = join(deps.root, 'sessions');
   const transcriptChains = new Map<string, Promise<void>>();
   const streamUsage = new Map<string, UsageSnapshot>();
-  const modelsCache = new Map<string, ProviderModels>();
+  const modelsCache = new Map<string, CachedAccountModels>();
+  const getCachedCatalog = (accountId: string): ProviderModels | undefined =>
+    modelsCache.get(accountId)?.catalog;
   const capabilityCache = new Map<string, CapabilityListing>();
   const pickerAllowlist = new Set<string>();
   const usageDeps: UsageDeps = {
@@ -1878,11 +1893,13 @@ export function createHandlers(deps: HandlerDeps) {
     cachedSessionSettings = settings.sessions;
     cachedFailoverPolicy = settings.sessions.rateLimitFailover;
     cachedFailoverPolicyLoaded = true;
+    const cachedCatalog = getCachedCatalog(account.id);
     const modelConfig = resolveModelConfig({
       provider: account.provider,
       model: session.model ?? null,
       effort: session.effort ?? null,
       settings,
+      ...(cachedCatalog ? { catalog: cachedCatalog } : {}),
     });
     const spec = buildChatTurn({
       account,
@@ -2128,8 +2145,12 @@ export function createHandlers(deps: HandlerDeps) {
               const account = project
                 ? resolveSessionAccount({ session, project, accounts: store.accounts })
                 : undefined;
-              if (account && !isEffortSupported(account.provider, effort)) {
-                return fail('Nível de esforço não suportado por este provedor.');
+              if (account) {
+                const targetModel = model !== undefined ? model : (session.model ?? null);
+                const catalog = getCachedCatalog(account.id) ?? PROVIDER_MODELS[account.provider];
+                if (!isEffortSupported(account.provider, effort, targetModel, catalog)) {
+                  return fail('Nível de esforço não suportado por este provedor.');
+                }
               }
             }
             if (mode !== undefined && mode !== null) {
@@ -3115,17 +3136,39 @@ export function createHandlers(deps: HandlerDeps) {
     listModels: (input: unknown): Promise<Result<ProviderModels>> =>
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);
-        const cached = modelsCache.get(account.id);
-        if (cached) return ok(cached);
         const fallback = PROVIDER_MODELS[account.provider];
         if (account.provider !== 'gemini' && account.provider !== 'opencode') {
-          modelsCache.set(account.id, fallback);
-          return ok(fallback);
+          const discovered = await discoverAccountModelsFromDisk({
+            provider: account.provider,
+            homeDir: account.homeDir,
+          });
+          const catalog = discovered?.catalog ?? fallback;
+          modelsCache.set(account.id, {
+            catalog,
+            fingerprint: discovered?.fingerprint ?? 'static',
+            cachedAt: Date.now(),
+          });
+          return ok(catalog);
         }
         const baseEnv = await deps.baseEnv();
         const adapter = providers[account.provider];
         const file = await findBinary(adapter.binary, readEnvPath(baseEnv));
         if (file === undefined) return ok(fallback);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = (await stat(file)).mtimeMs;
+        } catch {
+          mtimeMs = 0;
+        }
+        const fingerprint = `${file}:${mtimeMs}`;
+        const cached = modelsCache.get(account.id);
+        if (
+          cached &&
+          cached.fingerprint === fingerprint &&
+          Date.now() - cached.cachedAt < MODELS_CACHE_TTL_MS
+        ) {
+          return ok(cached.catalog);
+        }
         await adapter.prepareLaunch(account.homeDir, baseEnv['HOME']);
         const { env } = buildLaunch({ account, cwd: account.homeDir, args: [], baseEnv });
         try {
@@ -3143,7 +3186,11 @@ export function createHandlers(deps: HandlerDeps) {
               : parseOpenCodeModelsOutput(result.stdout);
           if (parsed.length === 0) return ok(fallback);
           const dynamicCatalog: ProviderModels = { ...fallback, models: parsed };
-          modelsCache.set(account.id, dynamicCatalog);
+          modelsCache.set(account.id, {
+            catalog: dynamicCatalog,
+            fingerprint,
+            cachedAt: Date.now(),
+          });
           return ok(dynamicCatalog);
         } catch (error: unknown) {
           if (error instanceof Error) return ok(fallback);
@@ -3245,10 +3292,30 @@ export function createHandlers(deps: HandlerDeps) {
           const baseEnv = await deps.baseEnv();
           const leftAdapter = providers[leftAccount.provider];
           const rightAdapter = providers[rightAccount.provider];
-          if (parsed.leftEffort && !isEffortSupported(leftAccount.provider, parsed.leftEffort)) {
+          const leftCatalog =
+            getCachedCatalog(leftAccount.id) ?? PROVIDER_MODELS[leftAccount.provider];
+          const rightCatalog =
+            getCachedCatalog(rightAccount.id) ?? PROVIDER_MODELS[rightAccount.provider];
+          if (
+            parsed.leftEffort &&
+            !isEffortSupported(
+              leftAccount.provider,
+              parsed.leftEffort,
+              parsed.leftModel ?? null,
+              leftCatalog,
+            )
+          ) {
             return fail(`Esforço não suportado para ${leftAccount.provider}: ${parsed.leftEffort}`);
           }
-          if (parsed.rightEffort && !isEffortSupported(rightAccount.provider, parsed.rightEffort)) {
+          if (
+            parsed.rightEffort &&
+            !isEffortSupported(
+              rightAccount.provider,
+              parsed.rightEffort,
+              parsed.rightModel ?? null,
+              rightCatalog,
+            )
+          ) {
             return fail(
               `Esforço não suportado para ${rightAccount.provider}: ${parsed.rightEffort}`,
             );

@@ -1,4 +1,9 @@
-import { type ModelOption, type ProviderModels } from '@inova/core/models';
+import {
+  effortsForModel,
+  splitModelEffortVariant,
+  type ModelOption,
+  type ProviderModels,
+} from '@inova/core/models';
 import type { EffortLevel, SupportedLocale } from '@inova/core/types';
 import { translate } from './i18n';
 
@@ -71,10 +76,22 @@ export function formatPickerLabel(input: {
   locale?: SupportedLocale;
 }): string {
   const { model, effort, catalog, locale = 'pt-BR' } = input;
-  const matched = model === null ? undefined : catalog.models.find((item) => item.id === model);
-  const modelLabel =
-    model === null ? defaultModelLabel(catalog, locale) : (matched?.label ?? model);
-  return effort === null ? modelLabel : `${modelLabel} (${effortLabel(effort, locale)})`;
+  const split = splitModelEffortVariant(catalog, model);
+  const normalizedModel = split.model;
+  const matched =
+    normalizedModel === null
+      ? undefined
+      : catalog.models.find((item) => item.id === normalizedModel);
+  const modelText =
+    normalizedModel === null
+      ? defaultModelLabel(catalog, locale)
+      : (matched?.label ?? normalizedModel);
+  const availableEfforts = effortsForModel(catalog, normalizedModel);
+  const effectiveEffort = effort ?? split.effort;
+  if (effectiveEffort === null || !availableEfforts.includes(effectiveEffort)) {
+    return modelText;
+  }
+  return `${modelText} (${effortLabel(effectiveEffort, locale)})`;
 }
 
 export function resolveModelOptions(input: {
@@ -83,6 +100,7 @@ export function resolveModelOptions(input: {
   locale?: SupportedLocale;
 }): ModelOption[] {
   const { model, catalog, locale = 'pt-BR' } = input;
+  const normalizedModel = splitModelEffortVariant(catalog, model).model;
   const options: ModelOption[] = [
     {
       id: '',
@@ -91,10 +109,10 @@ export function resolveModelOptions(input: {
     },
     ...catalog.models.map((item) => localizeModelOption(item, locale)),
   ];
-  if (model !== null && !catalog.models.some((item) => item.id === model)) {
+  if (normalizedModel !== null && !catalog.models.some((item) => item.id === normalizedModel)) {
     options.push({
-      id: model,
-      label: model,
+      id: normalizedModel,
+      label: normalizedModel,
       description: translate(locale, 'picker.customModel'),
     });
   }

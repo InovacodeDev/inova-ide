@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import type { ProviderModels } from '@inova/core/models';
 import type { ExecutionMode, ProviderId, Settings, SettingsPatch } from '@inova/core/types';
 import type { AccountView, ProjectView } from '../shared/api';
 import { CloseIcon } from './icons';
@@ -29,6 +30,7 @@ import './settings.css';
 interface SettingsModalProps {
   settings: Settings;
   defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   isMac: boolean;
   call: WarningCall;
   accounts: readonly AccountView[];
@@ -44,6 +46,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const {
     settings,
     defaultModes,
+    modelsByAccount,
     isMac,
     call,
     accounts,
@@ -97,6 +100,8 @@ export function SettingsModal(props: SettingsModalProps) {
       <ModelsSection
         settings={settings}
         defaultModes={defaultModes}
+        accounts={accounts}
+        modelsByAccount={modelsByAccount}
         onUpdate={onUpdate}
         onSetDefaultMode={onSetDefaultMode}
       />
