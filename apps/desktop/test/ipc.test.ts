@@ -108,8 +108,18 @@ function setup() {
   const library = {
     listLibrary: vi.fn(async () => ({ ok: true as const, value: 'listLibrary' })),
     saveLibraryItem: vi.fn(async () => ({ ok: true as const, value: 'saveLibraryItem' })),
+    pickLibraryZip: vi.fn(async () => ({ ok: true as const, value: 'pickLibraryZip' })),
+    importLibraryZip: vi.fn(async () => ({ ok: true as const, value: 'importLibraryZip' })),
     removeLibraryItem: vi.fn(async () => ({ ok: true as const, value: 'removeLibraryItem' })),
     setProjectOverride: vi.fn(async () => ({ ok: true as const, value: 'setProjectOverride' })),
+    setProjectLibraryBinding: vi.fn(async () => ({
+      ok: true as const,
+      value: 'setProjectLibraryBinding',
+    })),
+    removeProjectLibraryBinding: vi.fn(async () => ({
+      ok: true as const,
+      value: 'removeProjectLibraryBinding',
+    })),
     previewLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'previewLibrarySync' })),
     applyLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'applyLibrarySync' })),
   };
@@ -204,6 +214,14 @@ test('library invokes reach the library handlers', async () => {
   const input = { projectId: 'p', approvedIds: [] };
   await invoke('inova:listLibrary', trusted);
   expect(library.listLibrary).toHaveBeenCalledWith();
+  await invoke('inova:library:pickZip', trusted);
+  expect(library.pickLibraryZip).toHaveBeenCalledWith();
+  await invoke('inova:library:importZip', trusted, input);
+  expect(library.importLibraryZip).toHaveBeenCalledWith(input);
+  await invoke('inova:library:setProjectBinding', trusted, input);
+  expect(library.setProjectLibraryBinding).toHaveBeenCalledWith(input);
+  await invoke('inova:library:removeProjectBinding', trusted, input);
+  expect(library.removeProjectLibraryBinding).toHaveBeenCalledWith(input);
   for (const name of [
     'saveLibraryItem',
     'removeLibraryItem',

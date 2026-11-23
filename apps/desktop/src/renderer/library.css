@@ -1,11 +1,16 @@
 .library-hint,
 .library-error,
-.library-warning {
+.library-warning,
+.library-notice {
   margin: 0;
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.library-notice {
+  color: var(--ok);
 }
 
 .library-error {
@@ -130,6 +135,49 @@
   font-weight: 500;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+.library-row-title-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-badge,
+.library-slash-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+}
+
+.library-package-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.library-plugin-skills {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 6px 0 0 14px;
+  border-left: 2px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.library-plugin-skill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .library-row-desc,

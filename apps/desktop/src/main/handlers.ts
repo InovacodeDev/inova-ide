@@ -20,8 +20,17 @@ import type {
   CapabilityRef,
 } from '@inova/core/capabilities/types';
 import { claudeContextArgs, parseClaudeContextOutput } from '@inova/core/context-report';
-import { expandCommandPrompt, splitLeadingSlash } from '@inova/core/command-prompt';
+import { splitLeadingSlash } from '@inova/core/command-prompt';
 import { listProjectCommands } from '@inova/core/commands';
+import type { ProjectCommand } from '@inova/core/commands';
+import {
+  findSlashCommand,
+  formatSkillExecutionPrompt,
+  LibraryCorruptError,
+  loadLibrary,
+  mergeProjectAndLibraryCommands,
+  resolveProjectLibraryCommands,
+} from '@inova/core/library/index';
 import { listProjectFiles, rankProjectFiles, type ProjectFileList } from '@inova/core/files';
 import {
   checkpointExists,
@@ -310,6 +319,7 @@ async function projectView(project: Project, account: Account): Promise<ProjectV
     verificationChecks: project.verificationChecks,
     pinnedMemory: project.pinnedMemory,
     libraryDisabled: project.libraryOverrides?.disabled,
+    libraryBindings: project.libraryBindings,
   };
 }
 
@@ -1777,6 +1787,7 @@ export function createHandlers(deps: HandlerDeps) {
       effort: orch.dev.effort,
       executionMode: orch.dev.executionMode,
       extraDirs: orch.extraDirs,
+      disabledSkillIds: orch.disabledSkillIds,
     });
     deps.chat.send({
       sessionId,
@@ -1845,6 +1856,8 @@ export function createHandlers(deps: HandlerDeps) {
         model: orch.orch.model,
         effort: orch.orch.effort,
         executionMode: orch.orch.executionMode,
+        extraDirs: orch.extraDirs,
+        disabledSkillIds: orch.disabledSkillIds,
       });
       deps.chat.send({
         sessionId,
@@ -2369,19 +2382,59 @@ export function createHandlers(deps: HandlerDeps) {
     return ok(started);
   }
 
-  async function expandProjectCommand(input: {
-    projectPath: string;
+  async function listEffectiveProjectCommands(project: Project): Promise<ProjectCommand[]> {
+    const local = await listProjectCommands(project.path);
+    let libraryItems: ProjectCommand[] = [];
+    try {
+      const library = await loadLibrary(deps.root);
+      libraryItems = await resolveProjectLibraryCommands({ root: deps.root, library, project });
+    } catch (error: unknown) {
+      if (!(error instanceof LibraryCorruptError)) throw error;
+    }
+    return mergeProjectAndLibraryCommands({ local, library: libraryItems });
+  }
+
+  async function resolveTurnLibrarySkills(
+    project: Project,
+  ): Promise<{ commands: ProjectCommand[]; disabledSkillIds: string[] }> {
+    const local = await listProjectCommands(project.path);
+    let libraryItems: ProjectCommand[] = [];
+    const disabledSkillIds: string[] = [];
+    try {
+      const library = await loadLibrary(deps.root);
+      libraryItems = await resolveProjectLibraryCommands({ root: deps.root, library, project });
+      const activeIds = new Set(
+        libraryItems.flatMap((cmd) => (cmd.libraryItemId ? [cmd.libraryItemId] : [])),
+      );
+      for (const item of library.items) {
+        if (item.kind === 'skill' && !activeIds.has(item.id)) {
+          disabledSkillIds.push(item.id);
+        }
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof LibraryCorruptError)) throw error;
+    }
+    return {
+      commands: mergeProjectAndLibraryCommands({ local, library: libraryItems }),
+      disabledSkillIds,
+    };
+  }
+
+  function expandProjectCommand(input: {
+    commands: readonly ProjectCommand[];
     prompt: string;
     keepClaudeLiteral: boolean;
-  }): Promise<string> {
-    const { projectPath, prompt, keepClaudeLiteral } = input;
+  }): { prompt: string; extraDir?: string } {
+    const { commands, prompt, keepClaudeLiteral } = input;
     const parsed = splitLeadingSlash(prompt);
-    if (parsed === null) return prompt;
-    const commands = await listProjectCommands(projectPath);
-    const command = commands.find((item) => item.name === parsed.name);
-    if (command === undefined) return prompt;
-    if (keepClaudeLiteral && command.source === 'claude') return prompt;
-    return expandCommandPrompt(command.body, parsed.rest);
+    if (parsed === null) return { prompt };
+    const command = findSlashCommand(commands, parsed.name);
+    if (command === undefined) return { prompt };
+    if (keepClaudeLiteral && command.source === 'claude') return { prompt };
+    return {
+      prompt: formatSkillExecutionPrompt({ command, args: parsed.rest }),
+      ...(command.resourceDir ? { extraDir: command.resourceDir } : {}),
+    };
   }
 
   async function runTurn(input: {
@@ -2431,11 +2484,19 @@ export function createHandlers(deps: HandlerDeps) {
       ...(handoffPrefix ? [handoffPrefix] : []),
     ];
     const contextPrefix = contextSections.join('\n\n---\n\n');
-    const commandPrompt = await expandProjectCommand({
-      projectPath: project.path,
+    const { commands, disabledSkillIds } = await resolveTurnLibrarySkills(project);
+    const expandedCommand = expandProjectCommand({
+      commands,
       prompt,
       keepClaudeLiteral: !orchestratorRun && account.provider === 'claude' && contextPrefix === '',
     });
+    const commandPrompt = expandedCommand.prompt;
+    const extraDirs = [
+      ...new Set([
+        ...(input.extraDirs ?? []),
+        ...(expandedCommand.extraDir ? [expandedCommand.extraDir] : []),
+      ]),
+    ];
     const promptForCli =
       contextPrefix !== ''
         ? `${contextPrefix}\n\n---\n\nSolicitação do usuário:\n${commandPrompt}`
@@ -2505,7 +2566,8 @@ export function createHandlers(deps: HandlerDeps) {
         userPrompt: commandPrompt,
         contextPrefix,
         baseEnv: input.baseEnv,
-        extraDirs: input.extraDirs ?? [],
+        extraDirs,
+        disabledSkillIds,
         maxRounds,
         orch: {
           account: orchAccount,
@@ -2579,6 +2641,8 @@ export function createHandlers(deps: HandlerDeps) {
         model: orchModelConfig.model,
         effort: orchModelConfig.effort,
         executionMode: orchState.orch.executionMode,
+        extraDirs,
+        disabledSkillIds,
       });
       deps.chat.send({
         sessionId,
@@ -2609,7 +2673,8 @@ export function createHandlers(deps: HandlerDeps) {
       model: modelConfig.model,
       effort: modelConfig.effort,
       executionMode,
-      extraDirs: input.extraDirs,
+      extraDirs,
+      disabledSkillIds,
     });
     if (persistNow && newId !== null) {
       provisionalSessions.set(sessionId, { providerSessionId: newId, confirmed: false });
@@ -4017,7 +4082,7 @@ export function createHandlers(deps: HandlerDeps) {
         const store = await loadStore(deps.root);
         const project = store.projects.find((item) => item.id === projectId);
         if (!project) return fail('Projeto não encontrado.');
-        return ok(await listProjectCommands(project.path));
+        return ok(await listEffectiveProjectCommands(project));
       }),
     startComparison: (input: unknown) =>
       validated(input, parseStartComparison, (parsed) =>

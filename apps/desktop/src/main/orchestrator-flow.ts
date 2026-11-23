@@ -25,6 +25,7 @@ export interface OrchestrationTurnState {
   contextPrefix: string;
   baseEnv: NodeJS.ProcessEnv;
   extraDirs: readonly string[];
+  disabledSkillIds: readonly string[];
   phase: 'planning' | 'developing' | 'reviewing';
   round: number;
   maxRounds: number;
@@ -79,6 +80,7 @@ export function createOrchestrationState(input: {
   contextPrefix: string;
   baseEnv: NodeJS.ProcessEnv;
   extraDirs: readonly string[];
+  disabledSkillIds?: readonly string[];
   maxRounds: number;
   orch: OrchestrationAgentRuntime;
   dev: OrchestrationAgentRuntime;
@@ -92,6 +94,7 @@ export function createOrchestrationState(input: {
     contextPrefix: input.contextPrefix,
     baseEnv: input.baseEnv,
     extraDirs: [...input.extraDirs],
+    disabledSkillIds: [...(input.disabledSkillIds ?? [])],
     phase: 'planning',
     round: 1,
     maxRounds: input.maxRounds,

@@ -48,6 +48,15 @@ export function skillDir(root: string, id: string): string {
   return target;
 }
 
+export function pluginDir(root: string, id: string): string {
+  const pluginsRoot = resolve(libraryDir(root), 'plugins');
+  const target = resolve(pluginsRoot, id);
+  if (!target.startsWith(pluginsRoot + sep)) {
+    throw new LibraryValidationError('plugin id escapes the plugins directory');
+  }
+  return target;
+}
+
 function isAlreadyExists(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EEXIST';
 }
@@ -154,21 +163,21 @@ async function backupLibraryFile(input: {
   await copyFile(file, join(await input.backupDir(), 'library.json'));
 }
 
-async function backupSkillDir(input: {
-  root: string;
+async function backupFolderDir(input: {
+  source: string;
+  backupSubdir: string;
   id: string;
   backupDir: BackupDirProvider;
 }): Promise<void> {
-  const source = skillDir(input.root, input.id);
   try {
-    await lstat(source);
+    await lstat(input.source);
   } catch (error: unknown) {
     if (isMissingFile(error)) return;
     throw error;
   }
-  const dest = join(await input.backupDir(), 'skills', input.id);
+  const dest = join(await input.backupDir(), input.backupSubdir, input.id);
   await mkdir(dirname(dest), { recursive: true, mode: 0o700 });
-  await cp(source, dest, { recursive: true, verbatimSymlinks: true });
+  await cp(input.source, dest, { recursive: true, verbatimSymlinks: true });
 }
 
 interface Mutation<T> {
@@ -236,8 +245,12 @@ export async function saveLibraryItem(input: {
   return item;
 }
 
-function skillIdToRemove(input: { id: string; kind: unknown }): string | null {
-  return input.kind === 'skill' && isLibraryId(input.id) ? input.id : null;
+function folderIdToRemove(input: {
+  id: string;
+  kind: unknown;
+  expectedKind: 'skill' | 'plugin';
+}): string | null {
+  return input.kind === input.expectedKind && isLibraryId(input.id) ? input.id : null;
 }
 
 export async function removeLibraryItem(input: {
@@ -254,22 +267,43 @@ export async function removeLibraryItem(input: {
       const stale = quarantined.find((entry) => entry.id === input.id);
       if (!found && !stale) return { next: null, result: null };
       const rawKind = stale && isRecord(stale.raw) ? stale.raw['kind'] : undefined;
+      const kind = found?.kind ?? rawKind;
       return {
         next: {
           items: library.items.filter((current) => current.id !== input.id),
           quarantined: quarantined.filter((entry) => entry.id !== input.id),
         },
-        result: { skillId: skillIdToRemove({ id: input.id, kind: found?.kind ?? rawKind }) },
+        result: {
+          skillId: folderIdToRemove({ id: input.id, kind, expectedKind: 'skill' }),
+          pluginId: folderIdToRemove({ id: input.id, kind, expectedKind: 'plugin' }),
+        },
       };
     },
     beforeWrite: async ({ result, backupDir }) => {
-      if (result?.skillId)
-        await backupSkillDir({ root: input.root, id: result.skillId, backupDir });
+      if (result?.skillId) {
+        await backupFolderDir({
+          source: skillDir(input.root, result.skillId),
+          backupSubdir: 'skills',
+          id: result.skillId,
+          backupDir,
+        });
+      }
+      if (result?.pluginId) {
+        await backupFolderDir({
+          source: pluginDir(input.root, result.pluginId),
+          backupSubdir: 'plugins',
+          id: result.pluginId,
+          backupDir,
+        });
+      }
     },
   });
   if (!removal) return { removed: false };
   if (removal.skillId) {
     await rm(skillDir(input.root, removal.skillId), { recursive: true, force: true });
+  }
+  if (removal.pluginId) {
+    await rm(pluginDir(input.root, removal.pluginId), { recursive: true, force: true });
   }
   return { removed: true };
 }

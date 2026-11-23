@@ -221,6 +221,18 @@ async function pickViewerFiles(): Promise<string[]> {
   return result.canceled ? [] : result.filePaths;
 }
 
+async function pickLibraryZip(): Promise<string | null> {
+  const window = BrowserWindow.getFocusedWindow();
+  const options: Electron.OpenDialogOptions = {
+    properties: ['openFile'],
+    filters: [{ name: 'ZIP', extensions: ['zip'] }],
+  };
+  const result = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? null : (result.filePaths[0] ?? null);
+}
+
 const ATTACHMENT_FILTERS: Readonly<Record<AttachmentKind, Electron.FileFilter[]>> = {
   images: [
     {
@@ -578,6 +590,7 @@ void app.whenReady().then(async () => {
       root: dataRoot(process.env),
       baseEnv,
       runner: nodeRunner,
+      pickLibraryZip,
     });
     registerIpc({
       handlers: created,

@@ -1,7 +1,16 @@
 import type { McpHttpServer, McpServerConfig, McpStdioServer } from '../profile-sync.js';
 import { isProviderId } from '../providers.js';
 import { containsSecretLiteral, isSecretFlagArgument } from './credential-detect.js';
-import type { LibraryItem, LibraryItemSource, PluginDefinition, SkillDefinition } from './types.js';
+import type {
+  LibraryItem,
+  LibraryItemSource,
+  PluginDefinition,
+  PluginManifestFormat,
+  PluginPackageCommandMeta,
+  PluginPackageDefinition,
+  PluginPackageSkillMeta,
+  SkillDefinition,
+} from './types.js';
 
 export const MAX_PROJECT_DISABLED_ITEMS = 200;
 
@@ -14,6 +23,15 @@ const MAX_ARG_LENGTH = 1000;
 const MAX_RECORD_ENTRIES = 50;
 const MAX_RECORD_KEY_LENGTH = 100;
 const MAX_URL_LENGTH = 2000;
+const MAX_PACKAGE_ENTRIES = 100;
+const MAX_PACKAGE_PATH_LENGTH = 255;
+const MANIFEST_FORMATS: ReadonlySet<string> = new Set([
+  'claude',
+  'codex',
+  'cursor',
+  'antigravity',
+  'generic',
+]);
 
 // REGEX: slug made of lowercase alphanumeric words joined by single hyphens
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -193,14 +211,134 @@ function referenceName(value: unknown, field: string): string {
   return value;
 }
 
+function packagePath(value: unknown, field: string): string {
+  const path = plainText({ value, field, min: 1, max: MAX_PACKAGE_PATH_LENGTH });
+  if (
+    path.includes('\0') ||
+    path.startsWith('/') ||
+    path.includes('\\') ||
+    /^[A-Za-z]:/.test(path) ||
+    path.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')
+  ) {
+    throw invalid(`${field} must be a safe relative path`);
+  }
+  return path;
+}
+
+function packageDescription(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  return plainText({ value, field, min: 0, max: MAX_DESCRIPTION_LENGTH });
+}
+
+function packageSkills(value: unknown): PluginPackageSkillMeta[] {
+  if (!Array.isArray(value) || value.length > MAX_PACKAGE_ENTRIES) {
+    throw invalid(`definition.skills must be an array of at most ${MAX_PACKAGE_ENTRIES} entries`);
+  }
+  return value.map((entry: unknown, index) => {
+    const record = requireRecord(entry, `definition.skills[${index}]`);
+    const id = record['id'];
+    if (!isLibraryId(id)) {
+      throw invalid(`definition.skills[${index}].id must be a slug of at most 64 characters`);
+    }
+    return {
+      id,
+      name: plainText({
+        value: record['name'],
+        field: `definition.skills[${index}].name`,
+        min: 1,
+        max: MAX_NAME_LENGTH,
+      }),
+      description: packageDescription(
+        record['description'],
+        `definition.skills[${index}].description`,
+      ),
+      path: packagePath(record['path'], `definition.skills[${index}].path`),
+    };
+  });
+}
+
+function packageCommands(value: unknown): PluginPackageCommandMeta[] {
+  if (!Array.isArray(value) || value.length > MAX_PACKAGE_ENTRIES) {
+    throw invalid(`definition.commands must be an array of at most ${MAX_PACKAGE_ENTRIES} entries`);
+  }
+  return value.map((entry: unknown, index) => {
+    const record = requireRecord(entry, `definition.commands[${index}]`);
+    const name = plainText({
+      value: record['name'],
+      field: `definition.commands[${index}].name`,
+      min: 1,
+      max: MAX_NAME_LENGTH,
+    });
+    if (name.includes('/') || /\s/.test(name)) {
+      throw invalid(`definition.commands[${index}].name must not contain spaces or slashes`);
+    }
+    return {
+      name,
+      description: packageDescription(
+        record['description'],
+        `definition.commands[${index}].description`,
+      ),
+      path: packagePath(record['path'], `definition.commands[${index}].path`),
+    };
+  });
+}
+
+function packageMcpServers(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_RECORD_ENTRIES) {
+    throw invalid(
+      `definition.mcpServers must be an array of at most ${MAX_RECORD_ENTRIES} entries`,
+    );
+  }
+  return value.map((entry: unknown, index) =>
+    plainText({
+      value: entry,
+      field: `definition.mcpServers[${index}]`,
+      min: 1,
+      max: MAX_NAME_LENGTH,
+    }),
+  );
+}
+
+function pluginPackageDefinition(record: Record<string, unknown>): PluginPackageDefinition {
+  const manifestFormat = record['manifestFormat'];
+  if (typeof manifestFormat !== 'string' || !MANIFEST_FORMATS.has(manifestFormat)) {
+    throw invalid('definition.manifestFormat must be a supported plugin format');
+  }
+  const hash = record['hash'];
+  if (typeof hash !== 'string' || !SKILL_HASH.test(hash)) {
+    throw invalid('definition.hash must be a lowercase hexadecimal hash');
+  }
+  const rawVersion = record['version'];
+  const version =
+    rawVersion === undefined
+      ? undefined
+      : plainText({ value: rawVersion, field: 'definition.version', min: 1, max: 64 });
+  const rawMcp = record['mcpServers'];
+  const mcpServers = rawMcp === undefined ? undefined : packageMcpServers(rawMcp);
+  return {
+    format: 'package',
+    manifestFormat: manifestFormat as PluginManifestFormat,
+    ...(version === undefined ? {} : { version }),
+    hash,
+    skills: packageSkills(record['skills']),
+    commands: packageCommands(record['commands']),
+    ...(mcpServers === undefined ? {} : { mcpServers }),
+  };
+}
+
 function pluginDefinition(value: unknown): PluginDefinition {
   const record = requireRecord(value, 'definition');
+  if (record['format'] === 'package') return pluginPackageDefinition(record);
+  if (record['format'] !== undefined && record['format'] !== 'recipe') {
+    throw invalid('definition.format must be recipe or package');
+  }
   const provider = record['provider'];
   if (typeof provider !== 'string' || !isProviderId(provider)) {
     throw invalid('definition.provider must be a known provider');
   }
   const marketplace = record['marketplace'];
   return {
+    ...(record['format'] === 'recipe' ? { format: 'recipe' as const } : {}),
     provider,
     ...(marketplace === undefined
       ? {}

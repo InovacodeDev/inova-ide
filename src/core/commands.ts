@@ -1,7 +1,7 @@
 import { readdir, readFile, realpath } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 
-export type ProjectCommandSource = 'claude' | 'codex' | 'gemini';
+export type ProjectCommandSource = 'claude' | 'codex' | 'gemini' | 'library' | 'plugin';
 export type ProjectCommandKind = 'command' | 'skill';
 
 export interface ProjectCommand {
@@ -10,6 +10,10 @@ export interface ProjectCommand {
   source: ProjectCommandSource;
   kind: ProjectCommandKind;
   body: string;
+  libraryItemId?: string;
+  pluginId?: string;
+  pluginName?: string;
+  resourceDir?: string;
 }
 
 const MAX_DESCRIPTION_CHARS = 120;
@@ -40,7 +44,7 @@ function stripHeadingPrefix(line: string): string {
   return line.replace(/^#+\s*/, '').trim();
 }
 
-function fallbackDescription(body: string): string {
+export function fallbackCommandDescription(body: string): string {
   for (const line of body.split(/\r?\n/)) {
     const cleaned = stripHeadingPrefix(line);
     if (cleaned === '') continue;
@@ -51,7 +55,7 @@ function fallbackDescription(body: string): string {
   return '';
 }
 
-function parseMarkdownCommand(raw: string): {
+export function parseMarkdownCommand(raw: string): {
   name: string | null;
   description: string;
   body: string;
@@ -59,7 +63,7 @@ function parseMarkdownCommand(raw: string): {
   const match = FRONTMATTER_PATTERN.exec(raw);
   if (!match) {
     const body = raw.trim();
-    return { name: null, description: fallbackDescription(body), body };
+    return { name: null, description: fallbackCommandDescription(body), body };
   }
   const metaBlock = match[1] ?? '';
   const body = (match[2] ?? '').trim();
@@ -75,12 +79,12 @@ function parseMarkdownCommand(raw: string): {
   }
   return {
     name,
-    description: description !== '' ? description : fallbackDescription(body),
+    description: description !== '' ? description : fallbackCommandDescription(body),
     body,
   };
 }
 
-function parseTomlStrings(raw: string): Record<string, string> {
+export function parseTomlStrings(raw: string): Record<string, string> {
   const result: Record<string, string> = {};
   const lines = raw.split(/\r?\n/);
   for (let i = 0; i < lines.length; i += 1) {
@@ -209,7 +213,7 @@ async function loadGeminiTomlCommands(input: {
     const parsed = parseTomlStrings(raw);
     const prompt = parsed['prompt']?.trim() ?? '';
     if (prompt === '') continue;
-    const description = parsed['description']?.trim() || fallbackDescription(prompt);
+    const description = parsed['description']?.trim() || fallbackCommandDescription(prompt);
     items.push({
       name: commandNameFromRel(input.baseDir, file, '.toml'),
       description,

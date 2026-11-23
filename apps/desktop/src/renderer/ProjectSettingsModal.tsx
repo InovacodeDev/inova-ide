@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { VerificationCheck } from '@inova/core/types';
-import type { ProjectView } from '../shared/api';
+import type { ProjectLibraryBinding, ProjectView } from '../shared/api';
 import { CloseIcon, SettingsIcon } from './icons';
 import { useI18n } from './I18nContext';
 import { openModalCount } from './modal-layers';
@@ -26,6 +26,7 @@ interface ProjectSettingsModalProps {
   onDetectChecks: () => void;
   onRunVerification: () => void;
   onLibraryDisabledChange: (disabled: string[]) => void;
+  onLibraryBindingsChange: (bindings: ProjectLibraryBinding[]) => void;
   onClose: () => void;
 }
 
@@ -38,6 +39,7 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
     onDetectChecks,
     onRunVerification,
     onLibraryDisabledChange,
+    onLibraryBindingsChange,
   } = props;
   const { t } = useI18n();
   const [newCommand, setNewCommand] = useState('');
@@ -198,7 +200,11 @@ export function ProjectSettingsModal(props: ProjectSettingsModalProps) {
               </button>
             </div>
           </SettingGroup>
-          <ProjectLibraryPanel project={project} onDisabledChange={onLibraryDisabledChange} />
+          <ProjectLibraryPanel
+            project={project}
+            onDisabledChange={onLibraryDisabledChange}
+            onBindingsChange={onLibraryBindingsChange}
+          />
         </div>
       </div>
     </div>
