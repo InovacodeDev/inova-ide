@@ -351,3 +351,153 @@ export function projectMcpConnectorRows(input: {
     ...(input.projectDisabled ? { projectDisabled: input.projectDisabled } : {}),
   });
 }
+
+export const MAX_DROPPED_ZIPS = 20;
+
+export interface DroppedLibraryFileLike {
+  name: string;
+  isDirectory?: boolean;
+}
+
+export interface DroppedFileEntry {
+  file: File;
+  name: string;
+  isDirectory: boolean;
+}
+
+export interface DataTransferItemLike {
+  kind: string;
+  getAsFile: () => File | null;
+  webkitGetAsEntry?: () => { isDirectory?: boolean } | null;
+}
+
+export interface DataTransferLike {
+  items?: ArrayLike<DataTransferItemLike> | null;
+  files?: ArrayLike<File> | null;
+}
+
+export type DroppedZipResolution =
+  | { kind: 'empty' }
+  | { kind: 'invalid-files'; rejectedNames: string[] }
+  | { kind: 'unresolvable'; count: number }
+  | { kind: 'too-many'; count: number; max: number }
+  | { kind: 'ready'; zipPaths: string[]; rejectedNames: string[]; unresolvableCount: number };
+
+export type ZipBatchItemOutcome =
+  | { fileName: string; ok: true; itemName: string; replaced: boolean }
+  | { fileName: string; ok: false; message: string };
+
+export interface ZipBatchSummary {
+  importedNames: string[];
+  replacedSingle: boolean;
+  failures: { fileName: string; message: string }[];
+}
+
+export function isZipFileName(name: string): boolean {
+  const base = name.trim().replace(/^.*[/\\]/, '');
+  return base.length > 4 && base.toLowerCase().endsWith('.zip');
+}
+
+export function hasFileDragPayload(types: Iterable<string> | ArrayLike<string>): boolean {
+  return Array.from(types).includes('Files');
+}
+
+export function extractDroppedFiles(
+  transfer: DataTransferLike | null | undefined,
+): DroppedFileEntry[] {
+  if (!transfer) return [];
+  const { items, files } = transfer;
+  if (items && items.length > 0) {
+    const entries: DroppedFileEntry[] = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (!item || item.kind !== 'file') continue;
+      const file = item.getAsFile();
+      if (!file) continue;
+      const isDirectory = item.webkitGetAsEntry?.()?.isDirectory === true;
+      entries.push({ file, name: file.name, isDirectory });
+    }
+    return entries;
+  }
+  if (!files) return [];
+  const entries: DroppedFileEntry[] = [];
+  for (let i = 0; i < files.length; i += 1) {
+    const file = files[i];
+    if (!file) continue;
+    entries.push({ file, name: file.name, isDirectory: false });
+  }
+  return entries;
+}
+
+export function resolveDroppedLibraryZips<T extends DroppedLibraryFileLike>(input: {
+  files: readonly T[];
+  resolvePath: (file: T) => string;
+  maxFiles?: number;
+}): DroppedZipResolution {
+  const max = input.maxFiles ?? MAX_DROPPED_ZIPS;
+  if (input.files.length === 0) return { kind: 'empty' };
+
+  const seenPaths = new Set<string>();
+  const zipPaths: string[] = [];
+  const rejectedNames: string[] = [];
+  let unresolvableCount = 0;
+
+  for (const file of input.files) {
+    if (file.isDirectory === true) {
+      rejectedNames.push(file.name);
+      continue;
+    }
+    let resolved = '';
+    try {
+      resolved = input.resolvePath(file).trim();
+    } catch {
+      resolved = '';
+    }
+    const candidateName = resolved !== '' ? resolved : file.name;
+    if (!isZipFileName(candidateName)) {
+      rejectedNames.push(file.name || candidateName);
+      continue;
+    }
+    if (resolved === '') {
+      unresolvableCount += 1;
+      continue;
+    }
+    if (!seenPaths.has(resolved)) {
+      seenPaths.add(resolved);
+      zipPaths.push(resolved);
+    }
+  }
+
+  if (zipPaths.length === 0) {
+    return unresolvableCount > 0
+      ? { kind: 'unresolvable', count: unresolvableCount }
+      : { kind: 'invalid-files', rejectedNames };
+  }
+
+  if (zipPaths.length > max) {
+    return { kind: 'too-many', count: zipPaths.length, max };
+  }
+
+  return { kind: 'ready', zipPaths, rejectedNames, unresolvableCount };
+}
+
+export function summarizeZipImportBatch(outcomes: readonly ZipBatchItemOutcome[]): ZipBatchSummary {
+  const importedNames: string[] = [];
+  const failures: { fileName: string; message: string }[] = [];
+  let lastReplaced = false;
+
+  for (const outcome of outcomes) {
+    if (outcome.ok) {
+      importedNames.push(outcome.itemName);
+      lastReplaced = outcome.replaced;
+    } else {
+      failures.push({ fileName: outcome.fileName, message: outcome.message });
+    }
+  }
+
+  return {
+    importedNames,
+    replacedSingle: importedNames.length === 1 && lastReplaced,
+    failures,
+  };
+}

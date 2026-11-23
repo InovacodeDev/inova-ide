@@ -11,6 +11,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Importação de skills (`SKILL.md`) e plugins nos formatos padrão de mercado (`.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.cursor-plugin/plugin.json`, `.antigravity-plugin/plugin.json`, `plugin.json` e `gemini-extension.json`) via arquivo `.zip` diretamente na biblioteca da IDE, com validação de segredos e bloqueio de arquivos `.env`.
 - Vinculação opt-in de skills e plugins por projeto nas configurações do projeto, permitindo importar da biblioteca, ligar ou desligar itens inteiros ou skills individuais do plugin para economizar tokens e invocá-los por `/<skill>` no compositor apenas quando ativos.
 - Modo Orquestrador multi-provedor com comando `/orchestrator` e seletor na barra do compositor, permitindo parear qualquer modelo em modo plano/leitura como orquestrador de qualquer outro modelo desenvolvedor, mesmo ou entre provedores distintos, com até 3 rodadas de revisão e linha do tempo de fases.
+- Adicionada importação de arquivos `.zip` de skills e plugins por drag and drop na aba Biblioteca, com zona de soltura destacada, validação de extensão e suporte a múltiplos pacotes.
 
 ## [0.10.5] - 2026-11-23
 
