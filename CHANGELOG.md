@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.10.5] - 2026-11-23
+
 ### Alterado
 
 - Integração Gemini (`agy` 1.5.14): catálogo e parser agrupam modelos com variantes de esforço (`Gemini 4 Neon`, `Gemini 4 Argon`, `Gemini 4 Hydrogen`, `Gemini 3.8 Flash`, `Claude Opus 5.5`, `Claude Sonnet 5.5`), preservam modelos fixos (`Orchestrator (Neon)`, `Orchestrator (Argon)`, `GPT-OSS 120B (Medium)`), removem `--effort max`, adicionam `/effort`, leem `thinking_delta` em tempo real e leem `cache_read_tokens`.
