@@ -1,6 +1,23 @@
-import { lstat, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import {
+  PROVIDER_MODELS,
+  parseClaudeModelCatalog,
+  parseCodexModelsCache,
+  prependConfiguredModel,
+  type ProviderModels,
+} from './models.js';
 import type { Account, ProviderId } from './types.js';
 
 export type AuthStatus = 'logged-in' | 'logged-out' | 'binary-missing' | 'unknown';
@@ -467,5 +484,113 @@ export async function readAccountEmail(input: {
       }
       return null;
     }
+  }
+}
+
+export interface DiscoveredAccountModels {
+  readonly catalog: ProviderModels;
+  readonly fingerprint: string;
+}
+
+async function readOptionalFileWithMtime(
+  file: string,
+): Promise<{ raw: string; mtimeMs: number } | null> {
+  try {
+    const [fileStat, raw] = await Promise.all([stat(file), readFile(file, 'utf8')]);
+    return { raw, mtimeMs: fileStat.mtimeMs };
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+}
+
+// REGEX: match top-level `model = "..."` setting before any `[section]` header
+const GROK_TOP_LEVEL_MODEL = /^\s*model\s*=\s*"([^"]+)"/m;
+
+async function discoverClaudeModelsFromDisk(
+  homeDir: string,
+): Promise<DiscoveredAccountModels | null> {
+  const dir = join(homeDir, 'cache', 'model-catalog');
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (error: unknown) {
+    if (isMissingFile(error)) return null;
+    throw error;
+  }
+
+  let best: {
+    catalog: ProviderModels;
+    fingerprint: string;
+    freshness: number;
+    mtimeMs: number;
+  } | null = null;
+  for (const name of names) {
+    if (!name.endsWith('.json') || name.endsWith('.headless-failed.json')) continue;
+    const loaded = await readOptionalFileWithMtime(join(dir, name));
+    if (!loaded) continue;
+    const catalog = parseClaudeModelCatalog(loaded.raw);
+    if (!catalog) continue;
+    const record = parseJsonRecord(loaded.raw);
+    const fetchedAt =
+      record && typeof record['fetchedAt'] === 'number' && Number.isFinite(record['fetchedAt'])
+        ? record['fetchedAt']
+        : loaded.mtimeMs;
+    if (
+      best === null ||
+      fetchedAt > best.freshness ||
+      (fetchedAt === best.freshness && loaded.mtimeMs > best.mtimeMs)
+    ) {
+      best = {
+        catalog,
+        fingerprint: `claude:${name}:${loaded.mtimeMs}`,
+        freshness: fetchedAt,
+        mtimeMs: loaded.mtimeMs,
+      };
+    }
+  }
+  return best ? { catalog: best.catalog, fingerprint: best.fingerprint } : null;
+}
+
+export async function discoverAccountModelsFromDisk(input: {
+  provider: ProviderId;
+  homeDir: string;
+}): Promise<DiscoveredAccountModels | null> {
+  switch (input.provider) {
+    case 'claude':
+      return discoverClaudeModelsFromDisk(input.homeDir);
+    case 'codex': {
+      const loaded = await readOptionalFileWithMtime(join(input.homeDir, 'models_cache.json'));
+      if (!loaded) return null;
+      const catalog = parseCodexModelsCache(loaded.raw);
+      return catalog ? { catalog, fingerprint: `codex:${loaded.mtimeMs}` } : null;
+    }
+    case 'qwen': {
+      const loaded = await readOptionalFileWithMtime(join(input.homeDir, '.qwen', 'settings.json'));
+      if (!loaded) return null;
+      const parsed = parseJsonRecord(loaded.raw);
+      const modelValue = parsed?.['model'];
+      const modelId =
+        typeof modelValue === 'string'
+          ? modelValue
+          : isRecord(modelValue) && typeof modelValue['name'] === 'string'
+            ? modelValue['name']
+            : null;
+      const catalog = prependConfiguredModel(PROVIDER_MODELS.qwen, modelId);
+      return catalog ? { catalog, fingerprint: `qwen:${loaded.mtimeMs}` } : null;
+    }
+    case 'grok': {
+      const loaded = await readOptionalFileWithMtime(join(input.homeDir, 'config.toml'));
+      if (!loaded) return null;
+      const topSection = loaded.raw.split(/\r?\n\[/)[0] ?? loaded.raw;
+      const match = GROK_TOP_LEVEL_MODEL.exec(topSection);
+      const catalog = prependConfiguredModel(PROVIDER_MODELS.grok, match?.[1] ?? null);
+      return catalog ? { catalog, fingerprint: `grok:${loaded.mtimeMs}` } : null;
+    }
+    case 'gemini':
+    case 'deepseek':
+    case 'kimi':
+    case 'opencode':
+      return null;
   }
 }

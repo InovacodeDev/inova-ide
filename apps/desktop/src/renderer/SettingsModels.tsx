@@ -1,4 +1,11 @@
-import { PROVIDER_MODELS, effortsForModel, splitModelEffortVariant } from '@inova/core/models';
+import {
+  EFFORT_LEVELS,
+  PROVIDER_MODELS,
+  effortsForModel,
+  splitModelEffortVariant,
+  type ModelOption,
+  type ProviderModels,
+} from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type {
   EffortLevel,
@@ -7,6 +14,7 @@ import type {
   Settings,
   SettingsPatch,
 } from '@inova/core/types';
+import type { AccountView } from '../shared/api';
 import { useI18n } from './I18nContext';
 import { effectiveModeForSession, modeOptionText } from './mode-picker-state';
 import { effortLabel, resolveModelOptions } from './model-picker-state';
@@ -16,18 +24,53 @@ import { SettingGroup, SettingRow } from './settings-controls';
 
 const PROVIDERS = Object.keys(PROVIDER_MODES) as ProviderId[];
 
+export function resolveProviderCatalog(
+  provider: ProviderId,
+  accounts?: readonly Pick<AccountView, 'label' | 'provider'>[],
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>,
+): ProviderModels {
+  const fallback = PROVIDER_MODELS[provider];
+  if (!accounts || !modelsByAccount) return fallback;
+  const catalogs = accounts
+    .filter((account) => account.provider === provider)
+    .map((account) => modelsByAccount[account.label])
+    .filter((catalog): catalog is ProviderModels => catalog !== undefined);
+  if (catalogs.length === 0) return fallback;
+  if (catalogs.length === 1 && catalogs[0]) return catalogs[0];
+  const seen = new Set<string>();
+  const models: ModelOption[] = [];
+  for (const catalog of catalogs) {
+    for (const model of catalog.models) {
+      if (seen.has(model.id)) continue;
+      seen.add(model.id);
+      models.push(model);
+    }
+  }
+  const effortSet = new Set<EffortLevel>();
+  for (const catalog of catalogs) {
+    for (const effort of catalog.efforts) effortSet.add(effort);
+  }
+  return {
+    defaultModelLabel: catalogs[0]?.defaultModelLabel ?? fallback.defaultModelLabel,
+    models,
+    efforts: EFFORT_LEVELS.filter((level) => effortSet.has(level)),
+  };
+}
+
 export function ModelsSection(props: {
   settings: Settings;
   defaultModes: Partial<Record<ProviderId, ExecutionMode>>;
+  accounts?: readonly Pick<AccountView, 'label' | 'provider'>[];
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   onUpdate: (patch: SettingsPatch) => void;
   onSetDefaultMode: (provider: ProviderId, mode: ExecutionMode) => void;
 }) {
-  const { settings, defaultModes, onUpdate, onSetDefaultMode } = props;
+  const { settings, defaultModes, accounts, modelsByAccount, onUpdate, onSetDefaultMode } = props;
   const { locale, t } = useI18n();
   return (
     <>
       {PROVIDERS.map((provider) => {
-        const catalog = PROVIDER_MODELS[provider];
+        const catalog = resolveProviderCatalog(provider, accounts, modelsByAccount);
         const modes = PROVIDER_MODES[provider];
         const current = settings.models[provider];
         const split = splitModelEffortVariant(catalog, current.model);

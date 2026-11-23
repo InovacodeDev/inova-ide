@@ -445,3 +445,280 @@ export function parseOpenCodeModelsOutput(stdout: string): ModelOption[] {
   }
   return models;
 }
+
+function isCatalogRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function sortEfforts(values: readonly unknown[]): EffortLevel[] {
+  const unique = new Set<EffortLevel>();
+  for (const value of values) {
+    if (isEffortLevel(value)) unique.add(value);
+  }
+  return [...unique].sort((a, b) => EFFORT_LEVELS.indexOf(a) - EFFORT_LEVELS.indexOf(b));
+}
+
+function unionEfforts(
+  groups: readonly (readonly EffortLevel[] | undefined)[],
+  fallback: readonly EffortLevel[],
+): readonly EffortLevel[] {
+  const all = sortEfforts(groups.flatMap((group) => group ?? []));
+  return all.length > 0 ? all : fallback;
+}
+
+interface ParsedClaudeEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly shortName: string | null;
+  readonly section: string | null;
+  readonly description: string | undefined;
+  readonly efforts: readonly EffortLevel[] | undefined;
+}
+
+function extractClaudeEntryEfforts(
+  entry: Record<string, unknown>,
+): readonly EffortLevel[] | undefined {
+  const thinking = isCatalogRecord(entry['thinking']) ? entry['thinking'] : null;
+  if (thinking?.['type'] === 'none') return [];
+  const runtime = isCatalogRecord(entry['runtime']) ? entry['runtime'] : null;
+  if (runtime && Array.isArray(runtime['effort_levels'])) {
+    return sortEfforts(runtime['effort_levels']);
+  }
+  if (thinking && Array.isArray(thinking['effort_options'])) {
+    return sortEfforts(
+      thinking['effort_options'].map((option) =>
+        isCatalogRecord(option) ? option['id'] : undefined,
+      ),
+    );
+  }
+  return undefined;
+}
+
+function parseClaudeEntry(raw: unknown): ParsedClaudeEntry | null {
+  if (!isCatalogRecord(raw)) return null;
+  const id = raw['id'];
+  if (typeof id !== 'string' || id.trim() === '') return null;
+  const name = raw['name'];
+  const label = typeof name === 'string' && name.trim() !== '' ? name.trim() : id;
+  const shortName =
+    typeof raw['short_name'] === 'string' && raw['short_name'].trim() !== ''
+      ? raw['short_name'].trim()
+      : null;
+  const section = typeof raw['section'] === 'string' ? raw['section'] : null;
+  const rawDescription = raw['description'];
+  const description =
+    typeof rawDescription === 'string' && rawDescription.trim() !== ''
+      ? rawDescription.trim()
+      : undefined;
+  return {
+    id,
+    label,
+    shortName,
+    section,
+    description,
+    efforts: extractClaudeEntryEfforts(raw),
+  };
+}
+
+export function parseClaudeModelCatalog(
+  raw: string,
+  fallback: ProviderModels = PROVIDER_MODELS.claude,
+): ProviderModels | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isCatalogRecord(parsed)) return null;
+  const catalog = isCatalogRecord(parsed['catalog']) ? parsed['catalog'] : null;
+  const config = catalog && isCatalogRecord(catalog['config']) ? catalog['config'] : null;
+  if (!config || !Array.isArray(config['models'])) return null;
+
+  const entries = config['models']
+    .map(parseClaudeEntry)
+    .filter((item): item is ParsedClaudeEntry => item !== null);
+  if (entries.length === 0) return null;
+
+  const byId = new Map(entries.map((entry) => [entry.id, entry] as const));
+  const aliasTargets = isCatalogRecord(config['provider_alias_targets'])
+    ? config['provider_alias_targets']
+    : null;
+  const fallbackById = new Map(fallback.models.map((item) => [item.id, item] as const));
+
+  const findAliasTarget = (alias: string): ParsedClaudeEntry | undefined => {
+    const aliasRecord =
+      aliasTargets && isCatalogRecord(aliasTargets[alias]) ? aliasTargets[alias] : null;
+    const defaultTargetId = aliasRecord?.['default'];
+    if (typeof defaultTargetId === 'string') {
+      const matched = byId.get(defaultTargetId);
+      if (matched) return matched;
+    }
+    return entries.find(
+      (entry) => entry.section === 'main' && entry.shortName?.toLowerCase() === alias,
+    );
+  };
+
+  const models: ModelOption[] = [];
+  const seen = new Set<string>();
+  const addModel = (option: ModelOption) => {
+    if (seen.has(option.id)) return;
+    seen.add(option.id);
+    models.push(option);
+  };
+
+  const opusTarget = findAliasTarget('opus');
+  for (const alias of ['sonnet', 'opus', 'fable', 'haiku'] as const) {
+    const target = alias === 'opus' ? opusTarget : findAliasTarget(alias);
+    const fb = fallbackById.get(alias);
+    if (target) {
+      const description = fb?.description ?? target.description;
+      addModel({
+        id: alias,
+        label: target.label,
+        ...(description ? { description } : {}),
+        ...(target.efforts !== undefined ? { efforts: target.efforts } : {}),
+      });
+    } else if (fb) {
+      addModel(fb);
+    }
+  }
+
+  const fallbackOpusPlan = fallbackById.get('opusplan');
+  const opusLabel = opusTarget?.label ?? fallbackById.get('opus')?.label ?? 'Opus';
+  addModel({
+    id: 'opusplan',
+    label: `${opusLabel} Plan`,
+    ...(fallbackOpusPlan?.description ? { description: fallbackOpusPlan.description } : {}),
+    ...(opusTarget?.efforts !== undefined ? { efforts: opusTarget.efforts } : {}),
+  });
+
+  for (const entry of entries) {
+    addModel({
+      id: entry.id,
+      label: entry.label,
+      ...(entry.description ? { description: entry.description } : {}),
+      ...(entry.efforts !== undefined ? { efforts: entry.efforts } : {}),
+    });
+  }
+
+  return {
+    defaultModelLabel: fallback.defaultModelLabel,
+    models,
+    efforts: unionEfforts(
+      models.map((item) => item.efforts),
+      fallback.efforts,
+    ),
+  };
+}
+
+function formatCodexDisplayName(name: string): string {
+  const trimmed = name.trim();
+  if (/^GPT-/i.test(trimmed)) return trimmed.replace(/-/g, ' ');
+  return trimmed;
+}
+
+export function parseCodexModelsCache(
+  raw: string,
+  fallback: ProviderModels = PROVIDER_MODELS.codex,
+): ProviderModels | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isCatalogRecord(parsed) || !Array.isArray(parsed['models'])) return null;
+
+  const hiddenIds = new Set<string>();
+  const visible: {
+    readonly option: ModelOption;
+    readonly priority: number;
+    readonly index: number;
+  }[] = [];
+
+  for (const [index, entry] of parsed['models'].entries()) {
+    if (!isCatalogRecord(entry)) continue;
+    const rawSlug = entry['slug'];
+    if (typeof rawSlug !== 'string' || rawSlug.trim() === '') continue;
+    const slug = rawSlug.trim();
+    if (entry['visibility'] === 'hide') {
+      hiddenIds.add(slug);
+      continue;
+    }
+    const displayName =
+      typeof entry['display_name'] === 'string' && entry['display_name'].trim() !== ''
+        ? entry['display_name']
+        : slug;
+    const description =
+      typeof entry['description'] === 'string' && entry['description'].trim() !== ''
+        ? entry['description'].trim()
+        : undefined;
+    const efforts = Array.isArray(entry['supported_reasoning_levels'])
+      ? sortEfforts(
+          entry['supported_reasoning_levels'].map((level) =>
+            isCatalogRecord(level) ? level['effort'] : undefined,
+          ),
+        )
+      : undefined;
+    const priority =
+      typeof entry['priority'] === 'number' && Number.isFinite(entry['priority'])
+        ? entry['priority']
+        : Number.MAX_SAFE_INTEGER;
+    visible.push({
+      option: {
+        id: slug,
+        label: formatCodexDisplayName(displayName),
+        ...(description ? { description } : {}),
+        ...(efforts !== undefined ? { efforts } : {}),
+      },
+      priority,
+      index,
+    });
+  }
+
+  if (visible.length === 0 && hiddenIds.size === 0) return null;
+
+  visible.sort((a, b) => a.priority - b.priority || a.index - b.index);
+
+  const fallbackIds = new Set(fallback.models.map((item) => item.id));
+  const visibleById = new Map(visible.map((item) => [item.option.id, item.option] as const));
+  const models: ModelOption[] = [];
+  const seen = new Set<string>();
+
+  for (const item of visible) {
+    if (fallbackIds.has(item.option.id) || seen.has(item.option.id)) continue;
+    seen.add(item.option.id);
+    models.push(item.option);
+  }
+
+  for (const fb of fallback.models) {
+    if (hiddenIds.has(fb.id) || seen.has(fb.id)) continue;
+    seen.add(fb.id);
+    const cached = visibleById.get(fb.id);
+    models.push(cached?.efforts !== undefined ? { ...fb, efforts: cached.efforts } : fb);
+  }
+
+  if (models.length === 0) return null;
+
+  return {
+    defaultModelLabel: fallback.defaultModelLabel,
+    models,
+    efforts: unionEfforts(
+      [fallback.efforts, ...models.map((item) => item.efforts)],
+      fallback.efforts,
+    ),
+  };
+}
+
+export function prependConfiguredModel(
+  catalog: ProviderModels,
+  modelId: string | null,
+): ProviderModels | null {
+  const trimmed = modelId?.trim() ?? '';
+  if (trimmed === '' || catalog.models.some((item) => item.id === trimmed)) return null;
+  return {
+    ...catalog,
+    models: [{ id: trimmed, label: trimmed }, ...catalog.models],
+  };
+}

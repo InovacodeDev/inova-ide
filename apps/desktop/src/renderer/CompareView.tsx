@@ -5,6 +5,7 @@ import {
   effortsForModel,
   resolveModelConfig,
   splitModelEffortVariant,
+  type ProviderModels,
 } from '@inova/core/models';
 import { PROVIDER_MODES } from '@inova/core/modes';
 import type { EffortLevel, ExecutionMode, Session, Settings } from '@inova/core/types';
@@ -44,6 +45,7 @@ interface CompareViewProps {
   chats: Record<string, ChatState>;
   compareMetrics: Record<string, CompareMetrics>;
   modelDefaults: Settings['models'] | null;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   selectedGroupId: string | null;
   onSelectGroup: (groupId: string | null) => void;
   onStartComparison: (input: {
@@ -90,18 +92,21 @@ function SideConfigCard({
   draft,
   accounts,
   modelDefaults,
+  modelsByAccount,
   onChange,
 }: {
   heading: string;
   draft: CompareSideDraft;
   accounts: readonly AccountView[];
   modelDefaults: Settings['models'] | null;
+  modelsByAccount?: Readonly<Record<string, ProviderModels>>;
   onChange: (next: CompareSideDraft) => void;
 }) {
   const { t, locale } = useI18n();
   const account = accounts.find((item) => item.id === draft.accountId) ?? accounts[0];
   const provider = account?.provider ?? 'claude';
-  const catalog = PROVIDER_MODELS[provider];
+  const catalog =
+    (account ? modelsByAccount?.[account.label] : undefined) ?? PROVIDER_MODELS[provider];
   const modeCatalog = PROVIDER_MODES[provider];
 
   const accountOptions: PlatformSelectOption[] = accounts.map((item) => ({
@@ -325,6 +330,7 @@ export function CompareView(props: CompareViewProps) {
     chats,
     compareMetrics,
     modelDefaults,
+    modelsByAccount,
     selectedGroupId,
     onSelectGroup,
     onStartComparison,
@@ -515,6 +521,7 @@ export function CompareView(props: CompareViewProps) {
                 draft={leftDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
+                modelsByAccount={modelsByAccount}
                 onChange={setLeftDraft}
               />
               <SideConfigCard
@@ -522,6 +529,7 @@ export function CompareView(props: CompareViewProps) {
                 draft={rightDraft}
                 accounts={accounts}
                 modelDefaults={modelDefaults}
+                modelsByAccount={modelsByAccount}
                 onChange={setRightDraft}
               />
             </div>

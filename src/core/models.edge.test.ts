@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createChatParser } from './chat-events.js';
 import { extractTurnUsageFromLine } from './cost-tracking.js';
 import {
@@ -6,11 +9,26 @@ import {
   effortsForModel,
   isEffortSupported,
   parseAgyModelsOutput,
+  parseClaudeModelCatalog,
+  parseCodexModelsCache,
   resolveModelConfig,
   splitModelEffortVariant,
 } from './models.js';
+import { discoverAccountModelsFromDisk } from './providers.js';
 import { DEFAULT_SETTINGS } from './settings.js';
 import { nativeSlashCommands } from './slash-commands.js';
+
+const tempDirs: string[] = [];
+
+async function makeTempHome(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'inova-model-discovery-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 describe('gemini 1.5.14 update and conditional effort support edge cases', () => {
   it('groups real agy 1.5.14 output into base models with per-model efforts', () => {
@@ -157,5 +175,215 @@ describe('gemini 1.5.14 update and conditional effort support edge cases', () =>
     });
 
     expect(nativeSlashCommands('gemini').some((cmd) => cmd.name === 'effort')).toBe(true);
+  });
+
+  it('parses Claude model-catalog JSON with aliases, overflow models, and per-model efforts', () => {
+    const raw = JSON.stringify({
+      version: 2,
+      fetchedAt: 1795097822180,
+      catalog: {
+        config: {
+          provider_alias_targets: {
+            sonnet: { default: 'claude-sonnet-5-5' },
+            opus: { default: 'claude-opus-5-5' },
+            fable: { default: 'claude-fable-5-2' },
+            haiku: { default: 'claude-haiku-5-5' },
+          },
+          models: [
+            {
+              id: 'claude-opus-5-5',
+              name: 'Opus 5.5',
+              short_name: 'Opus',
+              section: 'main',
+              runtime: { effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+            },
+            {
+              id: 'claude-sonnet-5-5',
+              name: 'Sonnet 5.5',
+              short_name: 'Sonnet',
+              section: 'main',
+              runtime: { effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+            },
+            {
+              id: 'claude-fable-5-2',
+              name: 'Fable 5.2',
+              short_name: 'Fable',
+              section: 'main',
+              runtime: { effort_levels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+            },
+            {
+              id: 'claude-haiku-5-5',
+              name: 'Haiku 5.5',
+              short_name: 'Haiku',
+              section: 'main',
+              thinking: {
+                type: 'effort',
+                effort_options: [{ id: 'low' }, { id: 'medium' }, { id: 'high' }],
+              },
+            },
+            {
+              id: 'claude-sonnet-4-6',
+              name: 'Sonnet 4.6',
+              short_name: 'Sonnet',
+              section: 'overflow',
+              runtime: { effort_levels: ['low', 'medium', 'high', 'max'] },
+            },
+            {
+              id: 'claude-haiku-4-5-20251001',
+              name: 'Haiku 4.5',
+              short_name: 'Haiku',
+              section: 'overflow',
+              thinking: { type: 'none' },
+            },
+          ],
+        },
+      },
+    });
+
+    const parsed = parseClaudeModelCatalog(raw);
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error('Expected parsed Claude catalog');
+
+    expect(parsed.models.slice(0, 5).map((m) => m.id)).toEqual([
+      'sonnet',
+      'opus',
+      'fable',
+      'haiku',
+      'opusplan',
+    ]);
+    expect(effortsForModel(parsed, 'haiku')).toEqual(['low', 'medium', 'high']);
+    expect(effortsForModel(parsed, 'claude-sonnet-4-6')).toEqual(['low', 'medium', 'high', 'max']);
+    expect(effortsForModel(parsed, 'claude-haiku-4-5-20251001')).toEqual([]);
+  });
+
+  it('parses Codex models_cache.json, hides internal models, and maps supported reasoning levels', () => {
+    const raw = JSON.stringify({
+      models: [
+        {
+          slug: 'gpt-reserve',
+          display_name: 'GPT-Reserve',
+          visibility: 'hide',
+          priority: 1,
+          supported_reasoning_levels: [{ effort: 'medium' }],
+        },
+        {
+          slug: 'gpt-6.3-nova',
+          display_name: 'GPT-6.3-Nova',
+          description: 'New frontier release',
+          visibility: 'list',
+          priority: 1,
+          supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }],
+        },
+        {
+          slug: 'gpt-5.6-terra',
+          display_name: 'GPT-5.6-Terra',
+          visibility: 'list',
+          priority: 2,
+          supported_reasoning_levels: [
+            { effort: 'low' },
+            { effort: 'medium' },
+            { effort: 'ultra' },
+          ],
+        },
+      ],
+    });
+
+    const parsed = parseCodexModelsCache(raw);
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error('Expected parsed Codex catalog');
+
+    expect(parsed.models[0]).toEqual({
+      id: 'gpt-6.3-nova',
+      label: 'GPT 6.3 Nova',
+      description: 'New frontier release',
+      efforts: ['low', 'high'],
+    });
+    expect(parsed.models.some((m) => m.id === 'gpt-reserve')).toBe(false);
+    expect(effortsForModel(parsed, 'gpt-5.6-terra')).toEqual(['low', 'medium']);
+    expect(parsed.models.some((m) => m.id === 'gpt-6.2-astra')).toBe(true);
+  });
+
+  it('discovers account models from disk and changes fingerprint when cache files update', async () => {
+    const claudeHome = await makeTempHome();
+    const claudeDir = join(claudeHome, 'cache', 'model-catalog');
+    await mkdir(claudeDir, { recursive: true });
+    await writeFile(join(claudeDir, 'failed.headless-failed.json'), '{"error":true}');
+    await writeFile(
+      join(claudeDir, 'older.json'),
+      JSON.stringify({
+        fetchedAt: 100,
+        catalog: {
+          config: {
+            models: [
+              { id: 'claude-sonnet-5', name: 'Sonnet 5', short_name: 'Sonnet', section: 'main' },
+            ],
+          },
+        },
+      }),
+    );
+    await writeFile(
+      join(claudeDir, 'newer.json'),
+      JSON.stringify({
+        fetchedAt: 200,
+        catalog: {
+          config: {
+            models: [
+              { id: 'claude-sonnet-6', name: 'Sonnet 6', short_name: 'Sonnet', section: 'main' },
+            ],
+          },
+        },
+      }),
+    );
+
+    const claudeDiscovered = await discoverAccountModelsFromDisk({
+      provider: 'claude',
+      homeDir: claudeHome,
+    });
+    expect(claudeDiscovered).not.toBeNull();
+    expect(claudeDiscovered?.catalog.models.find((m) => m.id === 'sonnet')?.label).toBe('Sonnet 6');
+    expect(claudeDiscovered?.fingerprint).toContain('newer.json');
+
+    const codexHome = await makeTempHome();
+    await writeFile(
+      join(codexHome, 'models_cache.json'),
+      JSON.stringify({
+        models: [
+          {
+            slug: 'gpt-7-test',
+            display_name: 'GPT-7-Test',
+            visibility: 'list',
+            supported_reasoning_levels: [{ effort: 'low' }],
+          },
+        ],
+      }),
+    );
+    const codexFirst = await discoverAccountModelsFromDisk({
+      provider: 'codex',
+      homeDir: codexHome,
+    });
+    expect(codexFirst?.catalog.models[0]?.id).toBe('gpt-7-test');
+
+    const qwenHome = await makeTempHome();
+    await mkdir(join(qwenHome, '.qwen'), { recursive: true });
+    await writeFile(
+      join(qwenHome, '.qwen', 'settings.json'),
+      JSON.stringify({ model: 'qwen5-pro' }),
+    );
+    const qwenDiscovered = await discoverAccountModelsFromDisk({
+      provider: 'qwen',
+      homeDir: qwenHome,
+    });
+    expect(qwenDiscovered?.catalog.models[0]?.id).toBe('qwen5-pro');
+
+    const grokHome = await makeTempHome();
+    await writeFile(
+      join(grokHome, 'config.toml'),
+      'model = "grok-5"\n[mcp_servers.a]\nenabled = true\n',
+    );
+    const grokDiscovered = await discoverAccountModelsFromDisk({
+      provider: 'grok',
+      homeDir: grokHome,
+    });
+    expect(grokDiscovered?.catalog.models[0]?.id).toBe('grok-5');
   });
 });
