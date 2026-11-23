@@ -7,6 +7,7 @@ import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from '@inova/core/library/ind
 import type { LibraryItemKind } from '@inova/core/library/index';
 import { isEffortLevel } from '@inova/core/models';
 import { isExecutionMode } from '@inova/core/modes';
+import { isValidOrchestratorRounds } from '@inova/core/orchestrator';
 import { WorktreeError } from '@inova/core/git-worktree';
 import { PathNotFoundError } from '@inova/core/projects';
 import { isProviderId } from '@inova/core/providers';
@@ -24,6 +25,7 @@ import type {
   EffortLevel,
   ExecutionMode,
   ProviderId,
+  SessionOrchestratorConfig,
   SettingsPatch,
   Store,
   VerificationCheck,
@@ -304,18 +306,38 @@ export interface SessionUpdateInput {
   effort?: EffortLevel | null;
   mode?: ExecutionMode | null;
   pinnedMemory?: string | null;
+  orchestrator?: SessionOrchestratorConfig | null;
+}
+
+function isOrchestratorInput(value: unknown): value is SessionOrchestratorConfig {
+  if (!isRecord(value)) return false;
+  const { enabled, accountId, model, effort, maxRounds, providerSessionId } = value;
+  if (typeof enabled !== 'boolean') return false;
+  if (!isSafeId(accountId)) return false;
+  if (model !== null && (!isText(model) || model.trim() === '')) return false;
+  if (effort !== undefined && effort !== null && !isEffortLevel(effort)) return false;
+  if (maxRounds !== undefined && !isValidOrchestratorRounds(maxRounds)) return false;
+  if (
+    providerSessionId !== undefined &&
+    providerSessionId !== null &&
+    !isBoundedString(providerSessionId, MAX_TEXT)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefined {
   if (!isRecord(input) || !isSafeId(input['sessionId'])) return undefined;
-  const { sessionId, title, archived, model, effort, mode, pinnedMemory } = input;
+  const { sessionId, title, archived, model, effort, mode, pinnedMemory, orchestrator } = input;
   if (
     title === undefined &&
     archived === undefined &&
     model === undefined &&
     effort === undefined &&
     mode === undefined &&
-    pinnedMemory === undefined
+    pinnedMemory === undefined &&
+    orchestrator === undefined
   ) {
     return undefined;
   }
@@ -327,6 +349,9 @@ export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefin
   if (effort !== undefined && effort !== null && !isEffortLevel(effort)) return undefined;
   if (mode !== undefined && mode !== null && !isExecutionMode(mode)) return undefined;
   if (pinnedMemory !== undefined && !isPinnedMemoryInput(pinnedMemory)) return undefined;
+  if (orchestrator !== undefined && orchestrator !== null && !isOrchestratorInput(orchestrator)) {
+    return undefined;
+  }
   return {
     sessionId,
     ...(title === undefined ? {} : { title }),
@@ -335,6 +360,7 @@ export function parseSessionUpdate(input: unknown): SessionUpdateInput | undefin
     ...(effort === undefined ? {} : { effort }),
     ...(mode === undefined ? {} : { mode }),
     ...(pinnedMemory === undefined ? {} : { pinnedMemory }),
+    ...(orchestrator === undefined ? {} : { orchestrator }),
   };
 }
 
@@ -999,6 +1025,8 @@ function sessionMessage(error: SessionError): string {
       return 'Área de trabalho inválida.';
     case 'invalid-pinned-memory':
       return `A memória fixada deve ter no máximo ${MAX_PINNED_MEMORY_CHARS} caracteres.`;
+    case 'invalid-orchestrator':
+      return 'Configuração do orquestrador inválida.';
   }
 }
 

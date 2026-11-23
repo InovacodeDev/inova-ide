@@ -7,6 +7,7 @@ import { isSessionUsageTotals } from './cost-tracking.js';
 import { isLibraryId, MAX_PROJECT_DISABLED_ITEMS } from './library/validate.js';
 import { isEffortLevel } from './models.js';
 import { isExecutionMode } from './modes.js';
+import { isValidOrchestratorRounds } from './orchestrator.js';
 import { isProviderId } from './providers.js';
 import { isSettings } from './settings.js';
 import type { Store } from './types.js';
@@ -115,6 +116,20 @@ function isStringOrNull(value: unknown): boolean {
   return value === null || typeof value === 'string';
 }
 
+function isOrchestratorConfig(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const { enabled, accountId, model, effort, maxRounds, providerSessionId } = value;
+  return (
+    typeof enabled === 'boolean' &&
+    typeof accountId === 'string' &&
+    isSafeSegment(accountId) &&
+    isStringOrNull(model) &&
+    (effort === undefined || effort === null || isEffortLevel(effort)) &&
+    (maxRounds === undefined || isValidOrchestratorRounds(maxRounds)) &&
+    (providerSessionId === undefined || isStringOrNull(providerSessionId))
+  );
+}
+
 function isSession(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (!hasStrings(value, ['id', 'projectId', 'title', 'createdAt', 'updatedAt'])) return false;
@@ -132,6 +147,7 @@ function isSession(value: unknown): boolean {
     effort,
     mode,
     worktree,
+    orchestrator,
     usageTotals,
     archivedAt,
   } = value;
@@ -153,6 +169,7 @@ function isSession(value: unknown): boolean {
     (effort === undefined || effort === null || isEffortLevel(effort)) &&
     (mode === undefined || mode === null || isExecutionMode(mode)) &&
     (worktree === undefined || worktree === null || isWorktree(worktree)) &&
+    (orchestrator === undefined || orchestrator === null || isOrchestratorConfig(orchestrator)) &&
     (usageTotals === undefined || usageTotals === null || isSessionUsageTotals(usageTotals)) &&
     (archivedAt === undefined || isStringOrNull(archivedAt))
   );
