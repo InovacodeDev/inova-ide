@@ -261,6 +261,18 @@ export interface VoiceModelProgress {
   totalBytes: number;
 }
 
+export interface GithubStatus {
+  installed: boolean;
+  loggedIn: boolean;
+  user: string | null;
+  scopes?: string[];
+}
+
+export type GithubLoginEvent =
+  | { type: 'code-ready'; code: string; url: string }
+  | { type: 'succeeded' }
+  | { type: 'failed'; message: string };
+
 export type LoginStage =
   'starting' | 'waiting-auth' | 'verifying' | 'succeeded' | 'failed' | 'canceled';
 
@@ -415,6 +427,11 @@ export interface InovaApi {
   }): Promise<Result<{ text: string; rawText?: string; polished?: boolean }>>;
   onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
   onVoiceDockerProgress(callback: (progress: VoiceDockerProgress) => void): () => void;
+  getGithubStatus(): Promise<Result<GithubStatus>>;
+  startGithubLogin(): Promise<Result<null>>;
+  cancelGithubLogin(): Promise<Result<null>>;
+  logoutGithub(): Promise<Result<null>>;
+  onGithubLoginEvent(callback: (event: GithubLoginEvent) => void): () => void;
   enqueueTurn(input: {
     sessionId: string;
     prompt: string;
@@ -638,6 +655,11 @@ export const CHANNELS = {
   transcribeAudio: 'inova:transcribeAudio',
   voiceModelProgress: 'inova:voice:model-progress',
   voiceDockerProgress: 'inova:voice:docker-progress',
+  getGithubStatus: 'inova:getGithubStatus',
+  startGithubLogin: 'inova:startGithubLogin',
+  cancelGithubLogin: 'inova:cancelGithubLogin',
+  logoutGithub: 'inova:logoutGithub',
+  githubLoginEvent: 'inova:github:login-event',
   readFilePreview: 'inova:readFilePreview',
   pickViewerFiles: 'inova:pickViewerFiles',
   openFilePath: 'inova:openFilePath',

@@ -9,6 +9,10 @@
   overflow-wrap: anywhere;
 }
 
+.library-tabs {
+  margin: 12px 0 8px;
+}
+
 .library-notice {
   color: var(--ok);
 }

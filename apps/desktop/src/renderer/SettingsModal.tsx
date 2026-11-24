@@ -19,6 +19,7 @@ import {
   SessionsSection,
   ShortcutsSection,
 } from './SettingsSections';
+import { GithubSection } from './SettingsGithub';
 import { ModelsSection } from './SettingsModels';
 import { VoiceSection } from './SettingsVoice';
 import type { ManualCheckStatus } from './update-state';
@@ -110,6 +111,7 @@ export function SettingsModal(props: SettingsModalProps) {
     notifications: <NotificationsSection settings={settings} onUpdate={onUpdate} call={call} />,
     voice: <VoiceSection settings={settings} onUpdate={onUpdate} call={call} />,
     library: <LibrarySection accounts={accounts} projects={projects} onRun={onRunCommand} />,
+    github: <GithubSection call={call} />,
     shortcuts: <ShortcutsSection isMac={isMac} />,
   };
 

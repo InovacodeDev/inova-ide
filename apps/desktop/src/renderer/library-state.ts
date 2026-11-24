@@ -10,6 +10,7 @@ import type {
   SkillLibraryItem,
 } from '../shared/api';
 import type { TranslationKey } from './i18n';
+import { emptyForm, type LibraryFormState } from './library-form';
 
 export const LIBRARY_KINDS: readonly LibraryItemKind[] = ['skill', 'mcp', 'connector', 'plugin'];
 
@@ -36,6 +37,68 @@ export function groupLibraryItems(items: readonly LibraryItem[]): LibraryGroup[]
 
 export function libraryIdTaken(input: { items: readonly LibraryItem[]; id: string }): boolean {
   return input.items.some((item) => item.id === input.id);
+}
+
+export type LibraryTabId = 'skill' | 'plugin' | 'mcp';
+
+export interface LibraryTab {
+  id: LibraryTabId;
+  kinds: readonly LibraryItemKind[];
+}
+
+export const LIBRARY_TABS: readonly LibraryTab[] = [
+  { id: 'skill', kinds: ['skill'] },
+  { id: 'plugin', kinds: ['plugin'] },
+  { id: 'mcp', kinds: ['mcp', 'connector'] },
+];
+
+export function libraryTabOf(kind: string): LibraryTabId | null {
+  return LIBRARY_TABS.find((tab) => tab.kinds.some((entry) => entry === kind))?.id ?? null;
+}
+
+export function itemsForTab(items: readonly LibraryItem[], tabId: LibraryTabId): LibraryItem[] {
+  const tab = LIBRARY_TABS.find((entry) => entry.id === tabId);
+  if (!tab) return [];
+  return tab.kinds.flatMap((kind) => items.filter((item) => item.kind === kind).sort(compareItems));
+}
+
+export function libraryTabCounts(items: readonly LibraryItem[]): Record<LibraryTabId, number> {
+  return {
+    skill: itemsForTab(items, 'skill').length,
+    plugin: itemsForTab(items, 'plugin').length,
+    mcp: itemsForTab(items, 'mcp').length,
+  };
+}
+
+export const INOVA_FLOW_PRESET = {
+  id: 'inova-flow',
+  name: 'InovaFlow',
+  label: 'InovaFlow',
+  description: 'Rastreador de tarefas InovaFlow (MCP remoto).',
+  url: 'https://flow.inovacode.dev/api/v1/mcp',
+  headerKey: 'Authorization',
+  headerValue: 'Bearer ${INOVA_FLOW_TOKEN}',
+} as const;
+
+export type InovaFlowAction =
+  { kind: 'new'; form: LibraryFormState } | { kind: 'edit'; item: LibraryItem };
+
+export function inovaFlowAction(items: readonly LibraryItem[]): InovaFlowAction {
+  const existing = items.find((item) => item.id === INOVA_FLOW_PRESET.id);
+  if (existing) return { kind: 'edit', item: existing };
+  return {
+    kind: 'new',
+    form: {
+      ...emptyForm('connector'),
+      id: INOVA_FLOW_PRESET.id,
+      name: INOVA_FLOW_PRESET.name,
+      label: INOVA_FLOW_PRESET.label,
+      description: INOVA_FLOW_PRESET.description,
+      transport: 'http',
+      url: INOVA_FLOW_PRESET.url,
+      headers: [{ key: INOVA_FLOW_PRESET.headerKey, value: INOVA_FLOW_PRESET.headerValue }],
+    },
+  };
 }
 
 export function itemDetail(item: LibraryItem): string {

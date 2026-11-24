@@ -14,14 +14,17 @@ import {
   type LibraryFormState,
 } from './library-form';
 import {
-  LIBRARY_KINDS,
+  LIBRARY_TABS,
   extractDroppedFiles,
-  groupLibraryItems,
   hasFileDragPayload,
+  inovaFlowAction,
+  itemsForTab,
   libraryIdTaken,
+  libraryTabCounts,
   recipeFor,
   resolveDroppedLibraryZips,
   summarizeZipImportBatch,
+  type LibraryTabId,
   type ZipBatchItemOutcome,
 } from './library-state';
 import { LibraryItemForm } from './LibraryItemForm';
@@ -29,7 +32,9 @@ import { LibraryItemRow } from './LibraryItemRow';
 import type { RunCommand } from './LibraryPluginInstall';
 import { LibrarySyncPanel } from './LibrarySyncPanel';
 import { SettingGroup } from './settings-controls';
+import { handleHorizontalTabListKeyDown } from './tablist-nav';
 import { libraryCall, useLibrary } from './useLibrary';
+import './capabilities.css';
 import './library.css';
 
 interface LibrarySectionProps {
@@ -51,6 +56,7 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const [importingZip, setImportingZip] = useState(false);
   const [draggingZip, setDraggingZip] = useState(false);
   const [libraryVersion, setLibraryVersion] = useState(0);
+  const [activeTab, setActiveTab] = useState<LibraryTabId>('skill');
   const dragDepthRef = useRef(0);
   const importingZipRef = useRef(false);
 
@@ -290,7 +296,8 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
     else setRowError(result.message);
   };
 
-  const groups = listing ? groupLibraryItems(listing.items) : [];
+  const allItems = listing?.items ?? [];
+  const counts = libraryTabCounts(allItems);
   const invalidItems = listing?.invalidItems ?? [];
 
   return (
@@ -309,16 +316,6 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       ) : null}
       <SettingGroup description={t('library.intro')}>
         <div className="library-new">
-          {LIBRARY_KINDS.map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              className="btn btn-sm"
-              onClick={() => openForm(emptyForm(kind))}
-            >
-              {t('library.newButton', { kind: t(`library.kindOne.${kind}`) })}
-            </button>
-          ))}
           <button
             type="button"
             className="btn btn-sm btn-primary"
@@ -395,29 +392,102 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
           </ul>
         </SettingGroup>
       ) : null}
-      {listing && groups.length === 0 && invalidItems.length === 0 ? (
+      {listing && allItems.length === 0 && invalidItems.length === 0 ? (
         <p className="library-hint">{t('library.empty')}</p>
       ) : null}
       {!listing && !loadError ? <p className="library-hint">{t('common.loading')}</p> : null}
-      {groups.map((group) => (
-        <SettingGroup key={group.kind} title={t(`capabilities.tab.${group.kind}`)}>
-          <ul className="library-list">
-            {group.items.map((item) => (
-              <LibraryItemRow
-                key={item.id}
-                item={item}
-                recipe={recipeFor(listing?.pluginRecipes, item.id)}
-                accounts={accounts}
-                pending={pendingId === item.id}
-                onToggle={(target, enabled) => void toggle(target, enabled)}
-                onEdit={(target) => openForm(formFromItem(target))}
-                onRemove={setRemoving}
-                onRun={onRun}
-              />
-            ))}
-          </ul>
-        </SettingGroup>
-      ))}
+      <div
+        className="capabilities-tabs library-tabs"
+        role="tablist"
+        aria-label={t('library.tabsAria')}
+        onKeyDown={(event) =>
+          handleHorizontalTabListKeyDown({
+            event,
+            ids: LIBRARY_TABS.map((tab) => tab.id),
+            activeId: activeTab,
+            onSelect: setActiveTab,
+          })
+        }
+      >
+        {LIBRARY_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            id={`library-tab-${tab.id}`}
+            aria-selected={tab.id === activeTab}
+            aria-controls={`library-panel-${tab.id}`}
+            tabIndex={tab.id === activeTab ? 0 : -1}
+            className="capabilities-tab"
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span>{t(`library.tab.${tab.id}`)}</span>
+            <span className="capabilities-tab-count mono">{counts[tab.id]}</span>
+          </button>
+        ))}
+      </div>
+      {LIBRARY_TABS.map((tab) => {
+        const tabItems = itemsForTab(allItems, tab.id);
+        return (
+          <div
+            key={tab.id}
+            role="tabpanel"
+            id={`library-panel-${tab.id}`}
+            aria-labelledby={`library-tab-${tab.id}`}
+            hidden={tab.id !== activeTab}
+          >
+            <SettingGroup>
+              <div className="library-new">
+                {tab.kinds.map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => openForm(emptyForm(kind))}
+                  >
+                    {t('library.newButton', { kind: t(`library.kindOne.${kind}`) })}
+                  </button>
+                ))}
+                {tab.id === 'mcp' ? (
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      const action = inovaFlowAction(allItems);
+                      openForm(action.kind === 'edit' ? formFromItem(action.item) : action.form);
+                    }}
+                  >
+                    {t('library.addInovaFlow')}
+                  </button>
+                ) : null}
+              </div>
+              {tab.id === 'mcp' ? (
+                <p className="library-hint">{t('library.inovaFlowHint')}</p>
+              ) : null}
+              {listing && tabItems.length === 0 ? (
+                <p className="library-hint">{t('library.tabEmpty')}</p>
+              ) : null}
+              {tabItems.length > 0 ? (
+                <ul className="library-list">
+                  {tabItems.map((item) => (
+                    <LibraryItemRow
+                      key={item.id}
+                      item={item}
+                      recipe={recipeFor(listing?.pluginRecipes, item.id)}
+                      accounts={accounts}
+                      pending={pendingId === item.id}
+                      onToggle={(target, enabled) => void toggle(target, enabled)}
+                      onEdit={(target) => openForm(formFromItem(target))}
+                      onRemove={setRemoving}
+                      onRun={onRun}
+                    />
+                  ))}
+                </ul>
+              ) : null}
+            </SettingGroup>
+          </div>
+        );
+      })}
       <LibrarySyncPanel projects={projects} accounts={accounts} libraryVersion={libraryVersion} />
       {removing ? (
         <ConfirmModal

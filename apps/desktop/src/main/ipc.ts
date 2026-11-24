@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { CHANNELS } from '../shared/api.js';
 import type { CommandHandlers } from './command-handlers.js';
 import type { createHandlers } from './handlers.js';
+import type { GithubHandlers } from './github-auth.js';
 import type { LibraryHandlers } from './library-handlers.js';
 import type { VoiceHandlers } from './voice.js';
 
@@ -18,9 +19,10 @@ export function registerIpc(deps: {
   voice: VoiceHandlers;
   commands: CommandHandlers;
   library: LibraryHandlers;
+  github: GithubHandlers;
   allowedOrigin: string;
 }): void {
-  const { handlers, voice, commands, library, allowedOrigin } = deps;
+  const { handlers, voice, commands, library, github, allowedOrigin } = deps;
   const isTrusted = (event: SenderEvent): boolean =>
     isAppUrl(event.senderFrame?.url, allowedOrigin);
 
@@ -122,6 +124,10 @@ export function registerIpc(deps: {
   handle(CHANNELS.downloadVoiceModel, (input) => voice.downloadVoiceModel(input));
   handle(CHANNELS.deleteVoiceModel, (input) => voice.deleteVoiceModel(input));
   handle(CHANNELS.transcribeAudio, (input) => voice.transcribeAudio(input));
+  handle(CHANNELS.getGithubStatus, () => github.getGithubStatus());
+  handle(CHANNELS.startGithubLogin, () => github.startGithubLogin());
+  handle(CHANNELS.cancelGithubLogin, () => github.cancelGithubLogin());
+  handle(CHANNELS.logoutGithub, () => github.logoutGithub());
   handle(CHANNELS.readFilePreview, (input) => handlers.readFilePreview(input));
   handle(CHANNELS.pickViewerFiles, () => handlers.pickViewerFiles());
   handle(CHANNELS.openFilePath, (input) => handlers.openFilePath(input));

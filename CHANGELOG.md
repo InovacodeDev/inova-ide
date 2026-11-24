@@ -9,6 +9,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 ### Adicionado
 
 - Adicionada a subsessão do modo orquestrador (IDE-47): painel acima do compositor mostra, ao vivo, o agente, o modelo, o texto, o raciocínio e as ferramentas da fase atual (planejamento, desenvolvimento ou revisão), com os botões Parar e Avançar para revisão.
+- Adicionada a seção GitHub nas Configurações (IDE-47): conecta o `gh` pela IDE com código de dispositivo validado por você no navegador, mostra o usuário conectado e permite desconectar, para os agentes usarem `gh pr create` nas sessões. A IDE nunca lê nem exibe o token.
+- Adicionadas as abas Skills, Plugins e MCPs na Biblioteca das Configurações (IDE-47), com contagem por aba, botões de criação próprios e o atalho "Adicionar InovaFlow" que preenche o conector com a referência `${INOVA_FLOW_TOKEN}`.
 - Adicionados os IPCs `advanceOrchestration` (encerra a fase do desenvolvedor e segue para a revisão com o que foi feito) e `isTurnRunning` (restaura o botão de parar ao recarregar a conversa).
 
 ### Corrigido

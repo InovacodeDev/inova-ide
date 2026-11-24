@@ -21,6 +21,12 @@ import { createCommandExecutor } from './command-executor.js';
 import { createCommandHandlers } from './command-handlers.js';
 import { createCommandService } from './command-service.js';
 import type { AccountCommandEnv } from './command-service.js';
+import {
+  createGithubAuth,
+  createGithubHandlers,
+  spawnGithubProcess,
+  type GithubAuth,
+} from './github-auth.js';
 import { createHandlers, isExternalWebUrl } from './handlers.js';
 import { isAppUrl, registerIpc } from './ipc.js';
 import { createLibraryHandlers } from './library-handlers.js';
@@ -124,6 +130,7 @@ const spawnChild: SpawnChild = ({ file, args, cwd, env }) => {
 
 let handlers: ReturnType<typeof createHandlers> | undefined;
 let disposeVoice: (() => Promise<void>) | undefined;
+let githubAuth: GithubAuth | undefined;
 
 const chat = createChatRunner({
   spawnChild,
@@ -197,6 +204,7 @@ function createWindow(): void {
 
 function closeAllSessions(): Promise<void> {
   const report = (error: unknown): void => console.error('inova: closeAll failed', error);
+  githubAuth?.dispose();
   return Promise.all([
     sessions.closeAll().catch(report),
     chat.closeAll().catch(report),
@@ -592,11 +600,23 @@ void app.whenReady().then(async () => {
       runner: nodeRunner,
       pickLibraryZip,
     });
+    githubAuth = createGithubAuth({
+      findGh: async () => {
+        const envPath = readEnvPath(await baseEnv());
+        const extraPath =
+          process.platform === 'darwin' ? `${envPath}:/opt/homebrew/bin:/usr/local/bin` : envPath;
+        return findBinary('gh', extraPath);
+      },
+      getEnv: baseEnv,
+      spawn: spawnGithubProcess,
+      emit: (event) => sendToWindow(CHANNELS.githubLoginEvent, event),
+    });
     registerIpc({
       handlers: created,
       voice: createVoiceHandlers(voice),
       commands,
       library,
+      github: createGithubHandlers(githubAuth),
       allowedOrigin: appUrl,
     });
     createWindow();

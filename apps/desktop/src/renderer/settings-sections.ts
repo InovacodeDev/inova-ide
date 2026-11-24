@@ -2,7 +2,14 @@ import type { SupportedLocale } from '@inova/core/types';
 import { translate } from './i18n';
 
 export type SettingsSectionId =
-  'general' | 'models' | 'sessions' | 'notifications' | 'voice' | 'library' | 'shortcuts';
+  | 'general'
+  | 'models'
+  | 'sessions'
+  | 'notifications'
+  | 'voice'
+  | 'library'
+  | 'github'
+  | 'shortcuts';
 
 export const SETTINGS_SECTIONS: readonly { id: SettingsSectionId; label: string }[] = [
   { id: 'general', label: 'Geral' },
@@ -11,6 +18,7 @@ export const SETTINGS_SECTIONS: readonly { id: SettingsSectionId; label: string 
   { id: 'notifications', label: 'Notificações' },
   { id: 'voice', label: 'Voz' },
   { id: 'library', label: 'Biblioteca' },
+  { id: 'github', label: 'GitHub' },
   { id: 'shortcuts', label: 'Atalhos' },
 ];
 
