@@ -10,7 +10,6 @@ import type {
   SkillLibraryItem,
 } from '../shared/api';
 import type { TranslationKey } from './i18n';
-import { emptyForm, type LibraryFormState } from './library-form';
 
 export const LIBRARY_KINDS: readonly LibraryItemKind[] = ['skill', 'mcp', 'connector', 'plugin'];
 
@@ -70,36 +69,7 @@ export function libraryTabCounts(items: readonly LibraryItem[]): Record<LibraryT
   };
 }
 
-export const INOVA_FLOW_PRESET = {
-  id: 'inova-flow',
-  name: 'InovaFlow',
-  label: 'InovaFlow',
-  description: 'Rastreador de tarefas InovaFlow (MCP remoto).',
-  url: 'https://flow.inovacode.dev/api/v1/mcp',
-  headerKey: 'Authorization',
-  headerValue: 'Bearer ${INOVA_FLOW_TOKEN}',
-} as const;
-
-export type InovaFlowAction =
-  { kind: 'new'; form: LibraryFormState } | { kind: 'edit'; item: LibraryItem };
-
-export function inovaFlowAction(items: readonly LibraryItem[]): InovaFlowAction {
-  const existing = items.find((item) => item.id === INOVA_FLOW_PRESET.id);
-  if (existing) return { kind: 'edit', item: existing };
-  return {
-    kind: 'new',
-    form: {
-      ...emptyForm('connector'),
-      id: INOVA_FLOW_PRESET.id,
-      name: INOVA_FLOW_PRESET.name,
-      label: INOVA_FLOW_PRESET.label,
-      description: INOVA_FLOW_PRESET.description,
-      transport: 'http',
-      url: INOVA_FLOW_PRESET.url,
-      headers: [{ key: INOVA_FLOW_PRESET.headerKey, value: INOVA_FLOW_PRESET.headerValue }],
-    },
-  };
-}
+export { INOVA_FLOW_PRESET, inovaFlowAction, type InovaFlowAction } from './connector-catalog';
 
 export function itemDetail(item: LibraryItem): string {
   switch (item.kind) {
@@ -413,6 +383,38 @@ export function projectMcpConnectorRows(input: {
     items: input.items.filter((item) => item.kind === 'mcp' || item.kind === 'connector'),
     ...(input.projectDisabled ? { projectDisabled: input.projectDisabled } : {}),
   });
+}
+
+export interface ProjectTabState {
+  imported: ProjectSkillPluginRow[];
+  available: (SkillLibraryItem | PluginLibraryItem)[];
+  mcpRows: ProjectItemRow[];
+}
+
+/** What the project panel shows in one tab. Skills and plugins use bindings, MCPs use overrides. */
+export function projectTabState(input: {
+  items: readonly LibraryItem[];
+  bindings?: readonly ProjectLibraryBinding[];
+  projectDisabled?: readonly string[];
+  tabId: LibraryTabId;
+}): ProjectTabState {
+  const { items, bindings, projectDisabled, tabId } = input;
+  if (tabId === 'mcp') {
+    return {
+      imported: [],
+      available: [],
+      mcpRows: projectMcpConnectorRows({
+        items,
+        ...(projectDisabled ? { projectDisabled } : {}),
+      }),
+    };
+  }
+  const state = projectSkillPluginState({ items, ...(bindings ? { bindings } : {}) });
+  return {
+    imported: state.imported.filter((row) => row.item.kind === tabId),
+    available: state.available.filter((item) => item.kind === tabId),
+    mcpRows: [],
+  };
 }
 
 export const MAX_DROPPED_ZIPS = 20;

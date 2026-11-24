@@ -88,6 +88,7 @@ function setup() {
       'readFilePreview',
       'pickViewerFiles',
       'openFilePath',
+      'advanceOrchestration',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
@@ -399,6 +400,35 @@ test('cancelTurn is forwarded only from a trusted sender with a string id', () =
   expect(handlers['cancelTurn']).not.toHaveBeenCalled();
   send('inova:cancelTurn', trusted, 's');
   expect(handlers['cancelTurn']).toHaveBeenCalledWith('s');
+});
+
+test('advanceOrchestration invokes reach the handler and reject foreign senders', async () => {
+  const { handlers } = setup();
+  const input = { sessionId: 's1' };
+  await expect(invoke('inova:advanceOrchestration', trusted, input)).resolves.toEqual({
+    ok: true,
+    value: 'advanceOrchestration',
+  });
+  expect(handlers['advanceOrchestration']).toHaveBeenCalledWith(input);
+  await expect(invoke('inova:advanceOrchestration', foreign, input)).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
+  expect(handlers['advanceOrchestration']).toHaveBeenCalledTimes(1);
+});
+
+test('isTurnRunning forwards a string id and answers false for other payloads', async () => {
+  const { handlers } = setup();
+  const isTurnRunning = vi.fn((sessionId: string) => sessionId === 'busy');
+  handlers['isTurnRunning'] = isTurnRunning as unknown as (typeof handlers)[string];
+  await expect(invoke('inova:isTurnRunning', trusted, 'busy')).resolves.toBe(true);
+  await expect(invoke('inova:isTurnRunning', trusted, 'idle')).resolves.toBe(false);
+  expect(isTurnRunning).toHaveBeenCalledTimes(2);
+  await expect(invoke('inova:isTurnRunning', trusted, 42)).resolves.toBe(false);
+  await expect(invoke('inova:isTurnRunning', trusted, { sessionId: 'busy' })).resolves.toBe(false);
+  expect(isTurnRunning).toHaveBeenCalledTimes(2);
+  await expect(invoke('inova:isTurnRunning', foreign, 'busy')).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
 });
 
 test('isAppUrl matches the app url and its sub-paths, query or hash only', () => {

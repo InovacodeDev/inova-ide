@@ -37,6 +37,10 @@ export const SETTINGS_PT_BR = {
   'settings.github.confirmTitle': 'Desconectar do GitHub?',
   'settings.github.confirmDescription':
     'O gh deixa de ter acesso à conta {user}. Os agentes não conseguem mais usar o gh até você conectar de novo.',
+  'settings.github.envToken':
+    'A variável de ambiente {name} está definida. Em terminais, o gh usa esse token e ignora o login do chaveiro. O login feito aqui só vale depois que você remover {name}.',
+  'settings.github.envTokenLoggedIn': 'Conectado como {user} pela variável {name}.',
+  'settings.github.envTokenLoggedInNoUser': 'Conectado pela variável {name}.',
 
   'settings.appearance.title': 'Aparência',
   'settings.theme.title': 'Tema',
@@ -270,6 +274,10 @@ export const SETTINGS_EN_US: Record<SettingsKey, string> = {
   'settings.github.confirmTitle': 'Disconnect from GitHub?',
   'settings.github.confirmDescription':
     'gh loses access to the account {user}. Agents cannot use gh until you connect again.',
+  'settings.github.envToken':
+    'The environment variable {name} is set. In terminals, gh uses that token and ignores the keyring login. The login made here only applies after you remove {name}.',
+  'settings.github.envTokenLoggedIn': 'Connected as {user} through the {name} variable.',
+  'settings.github.envTokenLoggedInNoUser': 'Connected through the {name} variable.',
 
   'settings.appearance.title': 'Appearance',
   'settings.theme.title': 'Theme',

@@ -266,6 +266,10 @@ export interface GithubStatus {
   loggedIn: boolean;
   user: string | null;
   scopes?: string[];
+  /** Present only when gh reports that its token comes from an environment variable. */
+  tokenSource?: 'env';
+  /** Name of the environment variable that gh uses or that overrides the keyring login. */
+  envTokenVar?: string;
 }
 
 export type GithubLoginEvent =

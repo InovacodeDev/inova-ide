@@ -26,6 +26,29 @@ const TOKEN_SHAPE =
 const LOGGED_IN_LINE = /Logged in to (\S+) (?:account|as) (\S+)/gi;
 // REGEX: scopes line in `gh auth status`
 const SCOPES_LINE = /Token scopes?:\s*(.*)/i;
+// REGEX: gh names the env var as the token source, e.g. "(GH_TOKEN)", in the logged-in line
+const ENV_SOURCE = /\((GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\)/;
+
+/** Env vars that make gh ignore the keyring and refuse `gh auth login`. */
+export const GH_ENV_TOKEN_VARS = [
+  'GH_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_ENTERPRISE_TOKEN',
+] as const;
+
+export function envTokenVarIn(env: NodeJS.ProcessEnv): string | undefined {
+  return GH_ENV_TOKEN_VARS.find((name) => {
+    const value = env[name];
+    return typeof value === 'string' && value !== '';
+  });
+}
+
+export function withoutGhEnvTokens(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const copy: NodeJS.ProcessEnv = { ...env };
+  for (const name of GH_ENV_TOKEN_VARS) delete copy[name];
+  return copy;
+}
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_ESCAPE, '');
@@ -54,10 +77,12 @@ export function parseGithubStatus(input: {
         .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
         .filter((scope) => scope !== '')
     : [];
+  const envVar = chosen ? ENV_SOURCE.exec(chosen.text.split('\n')[0] ?? '')?.[1] : undefined;
   return {
     loggedIn: true,
     user: chosen?.user ?? null,
     ...(scopes.length > 0 ? { scopes } : {}),
+    ...(envVar === undefined ? {} : { tokenSource: 'env' as const, envTokenVar: envVar }),
   };
 }
 
@@ -137,9 +162,10 @@ interface CommandResult {
 export function createGithubAuth(deps: GithubAuthDeps) {
   let current: { process: GithubProcess; canceled: boolean } | null = null;
 
-  async function baseEnv(): Promise<NodeJS.ProcessEnv> {
+  async function baseEnv(options?: { stripTokens?: boolean }): Promise<NodeJS.ProcessEnv> {
+    const raw = await deps.getEnv();
     return {
-      ...(await deps.getEnv()),
+      ...(options?.stripTokens ? withoutGhEnvTokens(raw) : raw),
       NO_COLOR: '1',
       GH_NO_UPDATE_NOTIFIER: '1',
     };
@@ -149,8 +175,9 @@ export function createGithubAuth(deps: GithubAuthDeps) {
     file: string;
     args: string[];
     stdin?: string;
+    stripTokens?: boolean;
   }): Promise<CommandResult> {
-    const env = await baseEnv();
+    const env = await baseEnv({ stripTokens: input.stripTokens === true });
     return new Promise<CommandResult>((resolve) => {
       let output = '';
       let settled = false;
@@ -174,17 +201,24 @@ export function createGithubAuth(deps: GithubAuthDeps) {
     });
   }
 
-  async function getStatus(): Promise<GithubStatus> {
+  async function getStatus(options?: { stripTokens?: boolean }): Promise<GithubStatus> {
+    const stripTokens = options?.stripTokens === true;
     const file = await deps.findGh();
     if (file === undefined) return { installed: false, loggedIn: false, user: null };
-    const version = await runCommand({ file, args: ['--version'] });
+    const version = await runCommand({ file, args: ['--version'], stripTokens });
     if (version.failedToStart) return { installed: false, loggedIn: false, user: null };
     const status = await runCommand({
       file,
       args: ['auth', 'status', '--hostname', GITHUB_HOST],
+      stripTokens,
     });
     if (status.failedToStart) return { installed: false, loggedIn: false, user: null };
-    return { installed: true, ...parseGithubStatus(status) };
+    const parsed = parseGithubStatus(status);
+    const envVar = stripTokens ? undefined : envTokenVarIn(await deps.getEnv());
+    if (parsed.envTokenVar === undefined && envVar !== undefined) {
+      return { installed: true, ...parsed, envTokenVar: envVar };
+    }
+    return { installed: true, ...parsed };
   }
 
   async function startLogin(): Promise<Result<null>> {
@@ -194,7 +228,8 @@ export function createGithubAuth(deps: GithubAuthDeps) {
       return fail('GitHub CLI (gh) não encontrado. Instale com: brew install gh');
     }
     if (current !== null) return fail('Já existe um login do GitHub em andamento.');
-    const env = await baseEnv();
+    // gh refuses `auth login` while GH_TOKEN and similar variables are set, so remove them for the child only.
+    const env = await baseEnv({ stripTokens: true });
     const child = deps.spawn({
       file,
       args: [
@@ -274,12 +309,12 @@ export function createGithubAuth(deps: GithubAuthDeps) {
     if (current !== null) return fail('Cancele o login do GitHub em andamento primeiro.');
     const file = await deps.findGh();
     if (file === undefined) return fail('GitHub CLI (gh) não encontrado.');
-    const status = await getStatus();
+    const status = await getStatus({ stripTokens: true });
     const base = ['auth', 'logout', '--hostname', GITHUB_HOST];
     const withUser = status.user === null ? base : [...base, '--user', status.user];
-    let result = await runCommand({ file, args: withUser, stdin: 'Y\n' });
+    let result = await runCommand({ file, args: withUser, stdin: 'Y\n', stripTokens: true });
     if (result.code !== 0 && withUser !== base && /unknown flag/i.test(result.output)) {
-      result = await runCommand({ file, args: base, stdin: 'Y\n' });
+      result = await runCommand({ file, args: base, stdin: 'Y\n', stripTokens: true });
     }
     if (result.code === 0) return ok(null);
     return fail(safeFailureMessage(result.output, 'Não foi possível desconectar do GitHub.'));

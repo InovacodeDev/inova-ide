@@ -1,7 +1,10 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import type { AccountView, LibraryItem, ProjectView } from '../shared/api';
+import { presetAction, presetHelp, type PresetHelp } from './connector-catalog';
 import { ConfirmModal } from './ConfirmModal';
+import { ConnectorPicker } from './ConnectorPicker';
+import { McpJsonImportModal } from './McpJsonImportModal';
 import { DownloadIcon } from './icons';
 import { useI18n } from './I18nContext';
 import {
@@ -17,7 +20,6 @@ import {
   LIBRARY_TABS,
   extractDroppedFiles,
   hasFileDragPayload,
-  inovaFlowAction,
   itemsForTab,
   libraryIdTaken,
   libraryTabCounts,
@@ -57,6 +59,9 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const [draggingZip, setDraggingZip] = useState(false);
   const [libraryVersion, setLibraryVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<LibraryTabId>('skill');
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [jsonOpen, setJsonOpen] = useState(false);
+  const [formHelp, setFormHelp] = useState<PresetHelp | null>(null);
   const dragDepthRef = useRef(0);
   const importingZipRef = useRef(false);
 
@@ -228,8 +233,19 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
 
   const openForm = (next: LibraryFormState) => {
     setFormError(null);
+    setFormHelp(null);
     setForm(next);
   };
+
+  const pickPreset = (presetId: string) => {
+    setPickerOpen(false);
+    const action = presetAction(listing?.items ?? [], presetId);
+    if (!action) return;
+    openForm(action.kind === 'edit' ? formFromItem(action.item) : action.form);
+    setFormHelp(presetHelp(presetId));
+  };
+
+  const existingIds = useMemo(() => (listing?.items ?? []).map((item) => item.id), [listing]);
 
   const submit = async () => {
     if (!form) return;
@@ -341,6 +357,13 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
           {zipNotice}
         </p>
       ) : null}
+      {form && formHelp ? (
+        <p className="library-hint" role="note">
+          {formHelp.kind === 'token'
+            ? t('connectors.help.token', { var: formHelp.envVar })
+            : t(formHelp.kind === 'oauth' ? 'connectors.help.oauth' : 'connectors.help.custom')}
+        </p>
+      ) : null}
       {form ? (
         <LibraryItemForm
           key={form.editing ? `edit-${form.id}` : `new-${form.kind}`}
@@ -449,21 +472,21 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
                   </button>
                 ))}
                 {tab.id === 'mcp' ? (
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => {
-                      const action = inovaFlowAction(allItems);
-                      openForm(action.kind === 'edit' ? formFromItem(action.item) : action.form);
-                    }}
-                  >
-                    {t('library.addInovaFlow')}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      onClick={() => setPickerOpen(true)}
+                    >
+                      {t('connectors.add')}
+                    </button>
+                    <button type="button" className="btn btn-sm" onClick={() => setJsonOpen(true)}>
+                      {t('connectors.json.button')}
+                    </button>
+                  </>
                 ) : null}
               </div>
-              {tab.id === 'mcp' ? (
-                <p className="library-hint">{t('library.inovaFlowHint')}</p>
-              ) : null}
+              {tab.id === 'mcp' ? <p className="library-hint">{t('connectors.hint')}</p> : null}
               {listing && tabItems.length === 0 ? (
                 <p className="library-hint">{t('library.tabEmpty')}</p>
               ) : null}
@@ -489,6 +512,20 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
         );
       })}
       <LibrarySyncPanel projects={projects} accounts={accounts} libraryVersion={libraryVersion} />
+      {pickerOpen ? (
+        <ConnectorPicker
+          existingIds={new Set(existingIds)}
+          onPick={pickPreset}
+          onCancel={() => setPickerOpen(false)}
+        />
+      ) : null}
+      {jsonOpen ? (
+        <McpJsonImportModal
+          existingIds={existingIds}
+          onClose={() => setJsonOpen(false)}
+          onSaved={refresh}
+        />
+      ) : null}
       {removing ? (
         <ConfirmModal
           title={t('library.remove.title')}

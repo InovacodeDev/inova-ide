@@ -112,6 +112,27 @@ export function GithubSection({ call }: { call: WarningCall }) {
         </SettingRow>
       );
     }
+    if (status.loggedIn && status.tokenSource === 'env') {
+      const name = status.envTokenVar ?? 'GH_TOKEN';
+      return (
+        <SettingRow
+          title={
+            status.user === null
+              ? t('settings.github.envTokenLoggedInNoUser', { name })
+              : t('settings.github.envTokenLoggedIn', { user: status.user, name })
+          }
+        >
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            disabled={busy}
+            onClick={() => void connect()}
+          >
+            {t(phase === 'starting' ? 'settings.github.starting' : 'settings.github.connect')}
+          </button>
+        </SettingRow>
+      );
+    }
     if (status.loggedIn) {
       const title =
         status.user === null
@@ -156,6 +177,11 @@ export function GithubSection({ call }: { call: WarningCall }) {
         description={t('settings.github.description')}
       >
         {statusRow()}
+        {status?.envTokenVar ? (
+          <p className="library-warning" role="status">
+            {t('settings.github.envToken', { name: status.envTokenVar })}
+          </p>
+        ) : null}
         {phase === 'waiting-code' ? (
           <p className="setting-row-desc" role="status">
             {t('settings.github.waitingCode')}

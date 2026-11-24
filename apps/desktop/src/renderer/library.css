@@ -443,6 +443,69 @@
   font-size: 11.5px;
 }
 
+.connector-picker-card,
+.mcp-json-card {
+  width: min(640px, 100%);
+  max-height: 86vh;
+}
+
+.connector-picker-card .modal-body,
+.mcp-json-card .modal-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.connector-picker-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.connector-picker-item {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.connector-picker-item:hover,
+.connector-picker-item:focus-visible {
+  border-color: var(--border-strong);
+}
+
+.connector-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.mcp-json-textarea {
+  resize: vertical;
+  min-height: 140px;
+}
+
+.mcp-json-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 @media (max-width: 560px) {
   .library-pair {
     grid-template-columns: minmax(0, 1fr) auto;

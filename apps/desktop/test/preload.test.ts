@@ -132,6 +132,16 @@ test('library calls use their channels', async () => {
   }
 });
 
+test('orchestration calls use their invoke channels', async () => {
+  const api = await loadApi();
+  electron.invoke.mockClear();
+  void api.advanceOrchestration({ sessionId: 's' });
+  expect(electron.invoke).toHaveBeenCalledWith('inova:advanceOrchestration', { sessionId: 's' });
+  electron.invoke.mockClear();
+  void api.isTurnRunning('s');
+  expect(electron.invoke).toHaveBeenCalledWith('inova:isTurnRunning', 's');
+});
+
 test('session update and workspace calls use their channels', async () => {
   const api = await loadApi();
   void api.updateSession({ sessionId: 's', archived: true });

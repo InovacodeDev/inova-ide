@@ -11,10 +11,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 - Adicionada a subsessão do modo orquestrador (IDE-47): painel acima do compositor mostra, ao vivo, o agente, o modelo, o texto, o raciocínio e as ferramentas da fase atual (planejamento, desenvolvimento ou revisão), com os botões Parar e Avançar para revisão.
 - Adicionada a seção GitHub nas Configurações (IDE-47): conecta o `gh` pela IDE com código de dispositivo validado por você no navegador, mostra o usuário conectado e permite desconectar, para os agentes usarem `gh pr create` nas sessões. A IDE nunca lê nem exibe o token.
 - Adicionadas as abas Skills, Plugins e MCPs na Biblioteca das Configurações (IDE-47), com contagem por aba, botões de criação próprios e o atalho "Adicionar InovaFlow" que preenche o conector com a referência `${INOVA_FLOW_TOKEN}`.
+- Adicionado o catálogo de conectores na aba MCPs (IDE-47): o botão "Adicionar conector" abre um seletor com busca para InovaFlow, Atlassian, Figma, Linear, Notion, Sentry, Slack, monday.com, Box, Canva, Intercom, GitHub e um conector personalizado. Conectores com token usam referência `${VAR}`; os de OAuth não levam segredo e dependem da autorização no cliente do provider (no Claude Code, `/mcp`). Substitui o botão "Adicionar InovaFlow".
+- Adicionado o botão "Colar JSON" na aba MCPs (IDE-47): importa servidores nos formatos `mcpServers`, `servers`, `mcp.servers`, entrada com nome ou servidor único, com prévia e resultado por item. Valores literais em cabeçalhos, `env` e parâmetros de URL nunca são salvos: viram `${VAR}` e a prévia lista as variáveis a definir. Segredo literal em `command` ou `args` bloqueia a entrada.
+- Adicionadas as abas Skills, Plugins e MCPs também no painel de biblioteca de cada projeto (IDE-47), mantendo a ativação por projeto.
 - Adicionados os IPCs `advanceOrchestration` (encerra a fase do desenvolvedor e segue para a revisão com o que foi feito) e `isTurnRunning` (restaura o botão de parar ao recarregar a conversa).
 
 ### Corrigido
 
+- Corrigido o login do GitHub nas Configurações quando `GH_TOKEN`, `GITHUB_TOKEN` (ou as variantes `*_ENTERPRISE_TOKEN`) está definido (IDE-47): o `gh auth login` agora roda sem essas variáveis, o status informa que o token vem da variável e a tela avisa que ela vale no lugar do login do chaveiro nos terminais. O token nunca é exibido.
 - Corrigido o cancelamento da orquestração: se nenhum processo estiver rodando, o turno é finalizado na hora e a sessão não fica ocupada para sempre.
 
 ## [0.12.0] - 2026-11-24
