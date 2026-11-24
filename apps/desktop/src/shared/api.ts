@@ -464,6 +464,8 @@ export interface InovaApi {
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
   getContextBreakdown(input: { sessionId: string }): Promise<Result<ContextBreakdown>>;
+  advanceOrchestration(input: { sessionId: string }): Promise<Result<null>>;
+  isTurnRunning(sessionId: string): Promise<boolean>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
   listCapabilities(input: { accountLabel: string }): Promise<Result<CapabilityListing>>;
   setCapabilityEnabled(input: {
@@ -597,6 +599,8 @@ export const CHANNELS = {
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
   getContextBreakdown: 'inova:getContextBreakdown',
+  advanceOrchestration: 'inova:advanceOrchestration',
+  isTurnRunning: 'inova:isTurnRunning',
   listModels: 'inova:listModels',
   listCapabilities: 'inova:listCapabilities',
   setCapabilityEnabled: 'inova:setCapabilityEnabled',

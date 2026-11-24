@@ -42,6 +42,8 @@ export interface OrchestrationTurnState {
     cacheWriteTokens: number;
   };
   cancelled: boolean;
+  /** The user asked to end the developer phase now and move on to the review. */
+  skipRequested: boolean;
   transitioning: boolean;
   orch: OrchestrationAgentRuntime;
   dev: OrchestrationAgentRuntime;
@@ -111,6 +113,7 @@ export function createOrchestrationState(input: {
       cacheWriteTokens: 0,
     },
     cancelled: false,
+    skipRequested: false,
     transitioning: false,
     orch: input.orch,
     dev: input.dev,
