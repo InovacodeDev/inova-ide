@@ -12,7 +12,7 @@ describe('moveSection', () => {
     expect(moveSection({ current: 'general', delta: -1 })).toBe('shortcuts');
   });
 
-  test('exposes the seven sections once each', () => {
+  test('exposes the eight sections once each', () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toEqual([
       'general',
       'models',
@@ -20,6 +20,7 @@ describe('moveSection', () => {
       'notifications',
       'voice',
       'library',
+      'github',
       'shortcuts',
     ]);
   });

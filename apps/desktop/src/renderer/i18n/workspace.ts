@@ -644,6 +644,16 @@ export const WORKSPACE_PT_BR = {
   'chat.orchestrator.verdictChanges': 'Ajustes solicitados',
   'chat.orchestrator.roundBadge': 'Rodada {round}/{max}',
   'chat.orchestrator.pairLabel': '{orchestrator} → {developer}',
+  'chat.subsession.aria': 'Subsessão da orquestração',
+  'chat.subsession.title': 'Subsessão: {phase} — {model} (rodada {round}/{max})',
+  'chat.subsession.phasePlanning': 'planejamento',
+  'chat.subsession.phaseDeveloping': 'desenvolvimento',
+  'chat.subsession.phaseReviewing': 'revisão',
+  'chat.subsession.stop': 'Parar',
+  'chat.subsession.advance': 'Avançar para revisão',
+  'chat.subsession.advanceTooltip':
+    'Encerra a fase do desenvolvedor agora e envia o que foi feito para a revisão do orquestrador',
+  'chat.subsession.empty': 'Aguardando a primeira saída do agente…',
 
   'turn.defaultTarget': 'arquivos',
   'turn.editOne': 'edição',
@@ -1432,6 +1442,16 @@ export const WORKSPACE_EN_US: Record<WorkspaceKey, string> = {
   'chat.orchestrator.verdictChanges': 'Changes requested',
   'chat.orchestrator.roundBadge': 'Round {round}/{max}',
   'chat.orchestrator.pairLabel': '{orchestrator} → {developer}',
+  'chat.subsession.aria': 'Orchestration sub-session',
+  'chat.subsession.title': 'Sub-session: {phase} — {model} (round {round}/{max})',
+  'chat.subsession.phasePlanning': 'planning',
+  'chat.subsession.phaseDeveloping': 'development',
+  'chat.subsession.phaseReviewing': 'review',
+  'chat.subsession.stop': 'Stop',
+  'chat.subsession.advance': 'Advance to review',
+  'chat.subsession.advanceTooltip':
+    'Ends the developer phase now and sends what was done to the orchestrator review',
+  'chat.subsession.empty': 'Waiting for the first agent output…',
 
   'turn.defaultTarget': 'files',
   'turn.editOne': 'edit',

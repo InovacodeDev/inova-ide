@@ -328,6 +328,9 @@ export function App() {
           ...current,
           [sessionId]: aggregateTranscriptUsage(result.value).turnEntries,
         }));
+        // `load`/`replace` reset `running`; ask the main process so Stop survives a reload.
+        const busy = await window.inova.isTurnRunning(sessionId).catch(() => false);
+        if (busy) dispatchChat({ sessionId, action: { type: 'started' } });
       }
     },
     [call],
@@ -2401,6 +2404,11 @@ export function App() {
                             void sendMessage(tab.sessionId, prompt, extraDirs)
                           }
                           onCancel={() => window.inova.cancelTurn(tab.sessionId)}
+                          onAdvanceOrchestration={() =>
+                            void call(() =>
+                              window.inova.advanceOrchestration({ sessionId: tab.sessionId }),
+                            )
+                          }
                         />
                       </div>
                     );

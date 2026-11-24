@@ -263,6 +263,8 @@ const TITLE_CHARS = 60;
 const FILE_CACHE_TTL_MS = 5_000;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 5 * 60_000;
 const BUSY_MESSAGE = 'Já existe um turno em andamento nesta sessão.';
+const DEVELOPER_SKIPPED_NOTE =
+  '[Nota: o usuário encerrou a fase do desenvolvedor antecipadamente. O relatório acima é parcial; revise o que existe no repositório.]';
 const ARCHIVED_MESSAGE = 'Desarquive a sessão antes de enviar mensagens.';
 const CONTEXT_BREAKDOWN_TIMEOUT_MS = 30_000;
 const MODELS_LIST_TIMEOUT_MS = 30_000;
@@ -1910,6 +1912,16 @@ export function createHandlers(deps: HandlerDeps) {
       return;
     }
 
+    if (
+      event.kind === 'error' &&
+      orch.skipRequested &&
+      orch.phase === 'developing' &&
+      !orch.cancelled
+    ) {
+      // The "cancelled" error of a user-requested skip is not a failure.
+      return;
+    }
+
     if (event.kind === 'usage-limits' || event.kind === 'error' || event.kind === 'context') {
       deps.emit(sessionId, event);
       enqueueAppend(sessionId, event);
@@ -1993,7 +2005,14 @@ export function createHandlers(deps: HandlerDeps) {
     active.provisionalConfirmed = false;
 
     const failedInOrchPhase = orch.phase !== 'developing';
-    if (event.isError || orch.cancelled || cancelledTurns.has(sessionId)) {
+    const skipped =
+      orch.skipRequested &&
+      orch.phase === 'developing' &&
+      !orch.cancelled &&
+      !cancelledTurns.has(sessionId);
+    orch.skipRequested = false;
+    if (skipped) lastErrorBySession.delete(sessionId);
+    if (!skipped && (event.isError || orch.cancelled || cancelledTurns.has(sessionId))) {
       handleChatEvent(sessionId, {
         kind: 'orchestrator',
         turnId: orch.turnId,
@@ -2042,7 +2061,10 @@ export function createHandlers(deps: HandlerDeps) {
     }
 
     if (orch.phase === 'developing') {
-      const developerReport = readPhaseText(orch);
+      const partialReport = readPhaseText(orch);
+      const developerReport = skipped
+        ? `${partialReport}\n\n${DEVELOPER_SKIPPED_NOTE}`.trim()
+        : partialReport;
       orch.phase = 'reviewing';
       orch.transitioning = true;
       clearPhaseOutput(orch);
@@ -3886,7 +3908,38 @@ export function createHandlers(deps: HandlerDeps) {
       cancelledTurns.add(sessionId);
       verificationControllers.get(sessionId)?.abort();
       deps.chat.cancel(sessionId);
+      if (orch && !deps.chat.isRunning(sessionId) && activeOrchestrations.get(sessionId) === orch) {
+        // No process will emit a `done`: finalize here so the session never stays busy.
+        orch.transitioning = false;
+        handleChatEvent(sessionId, {
+          kind: 'orchestrator',
+          turnId: orch.turnId,
+          phase: 'failed',
+          round: orch.round,
+          maxRounds: orch.maxRounds,
+          orchestratorLabel: orch.orch.label,
+          developerLabel: orch.dev.label,
+          summary: lastErrorBySession.get(sessionId) ?? null,
+        });
+        finalizeOrchestratedTurn({ sessionId, orch, isError: true, failedInOrchPhase: true });
+      }
     },
+    isTurnRunning: (sessionId: string): boolean => isSessionBusy(sessionId),
+    advanceOrchestration: (input: unknown): Promise<Result<null>> =>
+      validated(input, parseSessionRef, async ({ sessionId }) => {
+        const orch = activeOrchestrations.get(sessionId);
+        if (!orch) return fail('Não há orquestração em andamento nesta sessão.');
+        if (orch.phase !== 'developing') {
+          return fail('Só é possível avançar durante a fase do desenvolvedor.');
+        }
+        if (orch.cancelled || cancelledTurns.has(sessionId)) {
+          return fail('O turno já está sendo cancelado.');
+        }
+        if (orch.skipRequested) return ok(null);
+        orch.skipRequested = true;
+        deps.chat.cancel(sessionId);
+        return ok(null);
+      }),
     getUsage: (input: unknown) =>
       validated(input, parseUsageRequest, async ({ accountLabel }) => {
         const account = requireAccount(await loadStore(deps.root), accountLabel);

@@ -90,6 +90,8 @@ import { ModelEffortPicker } from './ModelEffortPicker';
 import { defaultModelLabel, localizeModelOption } from './model-picker-state';
 import { ModePicker } from './ModePicker';
 import { OrchestratorPicker } from './OrchestratorPicker';
+import { OrchestratorSubsessionPanel } from './OrchestratorSubsessionPanel';
+import { selectOrchestratorSubsession } from './orchestrator-subsession';
 import { ProviderBadge } from './ProviderBadge';
 import { formatMessageTime } from './relative-time';
 import { PROVIDER_NAME } from './provider-meta';
@@ -173,6 +175,7 @@ export interface ChatViewProps {
   onOpenFile?: (path: string) => void;
   onSend: (prompt: string, extraDirs: string[]) => void;
   onCancel: () => void;
+  onAdvanceOrchestration?: () => void;
 }
 
 const IS_MAC = isMacPlatform(navigator.platform);
@@ -1048,6 +1051,7 @@ export function ChatView({
   onOpenFile,
   onSend,
   onCancel,
+  onAdvanceOrchestration,
 }: ChatViewProps) {
   const { t, locale } = useI18n();
   const [draft, setDraft] = useState('');
@@ -1098,6 +1102,10 @@ export function ChatView({
   const editorRef = useRef<RichComposerHandle>(null);
   const stickRef = useRef(true);
   const { items, running } = state;
+  const orchestratorSubsession = useMemo(
+    () => (running ? selectOrchestratorSubsession(items) : null),
+    [items, running],
+  );
   const hasContent = draft.trim() !== '' || attachedFiles.length > 0;
   const primaryAction = composerPrimaryAction({
     running,
@@ -1739,6 +1747,15 @@ export function ChatView({
         </div>
       </div>
       <div className="chat-composer-wrap">
+        {orchestratorSubsession ? (
+          <OrchestratorSubsessionPanel
+            subsession={orchestratorSubsession}
+            onStop={onCancel}
+            onAdvance={() => onAdvanceOrchestration?.()}
+            onCopyText={copyText}
+            onOpenFile={onOpenFile}
+          />
+        ) : null}
         {queuedTurns.length > 0 ? (
           <div
             className={

@@ -38,6 +38,39 @@ export function libraryIdTaken(input: { items: readonly LibraryItem[]; id: strin
   return input.items.some((item) => item.id === input.id);
 }
 
+export type LibraryTabId = 'skill' | 'plugin' | 'mcp';
+
+export interface LibraryTab {
+  id: LibraryTabId;
+  kinds: readonly LibraryItemKind[];
+}
+
+export const LIBRARY_TABS: readonly LibraryTab[] = [
+  { id: 'skill', kinds: ['skill'] },
+  { id: 'plugin', kinds: ['plugin'] },
+  { id: 'mcp', kinds: ['mcp', 'connector'] },
+];
+
+export function libraryTabOf(kind: string): LibraryTabId | null {
+  return LIBRARY_TABS.find((tab) => tab.kinds.some((entry) => entry === kind))?.id ?? null;
+}
+
+export function itemsForTab(items: readonly LibraryItem[], tabId: LibraryTabId): LibraryItem[] {
+  const tab = LIBRARY_TABS.find((entry) => entry.id === tabId);
+  if (!tab) return [];
+  return tab.kinds.flatMap((kind) => items.filter((item) => item.kind === kind).sort(compareItems));
+}
+
+export function libraryTabCounts(items: readonly LibraryItem[]): Record<LibraryTabId, number> {
+  return {
+    skill: itemsForTab(items, 'skill').length,
+    plugin: itemsForTab(items, 'plugin').length,
+    mcp: itemsForTab(items, 'mcp').length,
+  };
+}
+
+export { INOVA_FLOW_PRESET, inovaFlowAction, type InovaFlowAction } from './connector-catalog';
+
 export function itemDetail(item: LibraryItem): string {
   switch (item.kind) {
     case 'skill':
@@ -350,6 +383,38 @@ export function projectMcpConnectorRows(input: {
     items: input.items.filter((item) => item.kind === 'mcp' || item.kind === 'connector'),
     ...(input.projectDisabled ? { projectDisabled: input.projectDisabled } : {}),
   });
+}
+
+export interface ProjectTabState {
+  imported: ProjectSkillPluginRow[];
+  available: (SkillLibraryItem | PluginLibraryItem)[];
+  mcpRows: ProjectItemRow[];
+}
+
+/** What the project panel shows in one tab. Skills and plugins use bindings, MCPs use overrides. */
+export function projectTabState(input: {
+  items: readonly LibraryItem[];
+  bindings?: readonly ProjectLibraryBinding[];
+  projectDisabled?: readonly string[];
+  tabId: LibraryTabId;
+}): ProjectTabState {
+  const { items, bindings, projectDisabled, tabId } = input;
+  if (tabId === 'mcp') {
+    return {
+      imported: [],
+      available: [],
+      mcpRows: projectMcpConnectorRows({
+        items,
+        ...(projectDisabled ? { projectDisabled } : {}),
+      }),
+    };
+  }
+  const state = projectSkillPluginState({ items, ...(bindings ? { bindings } : {}) });
+  return {
+    imported: state.imported.filter((row) => row.item.kind === tabId),
+    available: state.available.filter((item) => item.kind === tabId),
+    mcpRows: [],
+  };
 }
 
 export const MAX_DROPPED_ZIPS = 20;

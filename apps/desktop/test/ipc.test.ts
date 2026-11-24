@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import type { createHandlers } from '../src/main/handlers.js';
 import { isAppUrl, registerIpc } from '../src/main/ipc.js';
 import type { CommandHandlers } from '../src/main/command-handlers.js';
+import type { GithubHandlers } from '../src/main/github-auth.js';
 import type { LibraryHandlers } from '../src/main/library-handlers.js';
 import type { VoiceHandlers } from '../src/main/voice.js';
 
@@ -87,6 +88,7 @@ function setup() {
       'readFilePreview',
       'pickViewerFiles',
       'openFilePath',
+      'advanceOrchestration',
     ].map((name) => [name, vi.fn(async () => ({ ok: true, value: name }))]),
   );
   handlers['cancelTurn'] = vi.fn();
@@ -123,14 +125,21 @@ function setup() {
     previewLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'previewLibrarySync' })),
     applyLibrarySync: vi.fn(async () => ({ ok: true as const, value: 'applyLibrarySync' })),
   };
+  const github = {
+    getGithubStatus: vi.fn(async () => ({ ok: true as const, value: 'getGithubStatus' })),
+    startGithubLogin: vi.fn(async () => ({ ok: true as const, value: 'startGithubLogin' })),
+    cancelGithubLogin: vi.fn(async () => ({ ok: true as const, value: 'cancelGithubLogin' })),
+    logoutGithub: vi.fn(async () => ({ ok: true as const, value: 'logoutGithub' })),
+  };
   registerIpc({
     handlers: handlers as unknown as ReturnType<typeof createHandlers>,
     voice: voice as unknown as VoiceHandlers,
     commands: commands as unknown as CommandHandlers,
     library: library as unknown as LibraryHandlers,
+    github: github as unknown as GithubHandlers,
     allowedOrigin: APP,
   });
-  return { handlers, voice, commands, library };
+  return { handlers, voice, commands, library, github };
 }
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -161,7 +170,7 @@ test('a trusted invoke reaches the handler with the payload only', async () => {
 });
 
 test('invokes from a foreign or unknown sender are rejected', async () => {
-  const { handlers, voice, commands, library } = setup();
+  const { handlers, voice, commands, library, github } = setup();
   for (const event of [foreign, { senderFrame: null }, {}]) {
     for (const channel of electron.invokes.keys()) {
       await expect(invoke(channel, event, {})).rejects.toThrow('Remetente não autorizado.');
@@ -172,6 +181,7 @@ test('invokes from a foreign or unknown sender are rejected', async () => {
     ...Object.values(voice),
     ...Object.values(commands),
     ...Object.values(library),
+    ...Object.values(github),
   ]) {
     expect(handler).not.toHaveBeenCalled();
   }
@@ -390,6 +400,35 @@ test('cancelTurn is forwarded only from a trusted sender with a string id', () =
   expect(handlers['cancelTurn']).not.toHaveBeenCalled();
   send('inova:cancelTurn', trusted, 's');
   expect(handlers['cancelTurn']).toHaveBeenCalledWith('s');
+});
+
+test('advanceOrchestration invokes reach the handler and reject foreign senders', async () => {
+  const { handlers } = setup();
+  const input = { sessionId: 's1' };
+  await expect(invoke('inova:advanceOrchestration', trusted, input)).resolves.toEqual({
+    ok: true,
+    value: 'advanceOrchestration',
+  });
+  expect(handlers['advanceOrchestration']).toHaveBeenCalledWith(input);
+  await expect(invoke('inova:advanceOrchestration', foreign, input)).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
+  expect(handlers['advanceOrchestration']).toHaveBeenCalledTimes(1);
+});
+
+test('isTurnRunning forwards a string id and answers false for other payloads', async () => {
+  const { handlers } = setup();
+  const isTurnRunning = vi.fn((sessionId: string) => sessionId === 'busy');
+  handlers['isTurnRunning'] = isTurnRunning as unknown as (typeof handlers)[string];
+  await expect(invoke('inova:isTurnRunning', trusted, 'busy')).resolves.toBe(true);
+  await expect(invoke('inova:isTurnRunning', trusted, 'idle')).resolves.toBe(false);
+  expect(isTurnRunning).toHaveBeenCalledTimes(2);
+  await expect(invoke('inova:isTurnRunning', trusted, 42)).resolves.toBe(false);
+  await expect(invoke('inova:isTurnRunning', trusted, { sessionId: 'busy' })).resolves.toBe(false);
+  expect(isTurnRunning).toHaveBeenCalledTimes(2);
+  await expect(invoke('inova:isTurnRunning', foreign, 'busy')).rejects.toThrow(
+    'Remetente não autorizado.',
+  );
 });
 
 test('isAppUrl matches the app url and its sub-paths, query or hash only', () => {

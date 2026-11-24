@@ -261,6 +261,22 @@ export interface VoiceModelProgress {
   totalBytes: number;
 }
 
+export interface GithubStatus {
+  installed: boolean;
+  loggedIn: boolean;
+  user: string | null;
+  scopes?: string[];
+  /** Present only when gh reports that its token comes from an environment variable. */
+  tokenSource?: 'env';
+  /** Name of the environment variable that gh uses or that overrides the keyring login. */
+  envTokenVar?: string;
+}
+
+export type GithubLoginEvent =
+  | { type: 'code-ready'; code: string; url: string }
+  | { type: 'succeeded' }
+  | { type: 'failed'; message: string };
+
 export type LoginStage =
   'starting' | 'waiting-auth' | 'verifying' | 'succeeded' | 'failed' | 'canceled';
 
@@ -415,6 +431,11 @@ export interface InovaApi {
   }): Promise<Result<{ text: string; rawText?: string; polished?: boolean }>>;
   onVoiceModelProgress(callback: (progress: VoiceModelProgress) => void): () => void;
   onVoiceDockerProgress(callback: (progress: VoiceDockerProgress) => void): () => void;
+  getGithubStatus(): Promise<Result<GithubStatus>>;
+  startGithubLogin(): Promise<Result<null>>;
+  cancelGithubLogin(): Promise<Result<null>>;
+  logoutGithub(): Promise<Result<null>>;
+  onGithubLoginEvent(callback: (event: GithubLoginEvent) => void): () => void;
   enqueueTurn(input: {
     sessionId: string;
     prompt: string;
@@ -464,6 +485,8 @@ export interface InovaApi {
   cancelTurn(sessionId: string): void;
   getUsage(input: { accountLabel: string }): Promise<Result<UsageSnapshot>>;
   getContextBreakdown(input: { sessionId: string }): Promise<Result<ContextBreakdown>>;
+  advanceOrchestration(input: { sessionId: string }): Promise<Result<null>>;
+  isTurnRunning(sessionId: string): Promise<boolean>;
   listModels(input: { accountLabel: string }): Promise<Result<ProviderModels>>;
   listCapabilities(input: { accountLabel: string }): Promise<Result<CapabilityListing>>;
   setCapabilityEnabled(input: {
@@ -597,6 +620,8 @@ export const CHANNELS = {
   cancelTurn: 'inova:cancelTurn',
   getUsage: 'inova:getUsage',
   getContextBreakdown: 'inova:getContextBreakdown',
+  advanceOrchestration: 'inova:advanceOrchestration',
+  isTurnRunning: 'inova:isTurnRunning',
   listModels: 'inova:listModels',
   listCapabilities: 'inova:listCapabilities',
   setCapabilityEnabled: 'inova:setCapabilityEnabled',
@@ -634,6 +659,11 @@ export const CHANNELS = {
   transcribeAudio: 'inova:transcribeAudio',
   voiceModelProgress: 'inova:voice:model-progress',
   voiceDockerProgress: 'inova:voice:docker-progress',
+  getGithubStatus: 'inova:getGithubStatus',
+  startGithubLogin: 'inova:startGithubLogin',
+  cancelGithubLogin: 'inova:cancelGithubLogin',
+  logoutGithub: 'inova:logoutGithub',
+  githubLoginEvent: 'inova:github:login-event',
   readFilePreview: 'inova:readFilePreview',
   pickViewerFiles: 'inova:pickViewerFiles',
   openFilePath: 'inova:openFilePath',
