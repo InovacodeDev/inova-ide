@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { DragEvent } from 'react';
 import type { AccountView, LibraryItem, ProjectView } from '../shared/api';
 import { ConfirmModal } from './ConfirmModal';
 import { DownloadIcon } from './icons';
@@ -12,7 +13,17 @@ import {
   toggleInput,
   type LibraryFormState,
 } from './library-form';
-import { LIBRARY_KINDS, groupLibraryItems, libraryIdTaken, recipeFor } from './library-state';
+import {
+  LIBRARY_KINDS,
+  extractDroppedFiles,
+  groupLibraryItems,
+  hasFileDragPayload,
+  libraryIdTaken,
+  recipeFor,
+  resolveDroppedLibraryZips,
+  summarizeZipImportBatch,
+  type ZipBatchItemOutcome,
+} from './library-state';
 import { LibraryItemForm } from './LibraryItemForm';
 import { LibraryItemRow } from './LibraryItemRow';
 import type { RunCommand } from './LibraryPluginInstall';
@@ -38,14 +49,94 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const [rowError, setRowError] = useState<string | null>(null);
   const [zipNotice, setZipNotice] = useState<string | null>(null);
   const [importingZip, setImportingZip] = useState(false);
+  const [draggingZip, setDraggingZip] = useState(false);
   const [libraryVersion, setLibraryVersion] = useState(0);
+  const dragDepthRef = useRef(0);
+  const importingZipRef = useRef(false);
 
   const refresh = async () => {
     await reload();
     setLibraryVersion((version) => version + 1);
   };
 
+  const importZipPaths = async (input: {
+    zipPaths: readonly string[];
+    extraErrors?: readonly string[];
+  }) => {
+    if (importingZipRef.current || input.zipPaths.length === 0) return;
+    importingZipRef.current = true;
+    setImportingZip(true);
+    setRowError(null);
+    setZipNotice(null);
+
+    const outcomes: ZipBatchItemOutcome[] = [];
+    try {
+      for (const zipPath of input.zipPaths) {
+        const fileName = zipPath.replace(/^.*[/\\]/, '');
+        const result = await libraryCall({
+          action: () => window.inova.importLibraryZip({ zipPath }),
+          locale,
+        });
+        if (result.ok) {
+          outcomes.push({
+            fileName,
+            ok: true,
+            itemName: result.value.item.name,
+            replaced: result.value.replaced,
+          });
+        } else {
+          outcomes.push({ fileName, ok: false, message: result.message });
+        }
+      }
+    } finally {
+      importingZipRef.current = false;
+      setImportingZip(false);
+    }
+
+    const summary = summarizeZipImportBatch(outcomes);
+    const extraErrors = input.extraErrors ?? [];
+    const errorMessages = [
+      ...summary.failures.map((failure) =>
+        summary.importedNames.length === 0 &&
+        summary.failures.length === 1 &&
+        extraErrors.length === 0
+          ? failure.message
+          : t('library.importZipPartialError', {
+              name: failure.fileName,
+              message: failure.message,
+            }),
+      ),
+      ...extraErrors,
+    ];
+    if (errorMessages.length > 0) {
+      setRowError(errorMessages.join(' '));
+    }
+
+    if (summary.importedNames.length === 1) {
+      const name = summary.importedNames[0];
+      if (name !== undefined) {
+        setZipNotice(
+          t(summary.replacedSingle ? 'library.importZipReplaced' : 'library.importZipSuccess', {
+            name,
+          }),
+        );
+      }
+    } else if (summary.importedNames.length > 1) {
+      setZipNotice(
+        t('library.importZipBatchSuccess', {
+          count: summary.importedNames.length,
+          names: summary.importedNames.join(', '),
+        }),
+      );
+    }
+
+    if (summary.importedNames.length > 0) {
+      await refresh();
+    }
+  };
+
   const importZip = async () => {
+    if (importingZipRef.current) return;
     setRowError(null);
     setZipNotice(null);
     const picked = await libraryCall({ action: () => window.inova.pickLibraryZip(), locale });
@@ -54,22 +145,79 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
       return;
     }
     if (picked.value === null) return;
-    setImportingZip(true);
-    const result = await libraryCall({
-      action: () => window.inova.importLibraryZip({ zipPath: picked.value! }),
-      locale,
-    });
-    setImportingZip(false);
-    if (!result.ok) {
-      setRowError(result.message);
-      return;
+    await importZipPaths({ zipPaths: [picked.value] });
+  };
+
+  const handleDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current += 1;
+    setDraggingZip(true);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = importingZipRef.current ? 'none' : 'copy';
+  };
+
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!hasFileDragPayload(event.dataTransfer.types)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setDraggingZip(false);
     }
-    setZipNotice(
-      t(result.value.replaced ? 'library.importZipReplaced' : 'library.importZipSuccess', {
-        name: result.value.item.name,
-      }),
-    );
-    await refresh();
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
+    setDraggingZip(false);
+    if (!hasFileDragPayload(event.dataTransfer.types) || importingZipRef.current) return;
+
+    const files = extractDroppedFiles(event.dataTransfer);
+    const resolution = resolveDroppedLibraryZips({
+      files,
+      resolvePath: (entry) =>
+        typeof window.inova?.getPathForFile === 'function'
+          ? window.inova.getPathForFile(entry.file)
+          : '',
+    });
+
+    switch (resolution.kind) {
+      case 'empty':
+        return;
+      case 'invalid-files':
+        setZipNotice(null);
+        setRowError(t('library.dropZip.invalidFiles'));
+        return;
+      case 'unresolvable':
+        setZipNotice(null);
+        setRowError(t('library.dropZip.unresolvable'));
+        return;
+      case 'too-many':
+        setZipNotice(null);
+        setRowError(t('library.dropZip.tooMany', { max: resolution.max }));
+        return;
+      case 'ready': {
+        const extraErrors: string[] = [];
+        if (resolution.rejectedNames.length > 0) {
+          extraErrors.push(
+            t('library.dropZip.ignoredFiles', { names: resolution.rejectedNames.join(', ') }),
+          );
+        }
+        if (resolution.unresolvableCount > 0) {
+          extraErrors.push(t('library.dropZip.unresolvable'));
+        }
+        void importZipPaths({ zipPaths: resolution.zipPaths, extraErrors });
+        return;
+      }
+    }
   };
 
   const openForm = (next: LibraryFormState) => {
@@ -146,7 +294,19 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
   const invalidItems = listing?.invalidItems ?? [];
 
   return (
-    <>
+    <div
+      className={draggingZip ? 'library-section library-section-dragging' : 'library-section'}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {draggingZip ? (
+        <div className="library-drop-overlay" aria-hidden="true">
+          <DownloadIcon size={28} />
+          <span>{t('library.dropZip.overlay')}</span>
+        </div>
+      ) : null}
       <SettingGroup description={t('library.intro')}>
         <div className="library-new">
           {LIBRARY_KINDS.map((kind) => (
@@ -169,6 +329,15 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
             <span>{t(importingZip ? 'library.importingZip' : 'library.importZip')}</span>
           </button>
         </div>
+        <button
+          type="button"
+          className={draggingZip ? 'library-dropzone library-dropzone-active' : 'library-dropzone'}
+          disabled={importingZip}
+          onClick={() => void importZip()}
+        >
+          <DownloadIcon size={16} />
+          <span>{t(importingZip ? 'library.importingZip' : 'library.dropZip.hint')}</span>
+        </button>
       </SettingGroup>
       {zipNotice ? (
         <p className="library-notice" role="status">
@@ -260,6 +429,6 @@ export function LibrarySection({ accounts, projects, onRun }: LibrarySectionProp
           onCancel={() => setRemoving(null)}
         />
       ) : null}
-    </>
+    </div>
   );
 }
