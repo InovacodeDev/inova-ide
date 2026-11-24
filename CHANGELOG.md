@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.12.1] - 2026-11-24
+
 ### Adicionado
 
 - Adicionada a subsessão do modo orquestrador (IDE-47): painel acima do compositor mostra, ao vivo, o agente, o modelo, o texto, o raciocínio e as ferramentas da fase atual (planejamento, desenvolvimento ou revisão), com os botões Parar e Avançar para revisão.
