@@ -6,6 +6,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
 
 ## [Não lançado]
 
+## [0.12.0] - 2026-11-24
+
 ### Adicionado
 
 - Adicionada importação de arquivos `.zip` de skills e plugins por drag and drop na aba Biblioteca, com zona de soltura destacada, validação de extensão e suporte a múltiplos pacotes.
